@@ -1,0 +1,50 @@
+name: Bug Report
+description: Create a report to help us improve Tenet Commerce
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue for Tenet Commerce. 
+        Please ensure you have read the [Contributing Guidelines](../CONTRIBUTING.md) before submitting.
+  - type: input
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which module is affected? (e.g., POS Client, Halal Supply Chain, Sharia Ledger, AI Auditor)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      value: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: OS, Browser, Go version, Node version, etc.
+    validations:
+      required: false
