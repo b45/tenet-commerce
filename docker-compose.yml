@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # 🗄️ PostgreSQL (Schema-per-Tenant)
+  postgres:
+    image: postgres:16-alpine
+    container_name: tenet_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tenet_commerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tenet_commerce"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tenet_network
+
+  # ⚡ Redis (Idempotency Key Store & Distributed Locks)
+  redis:
+    image: redis:7-alpine
+    container_name: tenet_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tenet_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  tenet_network:
+    driver: bridge
