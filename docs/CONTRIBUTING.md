@@ -81,7 +81,45 @@ All commit messages must adhere to the [Conventional Commits](https://www.conven
 
 ---
 
-## 4. Pull Request Checklist
+## 4. GitHub Project Management & Workflow
+
+To maintain a professional, organized, and auditable repository, we strictly use GitHub Milestones, Issues, and Scoped Labels.
+
+### 4.1 Custom Labels (Scoped Labels)
+We use scoped labels to clearly define the domain, type, and priority of an issue. When creating issues, apply at least one label from each category.
+
+**Domain Labels (Modules):**
+- `domain: pos` (Color: `#1D76DB` - Blue)
+- `domain: supply-chain` (Color: `#0E8A16` - Dark Green)
+- `domain: sharia-ledger` (Color: `#FBCA04` - Gold)
+- `domain: ai-auditor` (Color: `#5319E7` - Purple)
+- `domain: infrastructure` (Color: `#5C6F7B` - Gray)
+
+**Type & Priority Labels:**
+- `type: bug` (Color: `#D73A4A` - Red)
+- `type: feature` (Color: `#A2EEEF` - Cyan/Mint)
+- `type: tech-debt` (Color: `#F9D0C4` - Pale Pink)
+- `type: docs` (Color: `#C5DEF5` - Light Blue)
+- `priority: critical` (Color: `#B60205` - Dark Red)
+- `priority: high` (Color: `#D93F0B` - Orange)
+
+**Compliance Labels (Crucial):**
+- `compliance: halal` (Color: `#176332` - Forest Green)
+- `compliance: sharia` (Color: `#D4C500` - Dark Gold)
+
+### 4.2 Standard Task Workflow
+Follow this exact sequence when contributing:
+
+1. **Check Milestones:** View the current active Milestone (e.g., `Phase 1: Foundation`).
+2. **Select/Create Issue:** Pick an unassigned issue from the Milestone, or create a new one using the standard Issue Templates (`.github/ISSUE_TEMPLATE`).
+3. **Assign Labels:** Apply the relevant `domain:`, `type:`, and `priority:` labels to the issue.
+4. **Create Branch:** Create a branch strictly following the naming convention (e.g., `feature/12-setup-postgres-schema`).
+5. **Commit Code:** Use Conventional Commits (e.g., `feat(infrastructure): setup postgres connection pool`).
+6. **Open Pull Request:** Use the provided PR template, link the issue (`Fixes #12`), and request a review.
+
+---
+
+## 5. Pull Request Checklist
 
 Before submitting a Pull Request, ensure the following criteria are satisfied:
 
