@@ -2,11 +2,11 @@ package tenant
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
+	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
@@ -16,6 +16,8 @@ import (
 //  2. The `X-Tenant-ID` request header (fallback for public/unauthenticated routes).
 func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		reqLogger := logger.FromContext(c.Request.Context())
+
 		// 1. Resolve tenant slug: JWT context takes priority over manual header.
 		tenantSlug := c.GetString("tenant_slug")
 		if tenantSlug == "" {
@@ -31,7 +33,10 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 		// 2. Validate tenant exists and is ACTIVE in the registry
 		tenantData, err := repo.GetTenantBySlug(c.Request.Context(), tenantSlug)
 		if err != nil {
-			log.Printf("[tenant.middleware] Lookup failed for slug='%s': %v", tenantSlug, err)
+			reqLogger.Warn("Tenant lookup failed",
+				"tenant_slug", tenantSlug,
+				"error", err.Error(),
+			)
 			response.AbortUnauthorized(c, "INVALID_TENANT", "Tenant not found or inactive")
 			return
 		}
@@ -39,7 +44,10 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 		// 3. Acquire a dedicated connection from the pool for this request lifetime
 		conn, err := db.Pool.Acquire(c.Request.Context())
 		if err != nil {
-			log.Printf("[tenant.middleware] Failed to acquire DB connection: %v", err)
+			reqLogger.Error("Failed to acquire DB connection from pool",
+				"tenant_slug", tenantSlug,
+				"error", err.Error(),
+			)
 			response.AbortInternalServerError(c, "DATABASE_UNAVAILABLE", "Failed to connect to the database")
 			return
 		}
@@ -52,7 +60,10 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 			pgx.Identifier{tenantData.SchemaName}.Sanitize())
 
 		if _, err := conn.Exec(c.Request.Context(), searchPathQuery); err != nil {
-			log.Printf("[tenant.middleware] Failed to set search_path to '%s': %v", tenantData.SchemaName, err)
+			reqLogger.Error("Failed to set search_path",
+				"schema_name", tenantData.SchemaName,
+				"error", err.Error(),
+			)
 			response.AbortInternalServerError(c, "TENANT_CONTEXT_FAILURE",
 				"Failed to initialize tenant database context")
 			return

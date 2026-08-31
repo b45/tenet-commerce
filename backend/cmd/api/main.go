@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
 	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
+	"github.com/b45/tenet-commerce/backend/pkg/logger"
 )
 
 func main() {
@@ -24,7 +24,8 @@ func main() {
 	ctx := context.Background()
 	db, err := database.NewPostgresDB(ctx)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Error("Failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
@@ -34,12 +35,19 @@ func main() {
 	authRepo := internalAuth.NewRepository(db)
 	authHandler := internalAuth.NewHandler(authRepo, jwtService)
 
-	// 3. Setup Gin Engine
+	// 3. Setup Gin Engine with Structured Observability Stack
 	gin.SetMode(gin.ReleaseMode)
 	if os.Getenv("APP_DEBUG") == "true" {
 		gin.SetMode(gin.DebugMode)
 	}
-	router := gin.Default()
+
+	router := gin.New()
+
+	// Mount Global Observability Middlewares
+	router.Use(logger.RealIPMiddleware())    // 1. Resolve real client IP behind proxies
+	router.Use(logger.TraceMiddleware())     // 2. Generate/propagate X-Trace-ID & X-Span-ID
+	router.Use(logger.AccessLogMiddleware()) // 3. Structured JSON access logging
+	router.Use(logger.RecoveryMiddleware())  // 4. Structured panic recovery
 
 	// 4. PUBLIC ROUTES
 	router.GET("/healthz", func(c *gin.Context) {
@@ -55,7 +63,8 @@ func main() {
 		// --- Unauthenticated Auth Endpoints ---
 		authGroup := v1.Group("/auth")
 		{
-			authGroup.POST("/login", authHandler.Login)
+			// Capture request payload for login audit
+			authGroup.POST("/login", logger.AuditBodyMiddleware(), authHandler.Login)
 			authGroup.POST("/refresh", authHandler.RefreshToken)
 		}
 
@@ -94,8 +103,13 @@ func main() {
 	}
 
 	// 6. Start API Server
-	log.Printf("Tenet Commerce API starting on port %s...", port)
+	logger.Info("Tenet Commerce API server initialized",
+		"port", port,
+		"env", os.Getenv("APP_ENV"),
+		"log_level", os.Getenv("LOG_LEVEL"),
+	)
 	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+		logger.Error("Server failed to start", "error", err)
+		os.Exit(1)
 	}
 }

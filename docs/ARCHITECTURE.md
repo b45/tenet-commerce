@@ -356,4 +356,50 @@ jobs:
 
 ---
 
+## 7. Observability, Logging & Distributed Tracing
+
+Tenet Commerce implements enterprise-grade, zero-dependency structured logging using Go 1.21+ `log/slog` designed for native compatibility with **Grafana Loki**, **Promtail**, and **CloudWatch**.
+
+### 7.1 Tracing & Correlation Model
+
+```
+Client Request (X-Trace-ID optional)
+  │
+  ▼
+[RealIPMiddleware] ────────► Resolves client IP (CF-Connecting-IP → X-Real-IP → X-Forwarded-For)
+  │
+  ▼
+[TraceMiddleware] ─────────► Generates/propagates X-Trace-ID (UUIDv4) + X-Span-ID (8-byte hex)
+  │                          Injects scoped logger into Go context.Context
+  │
+  ▼
+[AccessLogMiddleware] ─────► Measures latency_ms, captures status, tenant_slug, user_id, role
+  │
+  ▼
+[RecoveryMiddleware] ──────► Catches panics, logs full debug.Stack() in JSON, returns clean 500
+```
+
+### 7.2 Structured JSON Log Format (Loki-Ready)
+
+```json
+{
+  "time": "2026-08-31T23:00:00.123Z",
+  "level": "INFO",
+  "msg": "HTTP Request Completed",
+  "trace_id": "8f3b6c2a-9e1d-4b5c-8a7e-123456789abc",
+  "span_id": "a1b2c3d4e5f67890",
+  "method": "POST",
+  "path": "/api/v1/auth/login",
+  "status": 200,
+  "latency_ms": 12.45,
+  "client_ip": "103.28.12.45",
+  "user_agent": "Mozilla/5.0 ...",
+  "tenant_slug": "al-barakah-mart",
+  "user_id": "11111111-1111-1111-1111-111111111111",
+  "role": "CASHIER"
+}
+```
+
+---
+
 *Tenet Commerce — Technical Architecture Documentation v1.0.0*
