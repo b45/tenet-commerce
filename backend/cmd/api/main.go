@@ -7,10 +7,11 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
-	
-	"github.com/b45/tenet-commerce/backend/pkg/database"
+
+	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
+	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
+	"github.com/b45/tenet-commerce/backend/pkg/database"
 )
 
 func main() {
@@ -19,7 +20,7 @@ func main() {
 		port = "8081"
 	}
 
-	// Initialize Database Connection Pool
+	// 1. Initialize Database Connection Pool
 	ctx := context.Background()
 	db, err := database.NewPostgresDB(ctx)
 	if err != nil {
@@ -27,20 +28,20 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize Repositories
+	// 2. Initialize Services & Repositories
+	jwtService := pkgAuth.NewJWTService()
 	tenantRepo := tenant.NewRepository(db)
+	authRepo := internalAuth.NewRepository(db)
+	authHandler := internalAuth.NewHandler(authRepo, jwtService)
 
-	// Setup Gin Engine
+	// 3. Setup Gin Engine
 	gin.SetMode(gin.ReleaseMode)
 	if os.Getenv("APP_DEBUG") == "true" {
 		gin.SetMode(gin.DebugMode)
 	}
-	
 	router := gin.Default()
 
-	// ---------------------------------------------------------
-	// PUBLIC ROUTES
-	// ---------------------------------------------------------
+	// 4. PUBLIC ROUTES
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
@@ -48,82 +49,53 @@ func main() {
 		})
 	})
 
-	// ---------------------------------------------------------
-	// PROTECTED MULTI-TENANT ROUTES
-	// ---------------------------------------------------------
+	// 5. API v1 Routes
 	v1 := router.Group("/api/v1")
-	
-	// Apply Schema-per-Tenant Middleware
-	v1.Use(tenant.ContextMiddleware(db, tenantRepo))
-
-	v1.GET("/tenant/info", func(c *gin.Context) {
-		t, exists := c.Get("tenant")
-		if !exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context lost"})
-			return
-		}
-		
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data": t,
-			"message": "You are currently querying the isolated schema for this tenant.",
-		})
-	})
-
-	// Demonstrate schema-isolated query:
-	// This query runs 'SELECT * FROM products' without schema prefix.
-	// Because of 'SET search_path', PostgreSQL automatically fetches from tenant_{slug}.products!
-	v1.GET("/products", func(c *gin.Context) {
-		connVal, exists := c.Get("db_conn")
-		if !exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database connection context lost"})
-			return
-		}
-		
-		conn, ok := connVal.(*pgxpool.Conn)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid connection type"})
-			return
+	{
+		// --- Unauthenticated Auth Endpoints ---
+		authGroup := v1.Group("/auth")
+		{
+			authGroup.POST("/login", authHandler.Login)
+			authGroup.POST("/refresh", authHandler.RefreshToken)
 		}
 
-		rows, err := conn.Query(c.Request.Context(), "SELECT sku, name, unit_price, is_halal_certified FROM products")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
+		// --- Authenticated Routes (JWT + Tenant Context) ---
+		// All handlers below operate with a schema-scoped DB connection injected by
+		// tenant.ContextMiddleware; they must use c.Get("db_conn") for DB access.
+		protected := v1.Group("")
+		protected.Use(internalAuth.JWTAuthMiddleware(jwtService))
+		protected.Use(tenant.ContextMiddleware(db, tenantRepo))
+		{
+			protected.GET("/auth/me", authHandler.Me)
+
+			// NOTE: Domain handlers (POS, Supply Chain, Ledger, AI Auditor)
+			// will be wired here in Phase 2 from their respective internal packages.
+			// The placeholder routes below will be removed as real handlers are implemented.
+
+			// --- Phase 1 Verification Endpoints (placeholder) ---
+			// TODO(Phase 2): Move to internal/inventory package handler
+			protected.GET("/products",
+				internalAuth.RequirePermission("inventory:read"),
+				placeholderProductsHandler,
+			)
+
+			// TODO(Phase 2): Move to internal/manager package handler
+			protected.GET("/manager/dashboard",
+				internalAuth.RequireRole("MANAGER", "SUPER_ADMIN"),
+				placeholderManagerDashboardHandler,
+			)
+
+			// TODO(Phase 3): Move to internal/ledger package handler
+			protected.GET("/finance/ledger",
+				internalAuth.RequirePermission("ledger:read"),
+				placeholderLedgerHandler,
+			)
 		}
-		defer rows.Close()
+	}
 
-		type ProductItem struct {
-			SKU              string  `json:"sku"`
-			Name             string  `json:"name"`
-			UnitPrice        float64 `json:"unit_price"`
-			IsHalalCertified bool    `json:"is_halal_certified"`
-		}
-
-		var products []ProductItem
-		for rows.Next() {
-			var p ProductItem
-			if err := rows.Scan(&p.SKU, &p.Name, &p.UnitPrice, &p.IsHalalCertified); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed scanning product"})
-				return
-			}
-			products = append(products, p)
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data":    products,
-			"total":   len(products),
-		})
-	})
-
-	// Start API Server
+	// 6. Start API Server
 	log.Printf("Tenet Commerce API starting on port %s...", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }
-

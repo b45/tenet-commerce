@@ -46,7 +46,7 @@ func TestContextMiddleware_MissingHeader(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "MISSING_TENANT_HEADER")
+	assert.Contains(t, w.Body.String(), "MISSING_TENANT_CONTEXT")
 }
 
 func TestContextMiddleware_InvalidTenant(t *testing.T) {
