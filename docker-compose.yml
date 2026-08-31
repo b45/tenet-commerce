@@ -11,9 +11,10 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tenet_commerce
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_dev_db.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d tenet_commerce"]
       interval: 5s
