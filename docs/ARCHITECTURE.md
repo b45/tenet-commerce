@@ -402,4 +402,73 @@ Client Request (X-Trace-ID optional)
 
 ---
 
+## 8. POS Transaction Engine & Idempotency Architecture
+
+The Point of Sale (POS) checkout engine executes sales with strict ACID guarantees, atomic stock decrements, and double-charge prevention.
+
+### 8.1 Dual-Layer Concurrency & Idempotency Model
+
+```
+POS Client (Checkout Submission)
+  │  Headers: Authorization: Bearer <token>, Idempotency-Key: <uuid>
+  │
+  ▼
+[IdempotencyMiddleware (Redis)]
+  ├─ SETNX idempotency:{tenant_slug}:{idempotency_key} (TTL: 24h)
+  ├─ If Key Exists & Completed → Returns Cached Response (X-Cache-Lookup: HIT)
+  └─ If Key New → Acquires Lock & Proceeds to Execution
+  │
+  ▼
+[POS Checkout Service]
+  │  PostgreSQL Transaction (`pgx.Tx`) on Schema `tenant_{slug}`
+  │
+  ├─ 1. SELECT ... FROM products p JOIN inventory i ON p.id = i.product_id
+  │     WHERE p.sku = ANY($1) FOR UPDATE OF p, i
+  │     ↳ Acquires Row-Level Exclusive Lock on requested products & stock
+  │
+  ├─ 2. Stock Validation: IF stock_quantity < requested_qty → ROLLBACK + 409 Conflict
+  │
+  ├─ 3. Atomic Stock Decrement: UPDATE inventory SET stock_quantity = stock_quantity - $qty
+  │
+  ├─ 4. Insert Master Record: INSERT INTO transactions (...)
+  │     Insert Line Items:   INSERT INTO transaction_items (...)
+  │
+  ├─ 5. COMMIT Transaction
+  │
+  └─ 6. Cache Response in Redis (TTL: 24h) → Return 201 Created (Receipt)
+```
+
+### 8.2 APM-Grade Transaction Latency Profiling (Grafana Loki Ready)
+
+To enable granular performance observability without requiring an external APM agent, the POS checkout service instruments sub-millisecond execution timers across all critical database phases and emits them in the structured JSON log:
+
+```json
+{
+  "time": "2026-09-01T00:05:26.952Z",
+  "level": "INFO",
+  "msg": "POS Checkout Transaction Completed",
+  "trace_id": "84ae8d69-edf6-422f-af64-b29e92a0fcb8",
+  "span_id": "b49b43020a975b09",
+  "transaction_number": "TXN-20260901-b36252",
+  "total_amount": 145000,
+  "items_count": 1,
+  "duration_total_ms": 8.761,
+  "duration_lock_products_ms": 1.210,
+  "duration_stock_decrement_ms": 1.041,
+  "duration_insert_txn_ms": 1.606,
+  "duration_insert_items_ms": 2.456,
+  "duration_commit_ms": 2.155
+}
+```
+
+#### Grafana LogQL Query Examples for APM Dashboards:
+- **P95 Lock Contention Latency:**
+  `quantile_over_time(0.95, {service="tenet-commerce-api"} | json | unwrap duration_lock_products_ms [5m])`
+- **P99 Commit Latency:**
+  `quantile_over_time(0.99, {service="tenet-commerce-api"} | json | unwrap duration_commit_ms [5m])`
+- **Average Item Insert Latency:**
+  `avg_over_time({service="tenet-commerce-api"} | json | unwrap duration_insert_items_ms [1m])`
+
+---
+
 *Tenet Commerce — Technical Architecture Documentation v1.0.0*

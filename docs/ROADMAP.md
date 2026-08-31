@@ -54,9 +54,9 @@ gantt
 ### Phase 2: Core Domain APIs & Transaction Engine (Weeks 3 – 4)
 - **Objective:** Implement the transactional backend in Go with strict concurrency controls and Sharia compliance rules.
 - **Key Deliverables:**
-  - [ ] **POS Catalog & Checkout API:** `POST /api/v1/transactions` with atomic inventory decrements.
-  - [ ] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions.
-  - [ ] **Distributed Inventory Locking:** Dual-layer concurrency control (Redis Redlock + `SELECT ... FOR UPDATE`).
+  - [x] **POS Catalog & Checkout API:** `GET /api/v1/pos/products` and `POST /api/v1/pos/checkout` with atomic inventory decrements.
+  - [x] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions (`pkg/redis`).
+  - [x] **Concurrency Stock Locking:** Database transaction (`pgx.Tx`) with row-level locks (`SELECT ... FOR UPDATE OF p, i`).
   - [ ] **Halal Supply Chain Module:** Supplier registry, Halal Certificate tracking, and **hard-validation interceptor** blocking invalid POs and Goods Receipts.
   - [ ] **Double-Entry Ledger Engine:** Automated journal generation adhering to $\sum \text{Debits} = \sum \text{Credits}$ balance invariants.
 
