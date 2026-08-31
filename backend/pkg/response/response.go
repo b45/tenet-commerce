@@ -121,6 +121,38 @@ func AbortForbidden(c *gin.Context, code, message string) {
 	})
 }
 
+// Conflict sends a 409 Conflict response
+func Conflict(c *gin.Context, code, message string, details ...interface{}) {
+	apiErr := &APIError{Code: code, Message: message}
+	if len(details) > 0 {
+		apiErr.Details = details[0]
+	}
+	c.JSON(http.StatusConflict, APIResponse{
+		Success: false,
+		Error:   apiErr,
+	})
+}
+
+// AbortConflict aborts the request with a 409 Conflict response
+func AbortConflict(c *gin.Context, code, message string) {
+	c.AbortWithStatusJSON(http.StatusConflict, APIResponse{
+		Success: false,
+		Error:   &APIError{Code: code, Message: message},
+	})
+}
+
+// UnprocessableEntity sends a 422 Unprocessable Entity response
+func UnprocessableEntity(c *gin.Context, code, message string, details ...interface{}) {
+	apiErr := &APIError{Code: code, Message: message}
+	if len(details) > 0 {
+		apiErr.Details = details[0]
+	}
+	c.JSON(http.StatusUnprocessableEntity, APIResponse{
+		Success: false,
+		Error:   apiErr,
+	})
+}
+
 // AbortInternalServerError aborts the request with a 500 response
 func AbortInternalServerError(c *gin.Context, code, message string) {
 	c.AbortWithStatusJSON(http.StatusInternalServerError, APIResponse{
@@ -128,3 +160,4 @@ func AbortInternalServerError(c *gin.Context, code, message string) {
 		Error:   &APIError{Code: code, Message: message},
 	})
 }
+
