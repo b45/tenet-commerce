@@ -10,6 +10,7 @@ import (
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
 	"github.com/b45/tenet-commerce/backend/internal/pos"
+	"github.com/b45/tenet-commerce/backend/internal/supplychain"
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
 	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
@@ -50,6 +51,10 @@ func main() {
 	posRepo := pos.NewRepository()
 	posService := pos.NewService(posRepo)
 	posHandler := pos.NewHandler(posService)
+
+	supplychainRepo := supplychain.NewRepository()
+	supplychainService := supplychain.NewService(supplychainRepo)
+	supplychainHandler := supplychain.NewHandler(supplychainService)
 
 	// 4. Setup Gin Engine with Structured Observability Stack
 	gin.SetMode(gin.ReleaseMode)
@@ -106,6 +111,11 @@ func main() {
 					posHandler.Checkout,
 				)
 			}
+
+			// --- Supply Chain Domain Module ---
+			supplychainGroup := protected.Group("")
+			supplychainGroup.Use(internalAuth.RequirePermission("supply_chain:manage"))
+			supplychainHandler.RegisterRoutes(supplychainGroup)
 
 			// --- Placeholders for future phases ---
 			// TODO(Phase 2): Move to internal/manager package handler
