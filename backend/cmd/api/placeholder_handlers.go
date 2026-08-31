@@ -23,7 +23,7 @@ func placeholderProductsHandler(c *gin.Context) {
 	}
 
 	rows, err := conn.Query(c.Request.Context(),
-		"SELECT sku, name, unit_price, is_halal_certified FROM products")
+		"SELECT sku, name, unit_price, COALESCE(compliance_tags ? 'HALAL_MUI', FALSE) as is_halal_certified FROM products")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -22,6 +22,7 @@ db-reset: ## Reset local PostgreSQL database and re-apply seed data
 	@echo "Waiting for postgres to be ready..."
 	@sleep 3
 	docker exec -i tenet_postgres psql -U postgres -d tenet_commerce < scripts/init_dev_db.sql
+	docker exec -i tenet_postgres psql -U postgres -d tenet_commerce < scripts/02_supply_chain.sql
 	@echo "Database reset and seeded successfully!"
 
 # --- Backend Commands ---

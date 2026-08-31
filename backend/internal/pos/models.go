@@ -16,6 +16,7 @@ type Product struct {
 	UnitPrice        float64   `json:"unit_price"`
 	CostPrice        float64   `json:"cost_price"`
 	StockQuantity    int       `json:"stock_quantity"`
+	ComplianceTags   []string  `json:"compliance_tags"`
 	IsHalalCertified bool      `json:"is_halal_certified"`
 	IsActive         bool      `json:"is_active"`
 	CreatedAt        time.Time `json:"created_at"`

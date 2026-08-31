@@ -115,47 +115,52 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 
 ## 3. POS & Transaction Engine
 
-### 3.1 List Products & Inventory
-- **Endpoint:** `GET /api/v1/products`
-- **Auth:** `CASHIER`, `MANAGER`, `ADMIN`
-- **Query Params:** `query=halal`, `category_id=<UUID>`, `limit=50`
+### 3.1 List Products & Inventory Catalog
+- **Endpoint:** `GET /api/v1/pos/products`
+- **Auth:** `CASHIER`, `MANAGER`, `SUPER_ADMIN` (Requires permission: `inventory:read`)
 - **Response (200 OK):**
 ```json
 {
   "success": true,
   "data": [
     {
-      "id": "prod_1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-      "sku": "SKU-HALAL-BEEF-01",
-      "barcode": "8992753123456",
-      "name": "Wagyu Halal Ribeye Cut 250g",
-      "unit_price": 185000.00,
-      "stock_quantity": 42,
-      "is_halal_certified": true
+      "id": "10000000-0000-0000-0000-000000000001",
+      "category_id": "c0000000-0000-0000-0000-000000000001",
+      "category_name": "Fresh Meat & Poultry",
+      "sku": "SKU-BEEF-01",
+      "barcode": "8991001000011",
+      "name": "Daging Sapi Halal Al-Barakah 500g",
+      "description": "Daging sapi segar bersertifikat Halal MUI",
+      "unit_price": 75000.00,
+      "cost_price": 60000.00,
+      "stock_quantity": 50,
+      "is_halal_certified": true,
+      "is_active": true,
+      "created_at": "2026-09-01T00:00:00Z",
+      "updated_at": "2026-09-01T00:00:00Z"
     }
-  ]
+  ],
+  "meta": {
+    "total": 5
+  }
 }
 ```
 
 ### 3.2 Idempotent POS Checkout
-- **Endpoint:** `POST /api/v1/transactions`
-- **Headers:** `Idempotency-Key: 7b8a1c9e-2f3a-4b5c-6d7e-8f9a0b1c2d3e`
-- **Auth:** `CASHIER`, `MANAGER`
+- **Endpoint:** `POST /api/v1/pos/checkout`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
+- **Auth:** `CASHIER`, `MANAGER`, `SUPER_ADMIN` (Requires permission: `pos:checkout`)
 - **Request Body:**
 ```json
 {
-  "cashier_id": "usr_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-  "payment_method": "CASH",
   "items": [
     {
-      "product_id": "prod_1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-      "quantity": 2,
-      "unit_price": 185000.00
+      "sku": "SKU-BEEF-01",
+      "quantity": 2
     }
   ],
-  "discount_amount": 0.00,
-  "tax_amount": 37000.00,
-  "total_amount": 407000.00
+  "payment_method": "CASH",
+  "discount_amount": 0.00
 }
 ```
 - **Response (201 Created):**
@@ -163,54 +168,73 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 {
   "success": true,
   "data": {
-    "transaction_id": "txn_3f4a5b6c-7d8e-9f0a-1b2c-3d4e5f6a7b8c",
-    "transaction_number": "TXN-20260830-0042",
+    "transaction_id": "3f4a5b6c-7d8e-9f0a-1b2c-3d4e5f6a7b8c",
+    "transaction_number": "TXN-20260901-0001",
     "idempotency_key": "7b8a1c9e-2f3a-4b5c-6d7e-8f9a0b1c2d3e",
+    "cashier_id": "22222222-2222-2222-2222-222222222222",
+    "payment_method": "CASH",
     "status": "COMPLETED",
-    "total_amount": 407000.00,
-    "ledger_entry_number": "JRNL-20260830-0089",
-    "created_at": "2026-08-30T10:15:30Z"
+    "items": [
+      {
+        "id": "item_uuid",
+        "transaction_id": "3f4a5b6c-7d8e-9f0a-1b2c-3d4e5f6a7b8c",
+        "product_id": "10000000-0000-0000-0000-000000000001",
+        "sku": "SKU-BEEF-01",
+        "name": "Daging Sapi Halal Al-Barakah 500g",
+        "quantity": 2,
+        "unit_price": 75000.00,
+        "cost_price": 60000.00,
+        "subtotal": 150000.00
+      }
+    ],
+    "subtotal_amount": 150000.00,
+    "tax_amount": 0.00,
+    "discount_amount": 0.00,
+    "total_amount": 150000.00,
+    "created_at": "2026-09-01T01:30:00Z"
   }
 }
 ```
 
 ---
 
-## 4. Halal Supply Chain Management
+## 4. Compliance-Aware Supply Chain Management
 
-### 4.1 Register Supplier with Halal Certificate
-- **Endpoint:** `POST /api/v1/suppliers`
-- **Auth:** `MANAGER`, `COMPLIANCE_OFFICER`
+### 4.1 Register Supplier (with Optional Compliance Certificate)
+- **Endpoint:** `POST /api/v1/supply-chain/suppliers`
+- **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
 - **Request Body:**
 ```json
 {
+  "code": "SUP-AB-02",
   "company_name": "PT Halal Daging Nusantara",
-  "code": "SUPP-HDN-001",
   "contact_person": "Umar Bakri",
   "contact_email": "umar@halaldaging.id",
-  "certificate": {
+  "contact_phone": "+628123456789",
+  "compliance_certificate": {
+    "cert_type": "HALAL_MUI",
     "certificate_number": "ID31110000123450824",
     "issuing_authority": "BPJPH Indonesia",
-    "scope": "Fresh and Frozen Beef Slaughtering",
-    "valid_from": "2024-08-01",
-    "expiry_date": "2028-08-01",
-    "document_url": "https://storage.tenet.internal/certs/ID31110000123450824.pdf"
+    "scope": "Fresh and Frozen Beef",
+    "valid_from": "2024-01-01",
+    "expiry_date": "2026-12-31"
   }
 }
 ```
 
-### 4.2 Create Purchase Order (with Hard-Validation)
-- **Endpoint:** `POST /api/v1/purchase-orders`
-- **Auth:** `MANAGER`, `COMPLIANCE_OFFICER`
+### 4.2 Create Purchase Order (Enforcing Configurable Compliance)
+- **Endpoint:** `POST /api/v1/supply-chain/purchase-orders`
+- **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
 - **Request Body:**
 ```json
 {
-  "supplier_id": "sup_11223344-5566-7788-99aa-bbccddeeff00",
+  "supplier_id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "compliance_cert_id": "c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f",
   "items": [
     {
-      "product_id": "prod_1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "product_id": "10000000-0000-0000-0000-000000000001",
       "quantity": 50,
-      "unit_cost": 140000.00
+      "unit_cost": 60000.00
     }
   ]
 }
@@ -220,14 +244,36 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 {
   "success": false,
   "error": {
-    "code": "HALAL_CERTIFICATE_EXPIRED",
-    "message": "Cannot create Purchase Order: Supplier certificate expired on 2026-08-01",
-    "details": {
-      "supplier_id": "sup_11223344-5566-7788-99aa-bbccddeeff00",
-      "expiry_date": "2026-08-01",
-      "authority": "BPJPH"
-    }
+    "code": "COMPLIANCE_CERT_EXPIRED",
+    "message": "Compliance certificate has expired"
   }
+}
+```
+- **Error Response if Certificate Missing under Strict Mode (422 Unprocessable Entity):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "COMPLIANCE_CERT_REQUIRED",
+    "message": "Compliance certificate is required for this tenant"
+  }
+}
+```
+
+### 4.3 Create Goods Receipt (GR) & Stock Inbound
+- **Endpoint:** `POST /api/v1/supply-chain/goods-receipts`
+- **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
+- **Request Body:**
+```json
+{
+  "purchase_order_id": "po_uuid",
+  "notes": "Delivered in good condition",
+  "items": [
+    {
+      "product_id": "10000000-0000-0000-0000-000000000001",
+      "received_quantity": 50
+    }
+  ]
 }
 ```
 

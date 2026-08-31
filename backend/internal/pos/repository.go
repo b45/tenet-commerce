@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,7 +41,7 @@ func (r *Repository) GetProducts(ctx context.Context, conn *pgxpool.Conn) ([]Pro
 			p.unit_price, 
 			p.cost_price, 
 			COALESCE(i.stock_quantity, 0) as stock_quantity,
-			p.is_halal_certified, 
+			COALESCE(p.compliance_tags, '[]'::jsonb) as compliance_tags, 
 			p.is_active, 
 			p.created_at, 
 			p.updated_at
@@ -60,6 +61,7 @@ func (r *Repository) GetProducts(ctx context.Context, conn *pgxpool.Conn) ([]Pro
 	var products []Product
 	for rows.Next() {
 		var p Product
+		var tagsBytes []byte
 		if err := rows.Scan(
 			&p.ID,
 			&p.CategoryID,
@@ -71,13 +73,27 @@ func (r *Repository) GetProducts(ctx context.Context, conn *pgxpool.Conn) ([]Pro
 			&p.UnitPrice,
 			&p.CostPrice,
 			&p.StockQuantity,
-			&p.IsHalalCertified,
+			&tagsBytes,
 			&p.IsActive,
 			&p.CreatedAt,
 			&p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed scanning product: %w", err)
 		}
+
+		if len(tagsBytes) > 0 {
+			_ = json.Unmarshal(tagsBytes, &p.ComplianceTags)
+			for _, tag := range p.ComplianceTags {
+				if tag == "HALAL_MUI" {
+					p.IsHalalCertified = true
+					break
+				}
+			}
+		}
+		if p.ComplianceTags == nil {
+			p.ComplianceTags = []string{}
+		}
+
 		products = append(products, p)
 	}
 
@@ -95,7 +111,7 @@ func (r *Repository) GetProductsBySKUsForUpdate(ctx context.Context, tx pgx.Tx, 
 			p.unit_price, 
 			p.cost_price, 
 			i.stock_quantity, 
-			p.is_halal_certified,
+			COALESCE(p.compliance_tags, '[]'::jsonb) as compliance_tags,
 			p.is_active
 		FROM products p
 		INNER JOIN inventory i ON p.id = i.product_id
@@ -112,6 +128,7 @@ func (r *Repository) GetProductsBySKUsForUpdate(ctx context.Context, tx pgx.Tx, 
 	productMap := make(map[string]*Product)
 	for rows.Next() {
 		var p Product
+		var tagsBytes []byte
 		if err := rows.Scan(
 			&p.ID,
 			&p.SKU,
@@ -119,11 +136,25 @@ func (r *Repository) GetProductsBySKUsForUpdate(ctx context.Context, tx pgx.Tx, 
 			&p.UnitPrice,
 			&p.CostPrice,
 			&p.StockQuantity,
-			&p.IsHalalCertified,
+			&tagsBytes,
 			&p.IsActive,
 		); err != nil {
 			return nil, fmt.Errorf("failed scanning locked product: %w", err)
 		}
+
+		if len(tagsBytes) > 0 {
+			_ = json.Unmarshal(tagsBytes, &p.ComplianceTags)
+			for _, tag := range p.ComplianceTags {
+				if tag == "HALAL_MUI" {
+					p.IsHalalCertified = true
+					break
+				}
+			}
+		}
+		if p.ComplianceTags == nil {
+			p.ComplianceTags = []string{}
+		}
+
 		productMap[p.SKU] = &p
 	}
 
