@@ -3,11 +3,11 @@ package database
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/b45/tenet-commerce/backend/pkg/logger"
 )
 
 // PostgresDB represents the database connection pool
@@ -58,7 +58,12 @@ func NewPostgresDB(ctx context.Context) (*PostgresDB, error) {
 		return nil, fmt.Errorf("error pinging db: %w", err)
 	}
 
-	log.Println("Successfully connected to PostgreSQL Database Pool")
+	logger.Info("Successfully connected to PostgreSQL Database Pool",
+		"host", host,
+		"port", port,
+		"database", dbname,
+		"max_conns", config.MaxConns,
+	)
 	return &PostgresDB{Pool: pool}, nil
 }
 
@@ -66,6 +71,6 @@ func NewPostgresDB(ctx context.Context) (*PostgresDB, error) {
 func (db *PostgresDB) Close() {
 	if db.Pool != nil {
 		db.Pool.Close()
-		log.Println("PostgreSQL connection pool closed")
+		logger.Info("PostgreSQL connection pool closed")
 	}
 }

@@ -39,13 +39,15 @@ gantt
 ## 2. Phase-by-Phase Work Breakdown Structure (WBS)
 
 ### Phase 1: Foundation & Core Infrastructure (Weeks 1 – 2)
-- **Objective:** Establish the development environment, database multi-tenancy engine, CI/CD pipeline, and authentication guards.
+- **Objective:** Establish the development environment, database multi-tenancy engine, CI/CD pipeline, authentication guards, and observability foundation.
 - **Key Deliverables:**
   - [x] Monorepo structure (`backend/`, `frontend/`, `ai-worker/`, `docs/`).
   - [x] GitHub Actions CI pipeline for linting, security scanning, and multi-architecture Docker image builds.
   - [x] PostgreSQL dynamic `search_path` connection pool middleware for Schema-per-Tenant routing.
   - [x] JWT token lifecycle (access/refresh token issuance, verification, tenant context injection).
-  - [x] RBAC permission guards protecting endpoint routes.
+  - [x] RBAC permission guards protecting endpoint routes (`RequireRole`, `RequirePermission`).
+  - [x] Standardized API response envelopes (`pkg/response`).
+  - [x] Structured JSON Logging (`pkg/logger` with `log/slog`), Request Tracing (`X-Trace-ID`, `X-Span-ID`), Real IP resolution, and Loki/Promtail compatibility.
 
 ---
 
