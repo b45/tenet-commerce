@@ -354,3 +354,20 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 ---
 
 *Tenet Commerce — REST API Specification v1.0.0*
+
+### Ledger Module
+`GET /api/v1/ledger/accounts`
+- **Description:** Retrieve Chart of Accounts.
+- **Permissions:** `ledger:read`
+
+`GET /api/v1/ledger/entries`
+- **Description:** Retrieve journal entries with pagination.
+- **Permissions:** `ledger:read`
+
+`POST /api/v1/ledger/entries`
+- **Description:** Create a manual journal entry (MANUAL_ADJUSTMENT only).
+- **Permissions:** `ledger:write`
+
+`GET /api/v1/ledger/trial-balance`
+- **Description:** Retrieve trial balance as of a specific date.
+- **Permissions:** `ledger:read`
