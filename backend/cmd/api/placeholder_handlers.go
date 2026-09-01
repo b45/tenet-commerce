@@ -63,11 +63,3 @@ func placeholderManagerDashboardHandler(c *gin.Context) {
 	})
 }
 
-// placeholderLedgerHandler is a Phase 1 RBAC verification stub.
-// TODO(Phase 3): Replace with the real handler from internal/ledger package.
-func placeholderLedgerHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    gin.H{"status": "Balanced", "message": "Finance Ledger - Phase 3 will implement this"},
-	})
-}

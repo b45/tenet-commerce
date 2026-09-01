@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/internal/pos"
 	"github.com/b45/tenet-commerce/backend/internal/supplychain"
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
@@ -55,6 +56,10 @@ func main() {
 	supplychainRepo := supplychain.NewRepository()
 	supplychainService := supplychain.NewService(supplychainRepo)
 	supplychainHandler := supplychain.NewHandler(supplychainService)
+
+	ledgerRepo := ledger.NewRepository()
+	ledgerService := ledger.NewService(ledgerRepo)
+	ledgerHandler := ledger.NewHandler(ledgerService)
 
 	// 4. Setup Gin Engine with Structured Observability Stack
 	gin.SetMode(gin.ReleaseMode)
@@ -124,11 +129,26 @@ func main() {
 				placeholderManagerDashboardHandler,
 			)
 
-			// TODO(Phase 3): Move to internal/ledger package handler
-			protected.GET("/finance/ledger",
-				internalAuth.RequirePermission("ledger:read"),
-				placeholderLedgerHandler,
-			)
+			// --- Ledger Domain Module (Phase 2) ---
+			ledgerGroup := protected.Group("/ledger")
+			{
+				ledgerGroup.GET("/accounts",
+					internalAuth.RequirePermission("ledger:read"),
+					ledgerHandler.GetChartOfAccounts,
+				)
+				ledgerGroup.GET("/entries",
+					internalAuth.RequirePermission("ledger:read"),
+					ledgerHandler.GetJournalEntries,
+				)
+				ledgerGroup.POST("/entries",
+					internalAuth.RequirePermission("ledger:write"),
+					ledgerHandler.CreateManualEntry,
+				)
+				ledgerGroup.GET("/trial-balance",
+					internalAuth.RequirePermission("ledger:read"),
+					ledgerHandler.GetTrialBalance,
+				)
+			}
 		}
 	}
 
