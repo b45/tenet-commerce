@@ -59,7 +59,7 @@ func main() {
 	posHandler := pos.NewHandler(posService)
 
 	supplychainRepo := supplychain.NewRepository()
-	supplychainService := supplychain.NewService(supplychainRepo)
+	supplychainService := supplychain.NewService(supplychainRepo, ledgerService)
 	supplychainHandler := supplychain.NewHandler(supplychainService)
 
 	// 4. Setup Gin Engine with Structured Observability Stack

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,11 +18,12 @@ var (
 )
 
 type Service struct {
-	repo *Repository
+	repo          *Repository
+	ledgerService *ledger.Service
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo *Repository, ledgerService *ledger.Service) *Service {
+	return &Service{repo: repo, ledgerService: ledgerService}
 }
 
 // checkCompliance is an internal helper that implements the Configurable Compliance Engine logic.
@@ -218,6 +220,25 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 		Notes:           req.Notes,
 	}
 
+	// Fetch PO items to determine unit costs for valuation
+	queryPOItems := `SELECT product_id, unit_cost FROM purchase_order_items WHERE purchase_order_id = $1`
+	rows, err := conn.Query(ctx, queryPOItems, po.ID)
+	if err != nil {
+		return nil, err
+	}
+	poUnitCosts := make(map[uuid.UUID]float64)
+	for rows.Next() {
+		var pid uuid.UUID
+		var cost float64
+		if err := rows.Scan(&pid, &cost); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		poUnitCosts[pid] = cost
+	}
+	rows.Close()
+
+	var inboundValue float64
 	for _, reqItem := range req.Items {
 		productID, _ := uuid.Parse(reqItem.ProductID)
 		gr.Items = append(gr.Items, GoodsReceiptItem{
@@ -226,6 +247,7 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 			ProductID:        productID,
 			ReceivedQuantity: reqItem.ReceivedQuantity,
 		})
+		inboundValue += float64(reqItem.ReceivedQuantity) * poUnitCosts[productID]
 	}
 
 	tx, err := conn.Begin(ctx)
@@ -241,6 +263,11 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	slog.InfoContext(ctx, "gr_and_stock_update_completed", slog.Duration("duration_stock_increment_ms", time.Since(startInsert)))
 
 	if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, "RECEIVED"); err != nil {
+		return nil, err
+	}
+
+	if err := s.ledgerService.PostGoodsReceiptJournal(ctx, tx, gr.ID, gr.GRNumber, inboundValue); err != nil {
+		slog.ErrorContext(ctx, "failed_to_post_gr_journal", slog.Any("error", err))
 		return nil, err
 	}
 
