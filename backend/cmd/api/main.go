@@ -49,17 +49,18 @@ func main() {
 	authRepo := internalAuth.NewRepository(db)
 	authHandler := internalAuth.NewHandler(authRepo, jwtService)
 
+	// Initialize Ledger first (needed by POS and Supply Chain)
+	ledgerRepo := ledger.NewRepository()
+	ledgerService := ledger.NewService(ledgerRepo)
+	ledgerHandler := ledger.NewHandler(ledgerService)
+
 	posRepo := pos.NewRepository()
-	posService := pos.NewService(posRepo)
+	posService := pos.NewService(posRepo, ledgerService)
 	posHandler := pos.NewHandler(posService)
 
 	supplychainRepo := supplychain.NewRepository()
 	supplychainService := supplychain.NewService(supplychainRepo)
 	supplychainHandler := supplychain.NewHandler(supplychainService)
-
-	ledgerRepo := ledger.NewRepository()
-	ledgerService := ledger.NewService(ledgerRepo)
-	ledgerHandler := ledger.NewHandler(ledgerService)
 
 	// 4. Setup Gin Engine with Structured Observability Stack
 	gin.SetMode(gin.ReleaseMode)
