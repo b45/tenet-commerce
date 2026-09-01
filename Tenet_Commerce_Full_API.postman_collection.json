@@ -877,13 +877,7 @@
                     "name": "Get Chart of Accounts",
                     "request": {
                         "method": "GET",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{access_token}}",
-                                "type": "text"
-                            }
-                        ],
+                        "header": [],
                         "url": {
                             "raw": "{{base_url}}/api/v1/ledger/accounts",
                             "host": [
@@ -902,13 +896,7 @@
                     "name": "Get Trial Balance",
                     "request": {
                         "method": "GET",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{access_token}}",
-                                "type": "text"
-                            }
-                        ],
+                        "header": [],
                         "url": {
                             "raw": "{{base_url}}/api/v1/ledger/trial-balance",
                             "host": [
@@ -927,13 +915,7 @@
                     "name": "Get Journal Entries",
                     "request": {
                         "method": "GET",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{access_token}}",
-                                "type": "text"
-                            }
-                        ],
+                        "header": [],
                         "url": {
                             "raw": "{{base_url}}/api/v1/ledger/entries",
                             "host": [
@@ -953,11 +935,6 @@
                     "request": {
                         "method": "POST",
                         "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{access_token}}",
-                                "type": "text"
-                            },
                             {
                                 "key": "Content-Type",
                                 "value": "application/json",
