@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/internal/pos"
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
@@ -34,7 +35,8 @@ func TestPOS_GetCatalog(t *testing.T) {
 	defer db.Close()
 
 	posRepo := pos.NewRepository()
-	posService := pos.NewService(posRepo)
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
 	posHandler := pos.NewHandler(posService)
 
 	gin.SetMode(gin.TestMode)
@@ -60,7 +62,8 @@ func TestPOS_Checkout_SuccessAndStockDecrement(t *testing.T) {
 	defer db.Close()
 
 	posRepo := pos.NewRepository()
-	posService := pos.NewService(posRepo)
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
 	posHandler := pos.NewHandler(posService)
 
 	gin.SetMode(gin.TestMode)
@@ -134,7 +137,8 @@ func TestPOS_Checkout_InsufficientStock(t *testing.T) {
 	defer db.Close()
 
 	posRepo := pos.NewRepository()
-	posService := pos.NewService(posRepo)
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
 	posHandler := pos.NewHandler(posService)
 
 	gin.SetMode(gin.TestMode)
