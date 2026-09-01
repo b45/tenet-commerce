@@ -890,7 +890,28 @@
                                 "accounts"
                             ]
                         }
-                    }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "if (jsonData.data && jsonData.data.length > 0) {",
+                                    "    jsonData.data.forEach(function(account) {",
+                                    "        if (account.code === '1010') {",
+                                    "            pm.collectionVariables.set('cash_account_id', account.id);",
+                                    "        }",
+                                    "        if (account.code === '5010') {",
+                                    "            pm.collectionVariables.set('expense_account_id', account.id);",
+                                    "        }",
+                                    "    });",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ]
                 },
                 {
                     "name": "Get Trial Balance",
