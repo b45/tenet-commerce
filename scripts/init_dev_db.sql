@@ -211,6 +211,85 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipt_items (
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
 );
 
+-- 5.5 Ledger Engine
+
+-- Sharia Double-Entry General Ledger
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(31) NOT NULL UNIQUE,
+    name VARCHAR(127) NOT NULL,
+    account_type VARCHAR(31) NOT NULL CHECK (account_type IN ('ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE')),
+    is_zakat_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_number VARCHAR(63) NOT NULL UNIQUE,
+    entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_id UUID,
+    memo TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_entry_lines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ledger_entry_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.ledger_entries(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.ledger_accounts(id) ON DELETE RESTRICT,
+    debit_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (debit_amount >= 0),
+    credit_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (credit_amount >= 0),
+    CONSTRAINT chk_debit_or_credit CHECK (
+        (debit_amount > 0 AND credit_amount = 0) OR 
+        (credit_amount > 0 AND debit_amount = 0)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_al_barakah_mart ON tenant_al_barakah_mart.ledger_entry_lines(account_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_al_barakah_mart ON tenant_al_barakah_mart.ledger_entries(entry_date);
+
+-- Ledger Balance Invariant Trigger
+CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.verify_ledger_entry_balance()
+RETURNS TRIGGER AS $$
+DECLARE
+    total_debit NUMERIC(15, 2);
+    total_credit NUMERIC(15, 2);
+BEGIN
+    SELECT COALESCE(SUM(debit_amount), 0), COALESCE(SUM(credit_amount), 0)
+    INTO total_debit, total_credit
+    FROM tenant_al_barakah_mart.ledger_entry_lines
+    WHERE ledger_entry_id = NEW.ledger_entry_id;
+
+    IF total_debit <> total_credit THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Total Debits (%) must equal Total Credits (%) for Entry %', 
+            total_debit, total_credit, NEW.ledger_entry_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_verify_ledger_balance ON tenant_al_barakah_mart.ledger_entry_lines;
+CREATE CONSTRAINT TRIGGER trg_verify_ledger_balance
+AFTER INSERT OR UPDATE ON tenant_al_barakah_mart.ledger_entry_lines
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION tenant_al_barakah_mart.verify_ledger_entry_balance();
+
+-- Seed Chart of Accounts
+INSERT INTO tenant_al_barakah_mart.ledger_accounts (code, name, account_type, is_zakat_eligible) VALUES
+    ('1010', 'Cash on Hand', 'ASSET', TRUE),
+    ('1020', 'Bank Operating Account', 'ASSET', TRUE),
+    ('1030', 'Merchandise Inventory', 'ASSET', TRUE),
+    ('1040', 'Trade Accounts Receivable', 'ASSET', TRUE),
+    ('2010', 'Trade Accounts Payable', 'LIABILITY', TRUE),
+    ('3010', 'Owner''s Equity', 'EQUITY', FALSE),
+    ('4010', 'Sales Revenue', 'REVENUE', FALSE),
+    ('5010', 'Cost of Goods Sold', 'EXPENSE', FALSE),
+    ('5020', 'Inventory Shrinkage & Loss', 'EXPENSE', FALSE)
+ON CONFLICT (code) DO NOTHING;
+
 -- 5.6 Seed Categories for tenant_al_barakah_mart
 INSERT INTO tenant_al_barakah_mart.categories (id, name, code)
 VALUES
@@ -407,3 +486,83 @@ ON CONFLICT (sku) DO UPDATE SET
 INSERT INTO tenant_darussalam_store.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
 SELECT id, 30, 5, 'MAIN_STORE' FROM tenant_darussalam_store.products
 ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- 6.8 Ledger Engine
+
+-- Sharia Double-Entry General Ledger
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(31) NOT NULL UNIQUE,
+    name VARCHAR(127) NOT NULL,
+    account_type VARCHAR(31) NOT NULL CHECK (account_type IN ('ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE')),
+    is_zakat_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_number VARCHAR(63) NOT NULL UNIQUE,
+    entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_id UUID,
+    memo TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_entry_lines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ledger_entry_id UUID NOT NULL REFERENCES tenant_darussalam_store.ledger_entries(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES tenant_darussalam_store.ledger_accounts(id) ON DELETE RESTRICT,
+    debit_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (debit_amount >= 0),
+    credit_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (credit_amount >= 0),
+    CONSTRAINT chk_debit_or_credit CHECK (
+        (debit_amount > 0 AND credit_amount = 0) OR 
+        (credit_amount > 0 AND debit_amount = 0)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_darussalam_store ON tenant_darussalam_store.ledger_entry_lines(account_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_darussalam_store ON tenant_darussalam_store.ledger_entries(entry_date);
+
+-- Ledger Balance Invariant Trigger
+CREATE OR REPLACE FUNCTION tenant_darussalam_store.verify_ledger_entry_balance()
+RETURNS TRIGGER AS $$
+DECLARE
+    total_debit NUMERIC(15, 2);
+    total_credit NUMERIC(15, 2);
+BEGIN
+    SELECT COALESCE(SUM(debit_amount), 0), COALESCE(SUM(credit_amount), 0)
+    INTO total_debit, total_credit
+    FROM tenant_darussalam_store.ledger_entry_lines
+    WHERE ledger_entry_id = NEW.ledger_entry_id;
+
+    IF total_debit <> total_credit THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Total Debits (%) must equal Total Credits (%) for Entry %', 
+            total_debit, total_credit, NEW.ledger_entry_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_verify_ledger_balance ON tenant_darussalam_store.ledger_entry_lines;
+CREATE CONSTRAINT TRIGGER trg_verify_ledger_balance
+AFTER INSERT OR UPDATE ON tenant_darussalam_store.ledger_entry_lines
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION tenant_darussalam_store.verify_ledger_entry_balance();
+
+-- Seed Chart of Accounts
+INSERT INTO tenant_darussalam_store.ledger_accounts (code, name, account_type, is_zakat_eligible) VALUES
+    ('1010', 'Cash on Hand', 'ASSET', TRUE),
+    ('1020', 'Bank Operating Account', 'ASSET', TRUE),
+    ('1030', 'Merchandise Inventory', 'ASSET', TRUE),
+    ('1040', 'Trade Accounts Receivable', 'ASSET', TRUE),
+    ('2010', 'Trade Accounts Payable', 'LIABILITY', TRUE),
+    ('3010', 'Owner''s Equity', 'EQUITY', FALSE),
+    ('4010', 'Sales Revenue', 'REVENUE', FALSE),
+    ('5010', 'Cost of Goods Sold', 'EXPENSE', FALSE),
+    ('5020', 'Inventory Shrinkage & Loss', 'EXPENSE', FALSE)
+ON CONFLICT (code) DO NOTHING;
+
