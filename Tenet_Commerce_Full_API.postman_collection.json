@@ -1,0 +1,932 @@
+{
+	"info": {
+		"_postman_id": "4d1db495-9b37-43f1-b9db-9b2f6f16df33",
+		"name": "Tenet Commerce - API Integration (POS & Supply Chain)",
+		"description": "Complete manual testing collection for Tenet Commerce covering Authentication, POS & Checkout (with Redis Idempotency & Stock Locking), and Configurable Compliance Supply Chain Engine.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{jwt_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Login (Darussalam Store - Manager)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.access_token) {",
+									"    pm.collectionVariables.set(\"jwt_token\", jsonData.data.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"tenant_slug\": \"darussalam-store\",\n    \"email\": \"manager1@darussalam.com\",\n    \"password\": \"Password123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Login (Al-Barakah Mart - Cashier)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.access_token) {",
+									"    pm.collectionVariables.set(\"jwt_token\", jsonData.data.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"tenant_slug\": \"al-barakah-mart\",\n    \"email\": \"cashier1@albarakah.com\",\n    \"password\": \"Password123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Login (Al-Barakah Mart - Manager)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.access_token) {",
+									"    pm.collectionVariables.set(\"jwt_token\", jsonData.data.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"tenant_slug\": \"al-barakah-mart\",\n    \"email\": \"manager1@albarakah.com\",\n    \"password\": \"Password123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Point of Sale (POS)",
+			"item": [
+				{
+					"name": "1. List Products (Catalog)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"if (jsonData.data && jsonData.data.length > 0) {",
+									"    pm.collectionVariables.set(\"pos_sample_sku\", jsonData.data[0].sku);",
+									"    pm.collectionVariables.set(\"pos_sample_product_id\", jsonData.data[0].id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/pos/products",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"pos",
+								"products"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2. POS Checkout (Atomic Inventory Decrement) - SUCCESS",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Generate a fresh idempotency key for this transaction",
+									"var idempotencyKey = 'idemp_' + Date.now() + '_' + Math.random().toString(36).substring(7);",
+									"pm.collectionVariables.set(\"last_idempotency_key\", idempotencyKey);"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201 Created\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"var jsonData = pm.response.json();",
+									"pm.test(\"Transaction is COMPLETED\", function () {",
+									"    pm.expect(jsonData.data.status).to.eql(\"COMPLETED\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Idempotency-Key",
+								"value": "{{last_idempotency_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pos/checkout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"pos",
+								"checkout"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3. POS Checkout (Duplicate Idempotency Key - Replay from Redis)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201 Created (Cached Replay)\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"var jsonData = pm.response.json();",
+									"pm.test(\"Same Transaction returned from cache\", function () {",
+									"    pm.expect(jsonData.data.idempotency_key).to.eql(pm.collectionVariables.get(\"last_idempotency_key\"));",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Idempotency-Key",
+								"value": "{{last_idempotency_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pos/checkout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"pos",
+								"checkout"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4. POS Checkout (Insufficient Stock - FAILS 409)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var idempotencyKey = 'idemp_overstock_' + Date.now();",
+									"pm.collectionVariables.set(\"overstock_idempotency_key\", idempotencyKey);"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 409 Conflict\", function () {",
+									"    pm.response.to.have.status(409);",
+									"});",
+									"var jsonData = pm.response.json();",
+									"pm.test(\"Error code is INSUFFICIENT_STOCK\", function () {",
+									"    pm.expect(jsonData.error.code).to.eql(\"INSUFFICIENT_STOCK\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Idempotency-Key",
+								"value": "{{overstock_idempotency_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 999999\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pos/checkout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"pos",
+								"checkout"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5. POS Checkout (Product Not Found - FAILS 404)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var idempotencyKey = 'idemp_notfound_' + Date.now();",
+									"pm.collectionVariables.set(\"notfound_idempotency_key\", idempotencyKey);"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 404 Not Found\", function () {",
+									"    pm.response.to.have.status(404);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Idempotency-Key",
+								"value": "{{notfound_idempotency_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"NON-EXISTENT-SKU-999\",\n            \"quantity\": 1\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pos/checkout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"pos",
+								"checkout"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Supply Chain (Darussalam Store - Strict Mode OFF)",
+			"item": [
+				{
+					"name": "1. Create Supplier (Without Cert)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set(\"ds_supplier_id\", jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "darussalam-store",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"SUP-DS-01\",\n    \"company_name\": \"Supplier Without Cert (DS)\",\n    \"contact_person\": \"Budi\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/suppliers",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"suppliers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2. Create Purchase Order (No Cert) - SUCCESS",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set(\"ds_po_id\", jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "darussalam-store",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"supplier_id\": \"{{ds_supplier_id}}\",\n    \"items\": [\n        {\n            \"product_id\": \"20000000-0000-0000-0000-000000000001\",\n            \"quantity\": 10,\n            \"unit_cost\": 10000\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/purchase-orders",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"purchase-orders"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3. Create Goods Receipt",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "darussalam-store",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"purchase_order_id\": \"{{ds_po_id}}\",\n    \"items\": [\n        {\n            \"product_id\": \"20000000-0000-0000-0000-000000000001\",\n            \"received_quantity\": 10\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/goods-receipts",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"goods-receipts"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Supply Chain (Al-Barakah Mart - Strict Mode ON)",
+			"item": [
+				{
+					"name": "1. Create Supplier (Try Bypass Cert)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set(\"ab_supplier_no_cert_id\", jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"SUP-AB-01\",\n    \"company_name\": \"Supplier Try Bypass (AB)\",\n    \"contact_person\": \"Ahmad\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/suppliers",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"suppliers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2. Try Create PO (No Cert) - FAILS 422",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
+									"    pm.response.to.have.status(422);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"supplier_id\": \"{{ab_supplier_no_cert_id}}\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"quantity\": 10,\n            \"unit_cost\": 10000\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/purchase-orders",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"purchase-orders"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3. Create Supplier (Valid Cert)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set(\"ab_supplier_valid_id\", jsonData.data.id);",
+									"    if (jsonData.data.compliance_certificate && jsonData.data.compliance_certificate.id) {",
+									"        pm.collectionVariables.set(\"ab_valid_cert_id\", jsonData.data.compliance_certificate.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"SUP-AB-02\",\n    \"company_name\": \"Supplier Valid Cert (AB)\",\n    \"compliance_certificate\": {\n        \"cert_type\": \"HALAL_MUI\",\n        \"certificate_number\": \"CERT-002\",\n        \"issuing_authority\": \"MUI\",\n        \"scope\": \"Meat\",\n        \"valid_from\": \"2024-01-01\",\n        \"expiry_date\": \"2026-12-31\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/suppliers",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"suppliers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4. Create PO (Valid Cert) - SUCCESS 201",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201 Created\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"supplier_id\": \"{{ab_supplier_valid_id}}\",\n    \"compliance_cert_id\": \"{{ab_valid_cert_id}}\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"quantity\": 10,\n            \"unit_cost\": 10000\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/purchase-orders",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"purchase-orders"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5. Create Supplier (Expired Cert)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if(jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set(\"ab_supplier_expired_id\", jsonData.data.id);",
+									"    if (jsonData.data.compliance_certificate && jsonData.data.compliance_certificate.id) {",
+									"        pm.collectionVariables.set(\"ab_expired_cert_id\", jsonData.data.compliance_certificate.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"SUP-AB-03\",\n    \"company_name\": \"Supplier Expired Cert (AB)\",\n    \"compliance_certificate\": {\n        \"cert_type\": \"HALAL_MUI\",\n        \"certificate_number\": \"CERT-EXPIRED\",\n        \"issuing_authority\": \"MUI\",\n        \"scope\": \"Meat\",\n        \"valid_from\": \"2020-01-01\",\n        \"expiry_date\": \"2021-12-31\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/suppliers",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"suppliers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "6. Try Create PO (Expired Cert) - FAILS 422",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
+									"    pm.response.to.have.status(422);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tenant-ID",
+								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"supplier_id\": \"{{ab_supplier_expired_id}}\",\n    \"compliance_cert_id\": \"{{ab_expired_cert_id}}\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"quantity\": 10,\n            \"unit_cost\": 10000\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/supply-chain/purchase-orders",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"supply-chain",
+								"purchase-orders"
+							]
+						}
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8081"
+		},
+		{
+			"key": "jwt_token",
+			"value": ""
+		},
+		{
+			"key": "pos_sample_sku",
+			"value": "SKU-BEEF-01"
+		},
+		{
+			"key": "pos_sample_product_id",
+			"value": ""
+		},
+		{
+			"key": "last_idempotency_key",
+			"value": ""
+		},
+		{
+			"key": "overstock_idempotency_key",
+			"value": ""
+		},
+		{
+			"key": "notfound_idempotency_key",
+			"value": ""
+		},
+		{
+			"key": "ds_supplier_id",
+			"value": ""
+		},
+		{
+			"key": "ds_po_id",
+			"value": ""
+		},
+		{
+			"key": "ab_supplier_no_cert_id",
+			"value": ""
+		},
+		{
+			"key": "ab_supplier_valid_id",
+			"value": ""
+		},
+		{
+			"key": "ab_valid_cert_id",
+			"value": ""
+		},
+		{
+			"key": "ab_supplier_expired_id",
+			"value": ""
+		},
+		{
+			"key": "ab_expired_cert_id",
+			"value": ""
+		}
+	]
+}

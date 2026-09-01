@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
@@ -76,4 +77,14 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 
 		c.Next()
 	}
+}
+
+// GetConn retrieves the tenant-scoped database connection from the Gin context.
+func GetConn(c *gin.Context) (*pgxpool.Conn, bool) {
+	conn, exists := c.Get("db_conn")
+	if !exists {
+		return nil, false
+	}
+	pgxConn, ok := conn.(*pgxpool.Conn)
+	return pgxConn, ok
 }

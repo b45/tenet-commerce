@@ -20,7 +20,7 @@ erDiagram
     PRODUCTS ||--o{ TRANSACTION_ITEMS : "sold in"
     TRANSACTIONS ||--|{ TRANSACTION_ITEMS : "consists of"
     
-    SUPPLIERS ||--|{ HALAL_CERTIFICATES : "possesses"
+    SUPPLIERS ||--o{ COMPLIANCE_CERTIFICATES : "possesses"
     SUPPLIERS ||--o{ PURCHASE_ORDERS : "receives"
     PURCHASE_ORDERS ||--|{ PO_ITEMS : "contains"
     PRODUCTS ||--o{ PO_ITEMS : "ordered as"
@@ -34,6 +34,7 @@ erDiagram
     
     TENANT_CONFIG ||--o{ ZAKAT_CALCULATIONS : "configures"
     LEDGER_ACCOUNTS ||--o{ ZAKAT_CALCULATIONS : "evaluates balances"
+    TENANT_CONFIG ||--o| TENANT : "configures"
 ```
 
 ---
@@ -78,6 +79,14 @@ CREATE INDEX idx_users_tenant_email ON public.users(tenant_id, email);
 ```sql
 -- DDL executed inside each tenant schema
 
+-- 4.0 Tenant Configuration
+CREATE TABLE tenant_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    config_key VARCHAR(127) NOT NULL UNIQUE,
+    config_value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- 4.1 Products & Categories
 CREATE TABLE categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -96,7 +105,7 @@ CREATE TABLE products (
     description TEXT,
     unit_price NUMERIC(15, 2) NOT NULL CHECK (unit_price >= 0),
     cost_price NUMERIC(15, 2) NOT NULL CHECK (cost_price >= 0),
-    is_halal_certified BOOLEAN NOT NULL DEFAULT TRUE,
+    compliance_tags JSONB,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -138,7 +147,7 @@ CREATE TABLE transaction_items (
 CREATE INDEX idx_transactions_created_at ON transactions(created_at DESC);
 CREATE INDEX idx_transactions_idempotency ON transactions(idempotency_key);
 
--- 4.3 Halal Supply Chain Management
+-- 4.3 Compliance-Aware Supply Chain Management
 CREATE TABLE suppliers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(63) NOT NULL UNIQUE,
@@ -150,32 +159,26 @@ CREATE TABLE suppliers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE halal_certificates (
+CREATE TABLE compliance_certificates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+    cert_type VARCHAR(63) NOT NULL, -- e.g. HALAL_MUI, BPOM, ORGANIC
     certificate_number VARCHAR(127) NOT NULL UNIQUE,
-    issuing_authority VARCHAR(127) NOT NULL, -- e.g. BPJPH, MUI, JAKIM, MUIS
+    issuing_authority VARCHAR(127) NOT NULL, -- e.g. BPJPH, MUI, BPOM RI
     scope TEXT NOT NULL,
     valid_from DATE NOT NULL,
     expiry_date DATE NOT NULL,
     document_url VARCHAR(511),
-    status VARCHAR(31) GENERATED ALWAYS AS (
-        CASE 
-            WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-            WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
-            ELSE 'VALID'
-        END
-    ) STORED,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_halal_cert_expiry ON halal_certificates(expiry_date);
+CREATE INDEX idx_compliance_cert_expiry ON compliance_certificates(expiry_date);
 
 CREATE TABLE purchase_orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     po_number VARCHAR(63) NOT NULL UNIQUE,
     supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
-    halal_cert_id UUID NOT NULL REFERENCES halal_certificates(id) ON DELETE RESTRICT,
+    compliance_cert_id UUID REFERENCES compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
     status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
