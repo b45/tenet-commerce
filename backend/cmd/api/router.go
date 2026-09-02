@@ -16,6 +16,7 @@ import (
 	"github.com/b45/tenet-commerce/backend/pkg/database"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
+	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
 // RouterConfig holds all domain handlers and infrastructure dependencies required by the API router
@@ -48,6 +49,14 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 	router.Use(logger.TraceMiddleware())     // 2. Distributed Tracing (trace_id, span_id)
 	router.Use(logger.AccessLogMiddleware()) // 3. Structured JSON Access Logging
 	router.Use(logger.RecoveryMiddleware())  // 4. Panic Recovery with stack trace logging
+
+	// Standard JSON 404 and 405 error responses for all undefined endpoints
+	router.NoRoute(func(c *gin.Context) {
+		response.NotFound(c, "ROUTE_NOT_FOUND", "Endpoint not found: "+c.Request.Method+" "+c.Request.URL.Path)
+	})
+	router.NoMethod(func(c *gin.Context) {
+		response.MethodNotAllowed(c, "METHOD_NOT_ALLOWED", "Method "+c.Request.Method+" not allowed for "+c.Request.URL.Path)
+	})
 
 	// Health Check Endpoint (Unauthenticated)
 	router.GET("/health", func(c *gin.Context) {

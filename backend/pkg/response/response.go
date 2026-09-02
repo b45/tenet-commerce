@@ -90,6 +90,14 @@ func NotFound(c *gin.Context, code, message string) {
 	})
 }
 
+// MethodNotAllowed sends a 405 Method Not Allowed response
+func MethodNotAllowed(c *gin.Context, code, message string) {
+	c.JSON(http.StatusMethodNotAllowed, APIResponse{
+		Success: false,
+		Error:   &APIError{Code: code, Message: message},
+	})
+}
+
 // InternalServerError sends a 500 Internal Server Error response
 func InternalServerError(c *gin.Context, code, message string) {
 	c.JSON(http.StatusInternalServerError, APIResponse{
