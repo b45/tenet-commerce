@@ -212,7 +212,7 @@ func (r *Repository) IncrementStock(ctx context.Context, tx pgx.Tx, productID st
 // GenerateTransactionNumber generates a unique, sortable transaction code: TXN-YYYYMMDD-HEX
 func (r *Repository) GenerateTransactionNumber() string {
 	datePart := time.Now().Format("20060102")
-	randomBytes := make([]byte, 3)
+	randomBytes := make([]byte, 6)
 	_, _ = rand.Read(randomBytes)
 	hexPart := hex.EncodeToString(randomBytes)
 	return fmt.Sprintf("TXN-%s-%s", datePart, hexPart)
