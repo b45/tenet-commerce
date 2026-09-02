@@ -20,6 +20,11 @@ var (
 	ErrTransactionNotFound      = errors.New("transaction not found")
 	ErrAlreadyVoided            = errors.New("transaction is already voided")
 	ErrInsufficientCashTendered = errors.New("insufficient cash tendered")
+	ErrCategoryNotFound         = errors.New("category not found")
+	ErrCategoryCodeExists       = errors.New("category code already exists")
+	ErrSKUAlreadyExists         = errors.New("product SKU already exists")
+	ErrBarcodeAlreadyExists     = errors.New("product barcode already exists")
+	ErrNegativeAdjustmentStock  = errors.New("insufficient stock for negative adjustment")
 )
 
 // Repository handles database operations for the POS module within a tenant schema
@@ -769,5 +774,543 @@ func (r *Repository) UpdateQRISConfig(ctx context.Context, conn *pgxpool.Conn, c
 		return fmt.Errorf("failed updating QRIS config: %w", err)
 	}
 	return nil
+}
+
+// GetCategories returns all product categories with their current active product counts
+func (r *Repository) GetCategories(ctx context.Context, conn *pgxpool.Conn) ([]Category, error) {
+	query := `
+		SELECT 
+			c.id, 
+			c.name, 
+			c.code, 
+			c.parent_id, 
+			COUNT(p.id) as product_count, 
+			c.created_at
+		FROM categories c
+		LEFT JOIN products p ON c.id = p.category_id AND p.is_active = TRUE
+		GROUP BY c.id, c.name, c.code, c.parent_id, c.created_at
+		ORDER BY c.name ASC
+	`
+	rows, err := conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed querying categories: %w", err)
+	}
+	defer rows.Close()
+
+	var categories []Category
+	for rows.Next() {
+		var cat Category
+		var parentID *string
+		if err := rows.Scan(&cat.ID, &cat.Name, &cat.Code, &parentID, &cat.ProductCount, &cat.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed scanning category: %w", err)
+		}
+		cat.ParentID = parentID
+		categories = append(categories, cat)
+	}
+	if categories == nil {
+		categories = []Category{}
+	}
+	return categories, nil
+}
+
+// GetCategoryByID returns a category by its UUID
+func (r *Repository) GetCategoryByID(ctx context.Context, conn *pgxpool.Conn, id string) (*Category, error) {
+	query := `
+		SELECT 
+			c.id, 
+			c.name, 
+			c.code, 
+			c.parent_id, 
+			COUNT(p.id) as product_count, 
+			c.created_at
+		FROM categories c
+		LEFT JOIN products p ON c.id = p.category_id AND p.is_active = TRUE
+		WHERE c.id = $1
+		GROUP BY c.id, c.name, c.code, c.parent_id, c.created_at
+	`
+	var cat Category
+	var parentID *string
+	err := conn.QueryRow(ctx, query, id).Scan(&cat.ID, &cat.Name, &cat.Code, &parentID, &cat.ProductCount, &cat.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, fmt.Errorf("failed querying category: %w", err)
+	}
+	cat.ParentID = parentID
+	return &cat, nil
+}
+
+// CreateCategory inserts a new product category
+func (r *Repository) CreateCategory(ctx context.Context, conn *pgxpool.Conn, req CreateCategoryRequest) (*Category, error) {
+	query := `
+		INSERT INTO categories (name, code, parent_id, created_at)
+		VALUES ($1, $2, $3, NOW())
+		RETURNING id, name, code, parent_id, 0 as product_count, created_at
+	`
+	var cat Category
+	var parentID *string
+	err := conn.QueryRow(ctx, query, req.Name, strings.ToUpper(strings.TrimSpace(req.Code)), req.ParentID).
+		Scan(&cat.ID, &cat.Name, &cat.Code, &parentID, &cat.ProductCount, &cat.CreatedAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "categories_code_key") {
+			return nil, ErrCategoryCodeExists
+		}
+		return nil, fmt.Errorf("failed creating category: %w", err)
+	}
+	cat.ParentID = parentID
+	return &cat, nil
+}
+
+// UpdateCategory updates an existing category
+func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateCategoryRequest) (*Category, error) {
+	query := `
+		UPDATE categories
+		SET name = $1, code = $2, parent_id = $3
+		WHERE id = $4
+		RETURNING id, name, code, parent_id, created_at
+	`
+	var cat Category
+	var parentID *string
+	err := conn.QueryRow(ctx, query, req.Name, strings.ToUpper(strings.TrimSpace(req.Code)), req.ParentID, id).
+		Scan(&cat.ID, &cat.Name, &cat.Code, &parentID, &cat.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCategoryNotFound
+		}
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "categories_code_key") {
+			return nil, ErrCategoryCodeExists
+		}
+		return nil, fmt.Errorf("failed updating category: %w", err)
+	}
+	cat.ParentID = parentID
+
+	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM products WHERE category_id = $1 AND is_active = TRUE`, id).Scan(&cat.ProductCount)
+	return &cat, nil
+}
+
+// DeleteCategory removes a category, unlinking any assigned products
+func (r *Repository) DeleteCategory(ctx context.Context, conn *pgxpool.Conn, id string) error {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `UPDATE products SET category_id = NULL WHERE category_id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed unlinking category products: %w", err)
+	}
+
+	res, err := tx.Exec(ctx, `DELETE FROM categories WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed deleting category: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return ErrCategoryNotFound
+	}
+
+	return tx.Commit(ctx)
+}
+
+// GetProductByID retrieves a product by its ID including category name and real-time inventory quantity
+func (r *Repository) GetProductByID(ctx context.Context, conn *pgxpool.Conn, id string) (*Product, error) {
+	query := `
+		SELECT 
+			p.id, 
+			p.category_id, 
+			COALESCE(c.name, '') as category_name, 
+			p.sku, 
+			p.barcode, 
+			p.name, 
+			p.description, 
+			p.unit_price, 
+			p.cost_price, 
+			COALESCE(i.stock_quantity, 0) as stock_quantity, 
+			COALESCE(p.compliance_tags, '[]'::jsonb) as compliance_tags, 
+			p.is_active, 
+			p.created_at, 
+			p.updated_at
+		FROM products p
+		LEFT JOIN categories c ON p.category_id = c.id
+		LEFT JOIN inventory i ON p.id = i.product_id
+		WHERE p.id = $1
+	`
+	var p Product
+	var tagsBytes []byte
+	err := conn.QueryRow(ctx, query, id).Scan(
+		&p.ID,
+		&p.CategoryID,
+		&p.CategoryName,
+		&p.SKU,
+		&p.Barcode,
+		&p.Name,
+		&p.Description,
+		&p.UnitPrice,
+		&p.CostPrice,
+		&p.StockQuantity,
+		&tagsBytes,
+		&p.IsActive,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
+		return nil, fmt.Errorf("failed querying product: %w", err)
+	}
+
+	if len(tagsBytes) > 0 {
+		_ = json.Unmarshal(tagsBytes, &p.ComplianceTags)
+	}
+	for _, tag := range p.ComplianceTags {
+		if strings.Contains(strings.ToUpper(tag), "HALAL") {
+			p.IsHalalCertified = true
+			break
+		}
+	}
+	return &p, nil
+}
+
+// CreateProduct inserts a new product and initializes its inventory entry atomically
+func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req CreateProductRequest) (*Product, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tagsJSON, err := json.Marshal(req.ComplianceTags)
+	if err != nil {
+		tagsJSON = []byte("[]")
+	}
+
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
+	warehouseLocation := "MAIN_STORE"
+	if strings.TrimSpace(req.WarehouseLocation) != "" {
+		warehouseLocation = req.WarehouseLocation
+	}
+
+	reorderThreshold := 10
+	if req.ReorderThreshold > 0 {
+		reorderThreshold = req.ReorderThreshold
+	}
+
+	productQuery := `
+		INSERT INTO products (
+			name, sku, barcode, description, category_id, unit_price, cost_price, compliance_tags, is_active, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW()
+		) RETURNING id, created_at, updated_at
+	`
+	var productID string
+	var createdAt, updatedAt time.Time
+
+	err = tx.QueryRow(
+		ctx,
+		productQuery,
+		req.Name,
+		strings.TrimSpace(req.SKU),
+		req.Barcode,
+		req.Description,
+		req.CategoryID,
+		req.UnitPrice,
+		req.CostPrice,
+		tagsJSON,
+		isActive,
+	).Scan(&productID, &createdAt, &updatedAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "products_sku_key") || strings.Contains(err.Error(), "sku") {
+			return nil, ErrSKUAlreadyExists
+		}
+		if strings.Contains(err.Error(), "products_barcode_key") || strings.Contains(err.Error(), "barcode") {
+			return nil, ErrBarcodeAlreadyExists
+		}
+		return nil, fmt.Errorf("failed inserting product: %w", err)
+	}
+
+	inventoryQuery := `
+		INSERT INTO inventory (product_id, stock_quantity, reorder_threshold, warehouse_location, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`
+	if _, err := tx.Exec(ctx, inventoryQuery, productID, req.InitialStock, reorderThreshold, warehouseLocation); err != nil {
+		return nil, fmt.Errorf("failed inserting inventory record: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing product creation: %w", err)
+	}
+
+	var categoryName string
+	if req.CategoryID != nil {
+		_ = conn.QueryRow(ctx, `SELECT name FROM categories WHERE id = $1`, *req.CategoryID).Scan(&categoryName)
+	}
+
+	isHalal := false
+	for _, tag := range req.ComplianceTags {
+		if strings.Contains(strings.ToUpper(tag), "HALAL") {
+			isHalal = true
+			break
+		}
+	}
+
+	return &Product{
+		ID:               productID,
+		CategoryID:       req.CategoryID,
+		CategoryName:     categoryName,
+		SKU:              req.SKU,
+		Barcode:          req.Barcode,
+		Name:             req.Name,
+		Description:      req.Description,
+		UnitPrice:        req.UnitPrice,
+		CostPrice:        req.CostPrice,
+		StockQuantity:    req.InitialStock,
+		ComplianceTags:   req.ComplianceTags,
+		IsHalalCertified: isHalal,
+		IsActive:         isActive,
+		CreatedAt:        createdAt,
+		UpdatedAt:        updatedAt,
+	}, nil
+}
+
+// UpdateProduct updates product metadata and inventory reorder parameters atomically
+func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateProductRequest) (*Product, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tagsJSON, err := json.Marshal(req.ComplianceTags)
+	if err != nil {
+		tagsJSON = []byte("[]")
+	}
+
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
+	query := `
+		UPDATE products
+		SET name = $1, barcode = $2, description = $3, category_id = $4,
+		    unit_price = $5, cost_price = $6, compliance_tags = $7, is_active = $8, updated_at = NOW()
+		WHERE id = $9
+		RETURNING sku, created_at, updated_at
+	`
+	var sku string
+	var createdAt, updatedAt time.Time
+	err = tx.QueryRow(
+		ctx,
+		query,
+		req.Name,
+		req.Barcode,
+		req.Description,
+		req.CategoryID,
+		req.UnitPrice,
+		req.CostPrice,
+		tagsJSON,
+		isActive,
+		id,
+	).Scan(&sku, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
+		if strings.Contains(err.Error(), "products_barcode_key") {
+			return nil, ErrBarcodeAlreadyExists
+		}
+		return nil, fmt.Errorf("failed updating product: %w", err)
+	}
+
+	if req.ReorderThreshold > 0 || req.WarehouseLocation != "" {
+		invUpdate := `
+			UPDATE inventory
+			SET reorder_threshold = CASE WHEN $1 > 0 THEN $1 ELSE reorder_threshold END,
+			    warehouse_location = CASE WHEN $2 <> '' THEN $2 ELSE warehouse_location END,
+			    updated_at = NOW()
+			WHERE product_id = $3
+		`
+		if _, err := tx.Exec(ctx, invUpdate, req.ReorderThreshold, req.WarehouseLocation, id); err != nil {
+			return nil, fmt.Errorf("failed updating inventory threshold: %w", err)
+		}
+	}
+
+	var stockQty int
+	_ = tx.QueryRow(ctx, `SELECT stock_quantity FROM inventory WHERE product_id = $1`, id).Scan(&stockQty)
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing product update: %w", err)
+	}
+
+	var categoryName string
+	if req.CategoryID != nil {
+		_ = conn.QueryRow(ctx, `SELECT name FROM categories WHERE id = $1`, *req.CategoryID).Scan(&categoryName)
+	}
+
+	isHalal := false
+	for _, tag := range req.ComplianceTags {
+		if strings.Contains(strings.ToUpper(tag), "HALAL") {
+			isHalal = true
+			break
+		}
+	}
+
+	return &Product{
+		ID:               id,
+		CategoryID:       req.CategoryID,
+		CategoryName:     categoryName,
+		SKU:              sku,
+		Barcode:          req.Barcode,
+		Name:             req.Name,
+		Description:      req.Description,
+		UnitPrice:        req.UnitPrice,
+		CostPrice:        req.CostPrice,
+		StockQuantity:    stockQty,
+		ComplianceTags:   req.ComplianceTags,
+		IsHalalCertified: isHalal,
+		IsActive:         isActive,
+		CreatedAt:        createdAt,
+		UpdatedAt:        updatedAt,
+	}, nil
+}
+
+// DeleteProduct performs a soft delete by marking is_active = FALSE
+func (r *Repository) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id string) error {
+	res, err := conn.Exec(ctx, `UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed soft-deleting product: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return ErrProductNotFound
+	}
+	return nil
+}
+
+// AdjustInventoryStock applies an atomic stock adjustment to an inventory item with row-level locking
+func (r *Repository) AdjustInventoryStock(ctx context.Context, tx pgx.Tx, productID string, adjType string, qty int) (prevQty int, newQty int, deltaQty int, err error) {
+	err = tx.QueryRow(ctx, `SELECT stock_quantity FROM inventory WHERE product_id = $1 FOR UPDATE`, productID).Scan(&prevQty)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, 0, 0, ErrProductNotFound
+		}
+		return 0, 0, 0, fmt.Errorf("failed locking inventory: %w", err)
+	}
+
+	switch adjType {
+	case "ADD":
+		deltaQty = qty
+		newQty = prevQty + qty
+	case "SUBTRACT":
+		deltaQty = -qty
+		newQty = prevQty - qty
+	case "SET":
+		deltaQty = qty - prevQty
+		newQty = qty
+	default:
+		return 0, 0, 0, fmt.Errorf("invalid adjustment type: %s", adjType)
+	}
+
+	if newQty < 0 {
+		return 0, 0, 0, ErrNegativeAdjustmentStock
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE inventory SET stock_quantity = $1, updated_at = NOW() WHERE product_id = $2`, newQty, productID)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed updating inventory stock: %w", err)
+	}
+
+	return prevQty, newQty, deltaQty, nil
+}
+
+// RecordInventoryAdjustment inserts an audit log for an inventory adjustment
+func (r *Repository) RecordInventoryAdjustment(ctx context.Context, tx pgx.Tx, adjID string, productID string, adjType string, deltaQty int, prevQty int, newQty int, reason string, notes string, userID string, ledgerEntryID *string) error {
+	query := `
+		INSERT INTO inventory_adjustments (
+			id, product_id, adjustment_type, quantity_delta, previous_quantity, new_quantity, reason, notes, adjusted_by, ledger_entry_id, created_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()
+		)
+	`
+	_, err := tx.Exec(ctx, query, adjID, productID, adjType, deltaQty, prevQty, newQty, reason, notes, userID, ledgerEntryID)
+	if err != nil {
+		return fmt.Errorf("failed recording inventory adjustment audit: %w", err)
+	}
+	return nil
+}
+
+// GetLowStockProducts returns all active products whose stock quantity is at or below their reorder threshold
+func (r *Repository) GetLowStockProducts(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
+	query := `
+		SELECT 
+			p.id, 
+			p.category_id, 
+			COALESCE(c.name, '') as category_name, 
+			p.sku, 
+			p.barcode, 
+			p.name, 
+			p.description, 
+			p.unit_price, 
+			p.cost_price, 
+			COALESCE(i.stock_quantity, 0) as stock_quantity, 
+			COALESCE(p.compliance_tags, '[]'::jsonb) as compliance_tags, 
+			p.is_active, 
+			p.created_at, 
+			p.updated_at
+		FROM products p
+		LEFT JOIN categories c ON p.category_id = c.id
+		JOIN inventory i ON p.id = i.product_id
+		WHERE p.is_active = TRUE AND i.stock_quantity <= i.reorder_threshold
+		ORDER BY (i.stock_quantity - i.reorder_threshold) ASC, p.name ASC
+	`
+	rows, err := conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed querying low stock products: %w", err)
+	}
+	defer rows.Close()
+
+	var products []Product
+	for rows.Next() {
+		var p Product
+		var tagsBytes []byte
+		if err := rows.Scan(
+			&p.ID,
+			&p.CategoryID,
+			&p.CategoryName,
+			&p.SKU,
+			&p.Barcode,
+			&p.Name,
+			&p.Description,
+			&p.UnitPrice,
+			&p.CostPrice,
+			&p.StockQuantity,
+			&tagsBytes,
+			&p.IsActive,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed scanning low stock product: %w", err)
+		}
+
+		if len(tagsBytes) > 0 {
+			_ = json.Unmarshal(tagsBytes, &p.ComplianceTags)
+		}
+		for _, tag := range p.ComplianceTags {
+			if strings.Contains(strings.ToUpper(tag), "HALAL") {
+				p.IsHalalCertified = true
+				break
+			}
+		}
+		products = append(products, p)
+	}
+	if products == nil {
+		products = []Product{}
+	}
+	return products, nil
 }
 

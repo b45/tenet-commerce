@@ -390,6 +390,122 @@ Password for all seeded dev accounts: `Password123!`
 }
 ```
 
+### 3.8 Product CRUD & Detail
+- **Get Product Detail:** `GET /api/v1/pos/products/:id`
+  - **Auth:** Requires permission: `inventory:read`
+  - **Response (200 OK):**
+    ```json
+    {
+      "success": true,
+      "data": {
+        "id": "10000000-0000-0000-0000-000000000011",
+        "category_id": "c0000000-0000-0000-0000-000000000010",
+        "category_name": "Kue Tart & Custom Cake",
+        "sku": "SKU-CAKE-BF20",
+        "barcode": "8992001000010",
+        "name": "Black Forest Cake 20cm",
+        "description": "Kue Black Forest premium dengan dark cherry dan serutan cokelat halal",
+        "unit_price": 185000.00,
+        "cost_price": 120000.00,
+        "stock_quantity": 10,
+        "compliance_tags": ["HALAL_MUI"],
+        "is_halal_certified": true,
+        "is_active": true
+      }
+    }
+    ```
+
+- **Create Product:** `POST /api/v1/pos/products`
+  - **Auth:** Requires permission: `inventory:write`
+  - **Request Body:**
+    ```json
+    {
+      "name": "Chiffon Pandan Special 20cm",
+      "sku": "SKU-CAKE-CF20",
+      "barcode": "8992001000099",
+      "description": "Bolu chiffon lembut pandan wangi dengan santan murni",
+      "category_id": "c0000000-0000-0000-0000-000000000010",
+      "unit_price": 55000.00,
+      "cost_price": 32000.00,
+      "initial_stock": 20,
+      "reorder_threshold": 5,
+      "warehouse_location": "BAKERY_CHILLER_B",
+      "compliance_tags": ["HALAL_MUI"]
+    }
+    ```
+  - **Response (201 Created):** Returns created `Product` object.
+
+- **Update Product:** `PUT /api/v1/pos/products/:id`
+  - **Auth:** Requires permission: `inventory:write`
+  - **Request Body:** Similar to create product (without SKU and initial stock).
+  - **Response (200 OK):** Returns updated `Product` object.
+
+- **Soft Delete Product:** `DELETE /api/v1/pos/products/:id`
+  - **Auth:** Requires permission: `inventory:write`
+  - **Response (200 OK):** `{"success": true, "data": {"message": "Product soft-deleted successfully", "id": "..."}}`
+
+### 3.9 Category Management
+- **List Categories:** `GET /api/v1/pos/categories`
+  - **Auth:** Requires permission: `inventory:read`
+  - **Response (200 OK):**
+    ```json
+    {
+      "success": true,
+      "data": [
+        {
+          "id": "c0000000-0000-0000-0000-000000000010",
+          "name": "Kue Tart & Custom Cake",
+          "code": "CAT-CAKE",
+          "product_count": 3
+        }
+      ],
+      "meta": {"total": 1}
+    }
+    ```
+- **Create Category:** `POST /api/v1/pos/categories`
+  - **Request Body:** `{"name": "Kue Kering Lebaran", "code": "CAT-KERING"}`
+  - **Response (201 Created):** Returns created category.
+- **Update Category:** `PUT /api/v1/pos/categories/:id`
+- **Delete Category:** `DELETE /api/v1/pos/categories/:id`
+
+### 3.10 Inventory Stock Adjustment & Spoilage Write-Off
+- **Endpoint:** `POST /api/v1/pos/inventory/adjust`
+- **Headers:** `Idempotency-Key: <UUIDv4>`
+- **Auth:** Requires permission: `inventory:write`
+- **Request Body:**
+```json
+{
+  "product_id": "10000000-0000-0000-0000-000000000011",
+  "adjustment_type": "SUBTRACT",
+  "quantity": 1,
+  "reason": "DAMAGE",
+  "notes": "Kue terbentur saat penataan etalase, krim rusak"
+}
+```
+- **Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "adjustment_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "product_id": "10000000-0000-0000-0000-000000000011",
+    "product_name": "Black Forest Cake 20cm",
+    "previous_quantity": 10,
+    "new_quantity": 9,
+    "quantity_delta": -1,
+    "reason": "DAMAGE",
+    "ledger_entry_number": "JE-ADJ-20260903003211-9b1deb4d",
+    "adjusted_at": "2026-09-03T00:32:11Z"
+  }
+}
+```
+*(Automatically creates a balanced double-entry journal posting: Debit 5020 Inventory Shrinkage & Loss, Credit 1030 Merchandise Inventory).*
+
+### 3.11 Low Stock Alerts
+- **Endpoint:** `GET /api/v1/pos/inventory/low-stock`
+- **Auth:** Requires permission: `inventory:read`
+- **Response (200 OK):** Returns all products where `stock_quantity <= reorder_threshold` sorted by urgency.
+
 ---
 
 ## 4. Compliance-Aware Supply Chain Management

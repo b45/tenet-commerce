@@ -131,6 +131,14 @@ CREATE TABLE transactions (
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
     payment_method VARCHAR(31) NOT NULL CHECK (payment_method IN ('CASH', 'SIMULATED_CARD', 'QRIS')),
     status VARCHAR(31) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'COMPLETED', 'VOIDED')),
+    customer_name VARCHAR(127),
+    notes TEXT,
+    cash_tendered NUMERIC(15, 2) DEFAULT 0,
+    change_amount NUMERIC(15, 2) DEFAULT 0,
+    payment_reference VARCHAR(127),
+    void_reason VARCHAR(255),
+    voided_at TIMESTAMPTZ,
+    voided_by UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -144,8 +152,32 @@ CREATE TABLE transaction_items (
     subtotal NUMERIC(15, 2) NOT NULL CHECK (subtotal >= 0)
 );
 
+CREATE TABLE store_settings (
+    key VARCHAR(63) PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE inventory_adjustments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    adjustment_type VARCHAR(31) NOT NULL CHECK (adjustment_type IN ('ADD', 'SUBTRACT', 'SET')),
+    quantity_delta INTEGER NOT NULL,
+    previous_quantity INTEGER NOT NULL,
+    new_quantity INTEGER NOT NULL,
+    reason VARCHAR(63) NOT NULL CHECK (reason IN ('DAMAGE', 'EXPIRED', 'AUDIT_CORRECTION', 'RESTOCK', 'OTHER')),
+    notes TEXT,
+    adjusted_by UUID NOT NULL,
+    ledger_entry_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX idx_transactions_created_at ON transactions(created_at DESC);
 CREATE INDEX idx_transactions_idempotency ON transactions(idempotency_key);
+CREATE INDEX idx_transactions_status ON transactions(status);
+CREATE INDEX idx_transactions_payment ON transactions(payment_method);
+CREATE INDEX idx_inventory_adjustments_product ON inventory_adjustments(product_id);
+CREATE INDEX idx_inventory_adjustments_created ON inventory_adjustments(created_at DESC);
 
 -- 4.3 Compliance-Aware Supply Chain Management
 CREATE TABLE suppliers (
@@ -226,7 +258,7 @@ CREATE TABLE ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
     source_document_id UUID,
     memo TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

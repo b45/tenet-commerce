@@ -27,6 +27,10 @@ func setupTestDB(t *testing.T) (*database.PostgresDB, *tenant.Repository) {
 		t.Skipf("Skipping POS test: Database not available: %v", err)
 	}
 	tenantRepo := tenant.NewRepository(db)
+
+	// Ensure test products have sufficient stock for repeatable checkout tests
+	_, _ = db.Pool.Exec(ctx, `UPDATE tenant_al_barakah_mart.inventory SET stock_quantity = 50 WHERE stock_quantity < 10`)
+
 	return db, tenantRepo
 }
 
@@ -472,5 +476,274 @@ func TestPOS_QRISConfig(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, wPut.Code)
 	assert.Contains(t, wPut.Body.String(), "Toko Kue B45 Bakery QRIS")
+}
+
+func TestPOS_BakeryCategories_CRUD(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/categories", posHandler.GetCategories)
+	router.GET("/pos/categories/:id", posHandler.GetCategoryByID)
+	router.POST("/pos/categories", posHandler.CreateCategory)
+	router.PUT("/pos/categories/:id", posHandler.UpdateCategory)
+	router.DELETE("/pos/categories/:id", posHandler.DeleteCategory)
+
+	// 1. List seeded categories (should include CAT-CAKE, CAT-BREAD)
+	wList := httptest.NewRecorder()
+	reqList, _ := http.NewRequest("GET", "/pos/categories", nil)
+	router.ServeHTTP(wList, reqList)
+	assert.Equal(t, http.StatusOK, wList.Code)
+	assert.Contains(t, wList.Body.String(), "CAT-CAKE")
+	assert.Contains(t, wList.Body.String(), "CAT-BREAD")
+
+	// 2. Create new category
+	uniqueCode := fmt.Sprintf("CAT-%d", time.Now().UnixNano()%100000)
+	createReq := pos.CreateCategoryRequest{
+		Name: "Kue Kering & Hampers Lebaran",
+		Code: uniqueCode,
+	}
+	bodyBytes, _ := json.Marshal(createReq)
+	wCreate := httptest.NewRecorder()
+	reqCreate, _ := http.NewRequest("POST", "/pos/categories", bytes.NewBuffer(bodyBytes))
+	reqCreate.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wCreate, reqCreate)
+	assert.Equal(t, http.StatusCreated, wCreate.Code)
+
+	var createdCat struct {
+		Data pos.Category `json:"data"`
+	}
+	err := json.Unmarshal(wCreate.Body.Bytes(), &createdCat)
+	require.NoError(t, err)
+	assert.NotEmpty(t, createdCat.Data.ID)
+	assert.Equal(t, "Kue Kering & Hampers Lebaran", createdCat.Data.Name)
+
+	catID := createdCat.Data.ID
+
+	// 3. Get Category by ID
+	wGet := httptest.NewRecorder()
+	reqGet, _ := http.NewRequest("GET", "/pos/categories/"+catID, nil)
+	router.ServeHTTP(wGet, reqGet)
+	assert.Equal(t, http.StatusOK, wGet.Code)
+	assert.Contains(t, wGet.Body.String(), uniqueCode)
+
+	// 4. Update Category
+	updateReq := pos.UpdateCategoryRequest{
+		Name: "Kue Kering Premium & Hampers",
+		Code: uniqueCode,
+	}
+	updateBytes, _ := json.Marshal(updateReq)
+	wUpdate := httptest.NewRecorder()
+	reqUpdate, _ := http.NewRequest("PUT", "/pos/categories/"+catID, bytes.NewBuffer(updateBytes))
+	reqUpdate.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wUpdate, reqUpdate)
+	assert.Equal(t, http.StatusOK, wUpdate.Code)
+	var updatedCat struct {
+		Data pos.Category `json:"data"`
+	}
+	_ = json.Unmarshal(wUpdate.Body.Bytes(), &updatedCat)
+	assert.Equal(t, "Kue Kering Premium & Hampers", updatedCat.Data.Name)
+
+	// 5. Delete Category
+	wDelete := httptest.NewRecorder()
+	reqDelete, _ := http.NewRequest("DELETE", "/pos/categories/"+catID, nil)
+	router.ServeHTTP(wDelete, reqDelete)
+	assert.Equal(t, http.StatusOK, wDelete.Code)
+}
+
+func TestPOS_BakeryProduct_CRUD(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/products/:id", posHandler.GetProductByID)
+	router.POST("/pos/products", posHandler.CreateProduct)
+	router.PUT("/pos/products/:id", posHandler.UpdateProduct)
+	router.DELETE("/pos/products/:id", posHandler.DeleteProduct)
+
+	// 1. Create Product
+	uniqueSKU := fmt.Sprintf("SKU-BAKE-%d", time.Now().UnixNano()%1000000)
+	catID := "c0000000-0000-0000-0000-000000000010" // Kue Tart & Custom Cake
+	desc := "Bolu chiffon lembut pandan wangi dengan santan kelapa murni"
+	barcode := fmt.Sprintf("899%d", time.Now().UnixNano()%1000000000)
+	createReq := pos.CreateProductRequest{
+		Name:              "Chiffon Pandan Special 20cm",
+		SKU:               uniqueSKU,
+		Barcode:           &barcode,
+		Description:       &desc,
+		CategoryID:        &catID,
+		UnitPrice:         55000,
+		CostPrice:         32000,
+		InitialStock:      20,
+		ReorderThreshold:  5,
+		WarehouseLocation: "BAKERY_CHILLER_B",
+		ComplianceTags:    []string{"HALAL_MUI"},
+	}
+	bodyBytes, _ := json.Marshal(createReq)
+	wCreate := httptest.NewRecorder()
+	reqCreate, _ := http.NewRequest("POST", "/pos/products", bytes.NewBuffer(bodyBytes))
+	reqCreate.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wCreate, reqCreate)
+	assert.Equal(t, http.StatusCreated, wCreate.Code)
+
+	var createdProd struct {
+		Data pos.Product `json:"data"`
+	}
+	err := json.Unmarshal(wCreate.Body.Bytes(), &createdProd)
+	require.NoError(t, err)
+	prodID := createdProd.Data.ID
+	assert.NotEmpty(t, prodID)
+	assert.Equal(t, 20, createdProd.Data.StockQuantity)
+	assert.True(t, createdProd.Data.IsHalalCertified)
+
+	// 2. Get Product by ID
+	wGet := httptest.NewRecorder()
+	reqGet, _ := http.NewRequest("GET", "/pos/products/"+prodID, nil)
+	router.ServeHTTP(wGet, reqGet)
+	assert.Equal(t, http.StatusOK, wGet.Code)
+	assert.Contains(t, wGet.Body.String(), uniqueSKU)
+	assert.Contains(t, wGet.Body.String(), "Chiffon Pandan Special 20cm")
+
+	// 3. Update Product
+	updateDesc := "Bolu chiffon ekstra pandan suji harum"
+	updateReq := pos.UpdateProductRequest{
+		Name:             "Chiffon Pandan Special 20cm (Premium)",
+		Barcode:          &barcode,
+		Description:      &updateDesc,
+		CategoryID:       &catID,
+		UnitPrice:        60000,
+		CostPrice:        35000,
+		ReorderThreshold: 6,
+		ComplianceTags:   []string{"HALAL_MUI"},
+	}
+	updateBytes, _ := json.Marshal(updateReq)
+	wUpdate := httptest.NewRecorder()
+	reqUpdate, _ := http.NewRequest("PUT", "/pos/products/"+prodID, bytes.NewBuffer(updateBytes))
+	reqUpdate.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wUpdate, reqUpdate)
+	assert.Equal(t, http.StatusOK, wUpdate.Code)
+	assert.Contains(t, wUpdate.Body.String(), "Chiffon Pandan Special 20cm (Premium)")
+
+	// 4. Soft Delete Product
+	wDelete := httptest.NewRecorder()
+	reqDelete, _ := http.NewRequest("DELETE", "/pos/products/"+prodID, nil)
+	router.ServeHTTP(wDelete, reqDelete)
+	assert.Equal(t, http.StatusOK, wDelete.Code)
+	assert.Contains(t, wDelete.Body.String(), "soft-deleted successfully")
+}
+
+func TestPOS_InventoryStockAdjustment_ShrinkageWriteOff(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.POST("/pos/inventory/adjust", posHandler.AdjustStock)
+	router.GET("/pos/products/:id", posHandler.GetProductByID)
+
+	// Black Forest Cake seeded product: 10000000-0000-0000-0000-000000000011
+	productID := "10000000-0000-0000-0000-000000000011"
+
+	// Fetch current stock
+	wBefore := httptest.NewRecorder()
+	reqBefore, _ := http.NewRequest("GET", "/pos/products/"+productID, nil)
+	router.ServeHTTP(wBefore, reqBefore)
+	require.Equal(t, http.StatusOK, wBefore.Code)
+	var prodBefore struct {
+		Data pos.Product `json:"data"`
+	}
+	_ = json.Unmarshal(wBefore.Body.Bytes(), &prodBefore)
+	initialStock := prodBefore.Data.StockQuantity
+
+	// Write off 1 cake due to DAMAGE (frosting collapsed in transit)
+	adjustReq := pos.StockAdjustmentRequest{
+		ProductID:      productID,
+		AdjustmentType: "SUBTRACT",
+		Quantity:       1,
+		Reason:         "DAMAGE",
+		Notes:          "Kue terbentur saat penataan etalase, krim rusak",
+	}
+	bodyBytes, _ := json.Marshal(adjustReq)
+	wAdjust := httptest.NewRecorder()
+	reqAdjust, _ := http.NewRequest("POST", "/pos/inventory/adjust", bytes.NewBuffer(bodyBytes))
+	reqAdjust.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wAdjust, reqAdjust)
+
+	assert.Equal(t, http.StatusOK, wAdjust.Code)
+	assert.Contains(t, wAdjust.Body.String(), "DAMAGE")
+	assert.Contains(t, wAdjust.Body.String(), "JE-ADJ-")
+
+	var adjResp struct {
+		Data pos.StockAdjustmentResponse `json:"data"`
+	}
+	err := json.Unmarshal(wAdjust.Body.Bytes(), &adjResp)
+	require.NoError(t, err)
+	assert.Equal(t, initialStock-1, adjResp.Data.NewQuantity)
+	assert.Equal(t, -1, adjResp.Data.QuantityDelta)
+	assert.NotNil(t, adjResp.Data.LedgerEntryNumber)
+	assert.Contains(t, *adjResp.Data.LedgerEntryNumber, "JE-ADJ-")
+}
+
+func TestPOS_InventoryLowStockAlert(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/inventory/low-stock", posHandler.GetLowStock)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/pos/inventory/low-stock", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"data"`)
+	assert.Contains(t, w.Body.String(), `"meta"`)
 }
 
