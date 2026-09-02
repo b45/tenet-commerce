@@ -69,6 +69,9 @@ func main() {
 	}
 
 	router := gin.New()
+	
+	// Disable trusting all proxies by default to resolve security warning
+	_ = router.SetTrustedProxies(nil)
 
 	// Mount Global Observability Middlewares
 	router.Use(logger.RealIPMiddleware())    // 1. Resolve real client IP behind proxies
@@ -122,13 +125,6 @@ func main() {
 			supplychainGroup := protected.Group("")
 			supplychainGroup.Use(internalAuth.RequirePermission("supply_chain:manage"))
 			supplychainHandler.RegisterRoutes(supplychainGroup)
-
-			// --- Placeholders for future phases ---
-			// TODO(Phase 2): Move to internal/manager package handler
-			protected.GET("/manager/dashboard",
-				internalAuth.RequireRole("MANAGER", "SUPER_ADMIN"),
-				placeholderManagerDashboardHandler,
-			)
 
 			// --- Ledger Domain Module (Phase 2) ---
 			ledgerGroup := protected.Group("/ledger")

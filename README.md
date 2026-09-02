@@ -28,8 +28,8 @@
 
 Traditional enterprise POS systems treat supply chain compliance and financial ledgering as disconnected afterthoughts. Tenet Commerce natively bridges this gap through four tightly integrated core domains:
 
-1. **High-Velocity Offline-First POS:** Sub-300ms checkout latency with client-side IndexedDB caching and background Service Worker synchronization.
-2. **Deterministic Transaction Engine:** Redis-backed idempotency key verification (eliminating double charges) coupled with dual-layer distributed inventory locking.
+1. **High-Velocity Offline-First POS:** Design goal of sub-300ms checkout latency (not yet benchmarked) with client-side IndexedDB caching and background Service Worker synchronization.
+2. **Deterministic Transaction Engine:** Redis-backed idempotency key verification (preventing double charges) coupled with dual-layer distributed inventory locking.
 3. **Halal Supply Chain Governance:** Automated hard-validation on Halal Certificate validity across Suppliers, Purchase Orders, Goods Receipts, and Stock Transfers.
 4. **Sharia Financial Ledger & Applied AI:** Real-time double-entry journal, dynamic Zakat Tijarah (Trade Zakat) calculation, and an asynchronous AI Reasoning Engine executing weekly continuous audits for financial anomalies.
 
