@@ -52,11 +52,15 @@ func GetPermissionsForRole(role string) []string {
 	case "CASHIER":
 		return []string{
 			"pos:checkout",
+			"pos:read",
+			"pos:void",
 			"inventory:read",
 		}
 	case "MANAGER":
 		return []string{
 			"pos:checkout",
+			"pos:read",
+			"pos:void",
 			"inventory:read",
 			"inventory:write",
 			"supply_chain:manage",
@@ -80,6 +84,8 @@ func GetPermissionsForRole(role string) []string {
 	case "SUPER_ADMIN":
 		return []string{
 			"pos:checkout",
+			"pos:read",
+			"pos:void",
 			"inventory:read",
 			"inventory:write",
 			"supply_chain:manage",

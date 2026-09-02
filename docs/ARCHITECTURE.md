@@ -181,6 +181,22 @@ To guarantee zero overselling under heavy concurrent checkouts (e.g., flash sale
    FOR UPDATE;
    ```
 
+### 3.3 Atomic Transaction Void & Reversal Architecture
+
+When a transaction is voided or refunded (e.g., customer cancel, incorrect cake size/flavor, defective pastry):
+1. **Row-Level Lock:** `SELECT status FROM transactions WHERE id = $1 FOR UPDATE`.
+2. **State Validation & Mutex:** Verifies the transaction is currently `COMPLETED` (prevents double-voids). Updates status to `VOIDED` along with `void_reason`, `voided_by`, and timestamp.
+3. **Stock Re-crediting:** Atomically increments `inventory.stock_quantity` for each item in `transaction_items`.
+4. **Sharia Ledger Reversal:** Posts an automated `JE-VOID-...` journal entry reversing revenue (`4010`), liquid asset accounts (`1010 Cash` or `1020 Bank`), COGS (`5010`), and merchandise inventory asset (`1030`).
+5. **Idempotency Defense:** Guards the `POST /api/v1/pos/orders/:id/void` route with Redis 24h key locking.
+
+### 3.4 Retail QRIS & Dynamic Tenant Invoicing
+
+Tenet Commerce supports Indonesian Standard QR Code (**QRIS**) payment flows:
+- Tenant-specific merchant identities, NMID, and EMVCo-compliant QR strings are managed dynamically in `store_settings` (`qris` key).
+- Cashiers can fetch live QR codes on the POS terminal for customer mobile banking/e-wallet scans (BCA, Mandiri, GoPay, OVO, Dana, LinkAja).
+- Eliminates manual EDV configuration changes during seasonal shifts or kiosk pop-up operations.
+
 ---
 
 ## 4. Offline-First Synchronization Architecture
@@ -245,6 +261,8 @@ The Next.js 14 POS client is built with an offline-first foundation to operate w
 | Permission String | Cashier | Store Manager | Compliance Officer | Financial Admin | Super Admin |
 |---|:---:|:---:|:---:|:---:|:---:|
 | `pos:checkout` | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `pos:read` | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `pos:void` | ✅ | ✅ | ❌ | ❌ | ✅ |
 | `inventory:read` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `inventory:write` | ❌ | ✅ | ❌ | ❌ | ✅ |
 | `supply_chain:manage` | ❌ | ✅ | ✅ | ❌ | ✅ |

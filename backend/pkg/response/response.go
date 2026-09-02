@@ -26,6 +26,7 @@ type Meta struct {
 	Total  int `json:"total,omitempty"`
 	Page   int `json:"page,omitempty"`
 	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
 }
 
 // OK sends a 200 OK response with data
@@ -84,6 +85,14 @@ func Forbidden(c *gin.Context, code, message string) {
 // NotFound sends a 404 Not Found response
 func NotFound(c *gin.Context, code, message string) {
 	c.JSON(http.StatusNotFound, APIResponse{
+		Success: false,
+		Error:   &APIError{Code: code, Message: message},
+	})
+}
+
+// MethodNotAllowed sends a 405 Method Not Allowed response
+func MethodNotAllowed(c *gin.Context, code, message string) {
+	c.JSON(http.StatusMethodNotAllowed, APIResponse{
 		Success: false,
 		Error:   &APIError{Code: code, Message: message},
 	})

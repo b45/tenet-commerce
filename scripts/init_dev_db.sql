@@ -49,9 +49,11 @@ VALUES
     ('22222222-2222-2222-2222-222222222222', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'manager1@albarakah.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Siti Rahma (Store Manager)', 'MANAGER', TRUE),
     ('33333333-3333-3333-3333-333333333333', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'compliance1@albarakah.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Ust. Zulkifli (Halal Officer)', 'COMPLIANCE_OFFICER', TRUE),
     ('44444444-4444-4444-4444-444444444444', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'finance1@albarakah.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'H. Mansur (Financial Admin)', 'FINANCIAL_ADMIN', TRUE),
+    ('55555555-5555-5555-5555-555555555551', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'superadmin@albarakah.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Super Administrator (Al-Barakah)', 'SUPER_ADMIN', TRUE),
     ('55555555-5555-5555-5555-555555555555', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'superadmin@tenet.internal', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Super Administrator', 'SUPER_ADMIN', TRUE),
     -- Seed Sample User for Tenant B (darussalam-store)
-    ('66666666-6666-6666-6666-666666666666', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'manager1@darussalam.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Budi Santoso (Store Manager)', 'MANAGER', TRUE)
+    ('66666666-6666-6666-6666-666666666666', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'manager1@darussalam.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Budi Santoso (Store Manager)', 'MANAGER', TRUE),
+    ('77777777-7777-7777-7777-777777777777', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'superadmin@darussalam.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Super Administrator (Darussalam)', 'SUPER_ADMIN', TRUE)
 ON CONFLICT (email) DO NOTHING;
 
 -- 4. Clean & Re-create Isolated Tenant Schemas for Dev
@@ -129,11 +131,50 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.transactions (
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
     payment_method VARCHAR(31) NOT NULL CHECK (payment_method IN ('CASH', 'SIMULATED_CARD', 'QRIS')),
     status VARCHAR(31) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'COMPLETED', 'VOIDED')),
+    customer_name VARCHAR(127),
+    notes TEXT,
+    cash_tendered NUMERIC(15, 2) DEFAULT 0,
+    change_amount NUMERIC(15, 2) DEFAULT 0,
+    payment_reference VARCHAR(127),
+    void_reason VARCHAR(255),
+    voided_at TIMESTAMPTZ,
+    voided_by UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_abm_transactions_created ON tenant_al_barakah_mart.transactions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_abm_transactions_idempotency ON tenant_al_barakah_mart.transactions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_abm_transactions_status ON tenant_al_barakah_mart.transactions(status);
+CREATE INDEX IF NOT EXISTS idx_abm_transactions_payment ON tenant_al_barakah_mart.transactions(payment_method);
+
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.store_settings (
+    key VARCHAR(63) PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO tenant_al_barakah_mart.store_settings (key, value)
+VALUES (
+    'qris',
+    '{"merchant_name": "Al Barakah Bakery & Mart", "nmid": "ID1020030040050", "qr_string": "00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924AL BARAKAH BAKERY & MART6010JAKARTA SE61051234062070703A0163041D2B", "qr_image_url": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924"}'::jsonb
+) ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.inventory_adjustments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE CASCADE,
+    adjustment_type VARCHAR(31) NOT NULL CHECK (adjustment_type IN ('ADD', 'SUBTRACT', 'SET')),
+    quantity_delta INTEGER NOT NULL,
+    previous_quantity INTEGER NOT NULL,
+    new_quantity INTEGER NOT NULL,
+    reason VARCHAR(63) NOT NULL CHECK (reason IN ('DAMAGE', 'EXPIRED', 'AUDIT_CORRECTION', 'RESTOCK', 'OTHER')),
+    notes TEXT,
+    adjusted_by UUID NOT NULL,
+    ledger_entry_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_abm_inv_adj_product ON tenant_al_barakah_mart.inventory_adjustments(product_id);
+CREATE INDEX IF NOT EXISTS idx_abm_inv_adj_created ON tenant_al_barakah_mart.inventory_adjustments(created_at DESC);
 
 -- 5.5 Transaction Items Table
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.transaction_items (
@@ -228,7 +269,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
     source_document_id UUID,
     memo TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -295,7 +336,11 @@ INSERT INTO tenant_al_barakah_mart.categories (id, name, code)
 VALUES
     ('c0000000-0000-0000-0000-000000000001', 'Fresh Meat & Poultry', 'CAT-FRESH-MEAT'),
     ('c0000000-0000-0000-0000-000000000002', 'Beverages & Syrups', 'CAT-BEVERAGES'),
-    ('c0000000-0000-0000-0000-000000000003', 'Pantry & Groceries', 'CAT-PANTRY')
+    ('c0000000-0000-0000-0000-000000000003', 'Pantry & Groceries', 'CAT-PANTRY'),
+    ('c0000000-0000-0000-0000-000000000010', 'Kue Tart & Custom Cake', 'CAT-CAKE'),
+    ('c0000000-0000-0000-0000-000000000020', 'Roti & Bolu', 'CAT-BREAD'),
+    ('c0000000-0000-0000-0000-000000000030', 'Pastry & Croissant', 'CAT-PASTRY'),
+    ('c0000000-0000-0000-0000-000000000040', 'Jajanan Pasar Halal', 'CAT-SNACK')
 ON CONFLICT (code) DO NOTHING;
 
 -- 5.7 Seed Products for tenant_al_barakah_mart
@@ -305,7 +350,13 @@ VALUES
     ('10000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001', 'SKU-CHICKEN-01', '8991001000028', 'Ayam Potong Segar 1kg', 'Ayam potong higienis dan halal', 38000.00, 30000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000002', 'SKU-HONEY-01', '8991001000035', 'Madu Murni Al-Barakah 350ml', 'Madu hutan murni tanpa bahan pengawet', 65000.00, 48000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000004', 'c0000000-0000-0000-0000-000000000003', 'SKU-OIL-01', '8991001000042', 'Minyak Goreng Kelapa Sawit 2L', 'Minyak goreng jernih berkualitas tinggi', 34000.00, 29000.00, '["HALAL_MUI"]', TRUE),
-    ('10000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000003', 'SKU-RICE-01', '8991001000059', 'Beras Ramos Organik 5kg', 'Beras putih pulen organik', 72000.00, 62000.00, '["ORGANIC"]', TRUE)
+    ('10000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000003', 'SKU-RICE-01', '8991001000059', 'Beras Ramos Organik 5kg', 'Beras putih pulen organik', 72000.00, 62000.00, '["ORGANIC"]', TRUE),
+    ('10000000-0000-0000-0000-000000000011', 'c0000000-0000-0000-0000-000000000010', 'SKU-CAKE-BF20', '8992001000010', 'Black Forest Cake 20cm', 'Kue Black Forest premium dengan dark cherry dan serutan cokelat halal', 185000.00, 120000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000012', 'c0000000-0000-0000-0000-000000000010', 'SKU-CAKE-RV18', '8992001000020', 'Red Velvet Cake 18cm', 'Kue Red Velvet lembut dengan cream cheese frosting gurih manis', 160000.00, 105000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-BG01', '8992001000030', 'Bolu Gulung Pandan Keju', 'Bolu gulung aroma pandan asli suji dengan taburan parutan keju melimpah', 45000.00, 28000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-RS01', '8992001000040', 'Roti Sisir Butter Premium', 'Roti sisir mentega jadul lembut, manis gurih nagih', 18000.00, 11000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000030', 'SKU-PASTRY-CA01', '8992001000050', 'Croissant Almond Halal', 'Croissant renyah berlapis dengan isian almond paste dan topping almond panggang', 25000.00, 15000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000040', 'SKU-SNACK-LL01', '8992001000060', 'Lapis Legit Prunes Slice', 'Lapis legit rempah klasik dengan potongan buah prunes pilihan', 28000.00, 18000.00, '["HALAL_MUI"]', TRUE)
 ON CONFLICT (sku) DO UPDATE SET 
     name = EXCLUDED.name,
     unit_price = EXCLUDED.unit_price,
@@ -388,11 +439,50 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.transactions (
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
     payment_method VARCHAR(31) NOT NULL CHECK (payment_method IN ('CASH', 'SIMULATED_CARD', 'QRIS')),
     status VARCHAR(31) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'COMPLETED', 'VOIDED')),
+    customer_name VARCHAR(127),
+    notes TEXT,
+    cash_tendered NUMERIC(15, 2) DEFAULT 0,
+    change_amount NUMERIC(15, 2) DEFAULT 0,
+    payment_reference VARCHAR(127),
+    void_reason VARCHAR(255),
+    voided_at TIMESTAMPTZ,
+    voided_by UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_ds_transactions_created ON tenant_darussalam_store.transactions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ds_transactions_idempotency ON tenant_darussalam_store.transactions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ds_transactions_status ON tenant_darussalam_store.transactions(status);
+CREATE INDEX IF NOT EXISTS idx_ds_transactions_payment ON tenant_darussalam_store.transactions(payment_method);
+
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.store_settings (
+    key VARCHAR(63) PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO tenant_darussalam_store.store_settings (key, value)
+VALUES (
+    'qris',
+    '{"merchant_name": "Darussalam Bakery & Store", "nmid": "ID1020030040050", "qr_string": "00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924DARUSSALAM BAKERY & STORE6010JAKARTA SE61051234062070703A0163041D2B", "qr_image_url": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924"}'::jsonb
+) ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.inventory_adjustments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE CASCADE,
+    adjustment_type VARCHAR(31) NOT NULL CHECK (adjustment_type IN ('ADD', 'SUBTRACT', 'SET')),
+    quantity_delta INTEGER NOT NULL,
+    previous_quantity INTEGER NOT NULL,
+    new_quantity INTEGER NOT NULL,
+    reason VARCHAR(63) NOT NULL CHECK (reason IN ('DAMAGE', 'EXPIRED', 'AUDIT_CORRECTION', 'RESTOCK', 'OTHER')),
+    notes TEXT,
+    adjusted_by UUID NOT NULL,
+    ledger_entry_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ds_inv_adj_product ON tenant_darussalam_store.inventory_adjustments(product_id);
+CREATE INDEX IF NOT EXISTS idx_ds_inv_adj_created ON tenant_darussalam_store.inventory_adjustments(created_at DESC);
 
 -- 6.5 Transaction Items Table
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.transaction_items (
@@ -504,7 +594,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
     source_document_id UUID,
     memo TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -68,6 +68,32 @@ To maintain Halal integrity throughout procurement, the business logic layer enf
 [ Update Inventory & Post Journal ]
 ```
 
+### 2.3 Double-Entry Ledger Governance for POS Operations & Inventory
+
+In accordance with AAOIFI Financial Accounting Standards (FAS), every inventory movement and financial adjustment must maintain strict double-entry balance ($\sum \text{Debits} = \sum \text{Credits}$). Unbalanced postings are strictly rejected at both the service validation layer and database constraints.
+
+#### 1. POS Sale Initial Entry
+When a retail/bakery checkout occurs:
+- **Debit:** `1010 Cash on Hand` (for CASH) or `1020 Bank Operating Account` (for QRIS / Card)
+- **Credit:** `4010 Sales Revenue`
+- **Debit:** `5010 Cost of Goods Sold` (COGS)
+- **Credit:** `1030 Merchandise Inventory`
+
+#### 2. POS Void & Refund Reversal Entry (`SourceDocPOSVoid`)
+When a completed sale is canceled or refunded (e.g. wrong cake order, customer return):
+- **Debit:** `4010 Sales Revenue` (Reversal of earned revenue)
+- **Credit:** `1010 Cash on Hand` / `1020 Bank Operating Account` (Asset outflow / cash refund)
+- **Debit:** `1030 Merchandise Inventory` (Restocking asset value)
+- **Credit:** `5010 Cost of Goods Sold` (Reversal of recorded expense)
+
+#### 3. Bakery Spoilage & Physical Shrinkage (`SourceDocManualAdjustment`)
+Perishable goods (cakes past expiration, damaged pastries, transit damage) are written off to preserve accurate balance sheet valuation:
+- **Debit:** `5020 Inventory Shrinkage & Loss` (Expense)
+- **Credit:** `1030 Merchandise Inventory` (Asset reduction at Cost Price)
+- In the event of physical count surplus (stock opname excess):
+  - **Debit:** `1030 Merchandise Inventory`
+  - **Credit:** `5020 Inventory Shrinkage & Loss`
+
 ---
 
 ## 3. Zakat Tijarah (Trade Zakat) Calculation Methodology

@@ -100,13 +100,24 @@ func (s *Service) Checkout(
 		})
 	}
 
-	// 5. Calculate final amounts (Option B: Tax is 0 for MVP)
+	// 5. Calculate final amounts
 	taxAmount := 0.00
 	discountAmount := req.DiscountAmount
 	if discountAmount > subtotal {
 		discountAmount = subtotal
 	}
 	totalAmount := math.Round((subtotal-discountAmount+taxAmount)*100) / 100
+
+	// 5.1 Handle Cash change calculation
+	var cashTendered float64
+	var changeAmount float64
+	if req.PaymentMethod == "CASH" && req.CashTendered != nil && *req.CashTendered > 0 {
+		cashTendered = *req.CashTendered
+		if cashTendered < totalAmount {
+			return nil, fmt.Errorf("%w: paid %.2f, required %.2f", ErrInsufficientCashTendered, cashTendered, totalAmount)
+		}
+		changeAmount = math.Round((cashTendered-totalAmount)*100) / 100
+	}
 
 	// 6. APM SPAN: Atomically decrement stock for each locked item
 	tDec := time.Now()
@@ -131,6 +142,11 @@ func (s *Service) Checkout(
 		TotalAmount:       totalAmount,
 		PaymentMethod:     req.PaymentMethod,
 		Status:            "COMPLETED",
+		CustomerName:      req.CustomerName,
+		Notes:             req.Notes,
+		CashTendered:      cashTendered,
+		ChangeAmount:      changeAmount,
+		PaymentReference:  req.PaymentReference,
 	}
 
 	tTxn := time.Now()
@@ -191,6 +207,11 @@ func (s *Service) Checkout(
 		CashierID:         masterTxn.CashierID,
 		PaymentMethod:     masterTxn.PaymentMethod,
 		Status:            masterTxn.Status,
+		CustomerName:      masterTxn.CustomerName,
+		Notes:             masterTxn.Notes,
+		CashTendered:      masterTxn.CashTendered,
+		ChangeAmount:      masterTxn.ChangeAmount,
+		PaymentReference:  masterTxn.PaymentReference,
 		Items:             lineItems,
 		SubtotalAmount:    masterTxn.SubtotalAmount,
 		TaxAmount:         masterTxn.TaxAmount,
@@ -199,3 +220,233 @@ func (s *Service) Checkout(
 		CreatedAt:         masterTxn.CreatedAt,
 	}, nil
 }
+
+// VoidTransaction executes an atomic void/refund of a completed transaction.
+// It acquires a row-level lock, restores stock quantities to inventory,
+// and posts a balanced reversal journal to the Sharia ledger.
+func (s *Service) VoidTransaction(
+	ctx context.Context,
+	conn *pgxpool.Conn,
+	cashierID string,
+	txnID string,
+	req VoidRequest,
+) (*VoidResponse, error) {
+	reqLogger := logger.FromContext(ctx)
+	tStart := time.Now()
+
+	// 1. Begin PostgreSQL Transaction
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin database transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// 2. Lock the transaction row
+	txn, err := s.repo.GetTransactionForUpdate(ctx, tx, txnID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Domain invariant validations
+	if txn.Status == "VOIDED" {
+		return nil, ErrAlreadyVoided
+	}
+	if txn.Status != "COMPLETED" {
+		return nil, fmt.Errorf("transaction with status '%s' cannot be voided", txn.Status)
+	}
+
+	// 4. Retrieve transaction line items
+	items, err := s.repo.GetTransactionItems(ctx, tx, txn.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed retrieving transaction line items: %w", err)
+	}
+
+	// 5. Restock inventory and compute total COGS
+	var totalCOGS float64
+	for _, item := range items {
+		if err := s.repo.IncrementStock(ctx, tx, item.ProductID, item.Quantity); err != nil {
+			reqLogger.Error("Failed restocking inventory during void", "product_id", item.ProductID, "error", err)
+			return nil, fmt.Errorf("failed restocking product %s: %w", item.SKU, err)
+		}
+		totalCOGS += math.Round(item.CostPrice*float64(item.Quantity)*100) / 100
+	}
+
+	// 6. Mark transaction VOIDED
+	if err := s.repo.MarkTransactionVoided(ctx, tx, txn.ID, cashierID, req.Reason); err != nil {
+		reqLogger.Error("Failed marking transaction as voided", "error", err)
+		return nil, fmt.Errorf("failed updating transaction status: %w", err)
+	}
+
+	// 7. Post Sharia Ledger Reversal Journal Entry
+	txnUUID, _ := uuid.Parse(txn.ID)
+	if err := s.ledgerService.PostPOSVoidReversalJournal(ctx, tx, txnUUID, txn.TransactionNumber, txn.TotalAmount, totalCOGS, txn.PaymentMethod, req.Reason); err != nil {
+		reqLogger.Error("Failed posting POS void reversal journal", "error", err)
+		return nil, fmt.Errorf("failed posting ledger reversal: %w", err)
+	}
+
+	// 8. Commit atomically
+	if err := tx.Commit(ctx); err != nil {
+		reqLogger.Error("Failed committing POS void transaction", "error", err)
+		return nil, fmt.Errorf("commit void failed: %w", err)
+	}
+
+	reqLogger.Info("POS Transaction Voided Successfully",
+		slog.String("transaction_number", txn.TransactionNumber),
+		slog.Float64("total_refunded", txn.TotalAmount),
+		slog.Int("items_restocked", len(items)),
+		slog.String("void_reason", req.Reason),
+		slog.Float64("duration_ms", float64(time.Since(tStart).Microseconds())/1000.0),
+	)
+
+	return &VoidResponse{
+		TransactionID:     txn.ID,
+		TransactionNumber: txn.TransactionNumber,
+		Status:            "VOIDED",
+		VoidReason:        req.Reason,
+		VoidedAt:          time.Now(),
+		VoidedBy:          cashierID,
+		ItemsRestocked:    len(items),
+		TotalRefunded:     txn.TotalAmount,
+	}, nil
+}
+
+// GetOrders queries the order history with filtering and pagination
+func (s *Service) GetOrders(ctx context.Context, conn *pgxpool.Conn, filter OrderFilter) ([]OrderSummary, int, error) {
+	return s.repo.GetOrders(ctx, conn, filter)
+}
+
+// GetOrderDetail retrieves a single transaction with all line items
+func (s *Service) GetOrderDetail(ctx context.Context, conn *pgxpool.Conn, id string) (*OrderDetailResponse, error) {
+	return s.repo.GetOrderByID(ctx, conn, id)
+}
+
+// GetDailySummary aggregates end-of-day/shift cashier metrics
+func (s *Service) GetDailySummary(ctx context.Context, conn *pgxpool.Conn, date string, cashierID *string) (*DailySummaryResponse, error) {
+	return s.repo.GetDailySummary(ctx, conn, date, cashierID)
+}
+
+// GetQRISConfig returns the active tenant's QRIS payload
+func (s *Service) GetQRISConfig(ctx context.Context, conn *pgxpool.Conn) (*QRISConfig, error) {
+	return s.repo.GetQRISConfig(ctx, conn)
+}
+
+// UpdateQRISConfig updates the active tenant's QRIS payload
+func (s *Service) UpdateQRISConfig(ctx context.Context, conn *pgxpool.Conn, cfg QRISConfig) error {
+	return s.repo.UpdateQRISConfig(ctx, conn, cfg)
+}
+
+// GetCategories returns all categories
+func (s *Service) GetCategories(ctx context.Context, conn *pgxpool.Conn) ([]Category, error) {
+	return s.repo.GetCategories(ctx, conn)
+}
+
+// GetCategoryByID returns a category by ID
+func (s *Service) GetCategoryByID(ctx context.Context, conn *pgxpool.Conn, id string) (*Category, error) {
+	return s.repo.GetCategoryByID(ctx, conn, id)
+}
+
+// CreateCategory creates a new category
+func (s *Service) CreateCategory(ctx context.Context, conn *pgxpool.Conn, req CreateCategoryRequest) (*Category, error) {
+	return s.repo.CreateCategory(ctx, conn, req)
+}
+
+// UpdateCategory updates an existing category
+func (s *Service) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateCategoryRequest) (*Category, error) {
+	return s.repo.UpdateCategory(ctx, conn, id, req)
+}
+
+// DeleteCategory deletes a category
+func (s *Service) DeleteCategory(ctx context.Context, conn *pgxpool.Conn, id string) error {
+	return s.repo.DeleteCategory(ctx, conn, id)
+}
+
+// GetProduct retrieves a product by its UUID
+func (s *Service) GetProduct(ctx context.Context, conn *pgxpool.Conn, id string) (*Product, error) {
+	return s.repo.GetProductByID(ctx, conn, id)
+}
+
+// CreateProduct adds a new product to the catalog with initial inventory
+func (s *Service) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req CreateProductRequest) (*Product, error) {
+	return s.repo.CreateProduct(ctx, conn, req)
+}
+
+// UpdateProduct updates product metadata
+func (s *Service) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateProductRequest) (*Product, error) {
+	return s.repo.UpdateProduct(ctx, conn, id, req)
+}
+
+// DeleteProduct soft-deletes a product
+func (s *Service) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id string) error {
+	return s.repo.DeleteProduct(ctx, conn, id)
+}
+
+// AdjustStock executes an atomic inventory adjustment and posts a balanced Sharia ledger shrinkage journal if applicable
+func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID string, req StockAdjustmentRequest) (*StockAdjustmentResponse, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed starting adjustment transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	product, err := s.repo.GetProductByID(ctx, conn, req.ProductID)
+	if err != nil {
+		return nil, err
+	}
+
+	prevQty, newQty, deltaQty, err := s.repo.AdjustInventoryStock(ctx, tx, req.ProductID, req.AdjustmentType, req.Quantity)
+	if err != nil {
+		return nil, err
+	}
+
+	adjID := uuid.New()
+	var ledgerEntryNum *string
+	var ledgerEntryIDStr *string
+
+	if deltaQty != 0 && product.CostPrice > 0 {
+		entry, err := s.ledgerService.PostInventoryAdjustmentJournal(ctx, tx, adjID, product.Name, deltaQty, product.CostPrice, req.Reason, req.Notes)
+		if err != nil {
+			return nil, fmt.Errorf("failed posting inventory adjustment journal: %w", err)
+		}
+		if entry != nil {
+			ledgerEntryNum = &entry.EntryNumber
+			idStr := entry.ID.String()
+			ledgerEntryIDStr = &idStr
+		}
+	}
+
+	if err := s.repo.RecordInventoryAdjustment(ctx, tx, adjID.String(), req.ProductID, req.AdjustmentType, deltaQty, prevQty, newQty, req.Reason, req.Notes, userID, ledgerEntryIDStr); err != nil {
+		return nil, fmt.Errorf("failed recording adjustment audit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing stock adjustment: %w", err)
+	}
+
+	reqLogger := logger.FromContext(ctx)
+	reqLogger.Info("Inventory Stock Adjusted",
+		slog.String("product_id", req.ProductID),
+		slog.String("product_name", product.Name),
+		slog.Int("previous_quantity", prevQty),
+		slog.Int("new_quantity", newQty),
+		slog.Int("quantity_delta", deltaQty),
+		slog.String("reason", req.Reason),
+	)
+
+	return &StockAdjustmentResponse{
+		AdjustmentID:      adjID.String(),
+		ProductID:         req.ProductID,
+		ProductName:       product.Name,
+		PreviousQuantity:  prevQty,
+		NewQuantity:       newQty,
+		QuantityDelta:     deltaQty,
+		Reason:            req.Reason,
+		LedgerEntryNumber: ledgerEntryNum,
+		AdjustedAt:        time.Now(),
+	}, nil
+}
+
+// GetLowStock retrieves all products at or below their reorder threshold
+func (s *Service) GetLowStock(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
+	return s.repo.GetLowStockProducts(ctx, conn)
+}
+

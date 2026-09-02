@@ -130,16 +130,21 @@ func (r *Repository) GetEntries(ctx context.Context, conn *pgxpool.Conn, limit, 
 		}
 		
 		var lines []EntryLine
+		var totalDebit, totalCredit float64
 		for lineRows.Next() {
 			var l EntryLine
 			if err := lineRows.Scan(&l.ID, &l.LedgerEntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.DebitAmount, &l.CreditAmount); err != nil {
 				lineRows.Close()
 				return nil, err
 			}
+			totalDebit += l.DebitAmount
+			totalCredit += l.CreditAmount
 			lines = append(lines, l)
 		}
 		lineRows.Close()
 		entries[i].Lines = lines
+		entries[i].TotalDebit = totalDebit
+		entries[i].TotalCredit = totalCredit
 	}
 
 	return entries, nil

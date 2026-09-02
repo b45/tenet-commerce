@@ -52,9 +52,16 @@ gantt
 ---
 
 ### Phase 2: Core Domain APIs & Transaction Engine (Weeks 3 – 4)
-- **Objective:** Implement the transactional backend in Go with strict concurrency controls and Sharia compliance rules.
+- **Objective:** Implement the transactional backend in Go with strict concurrency controls, retail operational workflows, and Sharia compliance rules.
 - **Key Deliverables:**
-  - [x] **POS Catalog & Checkout API:** `GET /api/v1/pos/products` and `POST /api/v1/pos/checkout` with atomic inventory decrements.
+  - [x] **POS Catalog & Checkout API:** `GET /api/v1/pos/products` and `POST /api/v1/pos/checkout` with atomic inventory decrements and cash change calculations.
+  - [x] **Order History & Detail API:** `GET /api/v1/pos/orders` with multi-criteria filtering (status, date range, pagination) and line-item breakdown (`GET /api/v1/pos/orders/:id`).
+  - [x] **Atomic POS Void & Refund Reversal:** `POST /api/v1/pos/orders/:id/void` with row locks, stock restoration, and automated double-entry reversal journal (`SourceDocPOSVoid`).
+  - [x] **End-of-Day Daily Summary (X/Z Report):** `GET /api/v1/pos/daily-summary` providing gross/net sales, COGS, gross margins, and payment method breakdowns.
+  - [x] **Tenant QRIS Integration:** Dynamic QRIS merchant configuration (`GET`/`PUT /api/v1/pos/qris`) and simulated digital payments.
+  - [x] **Bakery / Retail Inventory Management API:** Full Category and Product CRUD (`GET`, `POST`, `PUT`, `DELETE`) with soft-delete support.
+  - [x] **Stock Opname & Spoilage Write-Off Engine:** `POST /api/v1/pos/inventory/adjust` with audit trail and automated Sharia shrinkage journals (`5020 Inventory Shrinkage & Loss` $\leftrightarrow$ `1030 Merchandise Inventory`).
+  - [x] **Low-Stock Replenishment Alerts:** `GET /api/v1/pos/inventory/low-stock` for proactive baking/purchasing triggers.
   - [x] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions (`pkg/redis`).
   - [x] **Concurrency Stock Locking:** Database transaction (`pgx.Tx`) with row-level locks (`SELECT ... FOR UPDATE OF p, i`).
   - [x] **Compliance-Aware Supply Chain Module:** Supplier registry, Compliance Certificate tracking, and **configurable hard-validation interceptor** blocking invalid POs and Goods Receipts.
