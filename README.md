@@ -4,11 +4,12 @@
 ### Multi-Tenant Enterprise POS & Halal Supply Chain Platform
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/badge/Release-v0.3.0-blue?style=flat&logo=github)](https://github.com/b45/tenet-commerce/releases/tag/v0.3.0)
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![Python Version](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat&logo=python)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14+-000000?style=flat&logo=next.js)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat&logo=redis)](https://redis.io/)
+[![Benchmark Throughput](https://img.shields.io/badge/Benchmark-1%2C096_RPS_%7C_123.7_TPS-success)](docs/BENCHMARK_REPORT.md)
 [![Architecture](https://img.shields.io/badge/Architecture-Modular_Monolith-success)](docs/ARCHITECTURE.md)
 [![Compliance](https://img.shields.io/badge/Sharia-AAOIFI_Compliant-gold)](docs/SHARIA_COMPLIANCE.md)
 
@@ -28,10 +29,10 @@
 
 Traditional enterprise POS systems treat supply chain compliance and financial ledgering as disconnected afterthoughts. Tenet Commerce natively bridges this gap through four tightly integrated core domains:
 
-1. **High-Velocity Offline-First POS:** Design goal of sub-300ms checkout latency (not yet benchmarked) with client-side IndexedDB caching and background Service Worker synchronization.
-2. **Deterministic Transaction Engine:** Redis-backed idempotency key verification (preventing double charges) coupled with dual-layer distributed inventory locking.
+1. **High-Velocity Offline-First POS:** Empirically benchmarked at **1,096.3 RPS** (catalog read, 3.18ms median) and **123.7 TPS** (atomic checkouts with row-level locks, 61.25ms median), designed for offline resilience with client-side IndexedDB caching and background Service Worker synchronization.
+2. **Deterministic Transaction Engine:** Redis-backed idempotency key verification (preventing double charges) coupled with dual-layer distributed inventory locking (`SELECT ... FOR UPDATE`).
 3. **Halal Supply Chain Governance:** Automated hard-validation on Halal Certificate validity across Suppliers, Purchase Orders, Goods Receipts, and Stock Transfers.
-4. **Sharia Financial Ledger & Applied AI:** Real-time double-entry journal, dynamic Zakat Tijarah (Trade Zakat) calculation, and an asynchronous AI Reasoning Engine executing weekly continuous audits for financial anomalies.
+4. **Sharia Financial Ledger & Applied AI:** Real-time double-entry journal, dynamic Zakat Tijarah (Trade Zakat) calculation, automated void/shrinkage reversals, and an asynchronous AI Reasoning Engine executing weekly continuous audits for financial anomalies.
 
 ---
 
@@ -109,10 +110,11 @@ flowchart TB
 
 | Domain | Capabilities |
 |---|---|
-| **POS & Checkout** | • Sub-second barcode/SKU lookup<br/>• Offline-first cart persistence and receipt generation<br/>• Background sync with deterministic transaction replay |
-| **Transaction Engine** | • Guaranteed idempotency via `Idempotency-Key` headers<br/>• Redis distributed lock on SKU mutations<br/>• PostgreSQL `SELECT ... FOR UPDATE` row-level locking |
+| **POS & Checkout** | • Sub-second barcode/SKU lookup<br/>• Cash change calculation & payment reference tracking<br/>• Dynamic **Tenant QRIS** configuration via `store_settings`<br/>• **Atomic Void & Refund:** row locks, automatic restock, and Sharia reversal journal<br/>• Order history with multi-criteria filtering & Daily Sales Summary (X/Z-Report) |
+| **Transaction Engine** | • Guaranteed idempotency via `Idempotency-Key` headers (TTL: 24h)<br/>• PostgreSQL `SELECT ... FOR UPDATE` row-level locking (Zero Overselling guaranteed)<br/>• Hardened 48-bit transaction numbering (281 trillion daily unique codes) |
+| **Bakery & Retail Inventory** | • Complete Category and Product CRUD with soft-delete safety<br/>• Realistic seeded bakery catalog (Tarts, Breads, Pastries, Halal Snacks)<br/>• **Stock Opname & Spoilage Write-Off:** automated journals to `5020 Inventory Shrinkage & Loss` vs `1030 Merchandise Inventory`<br/>• Proactive low-stock replenishment alerts |
 | **Halal Supply Chain** | • Supplier Halal Certificate tracking (MUI, BPJPH, JAKIM, etc.)<br/>• **Hard-block validation:** prevents PO, Goods Receipt, or transfers from expired certs<br/>• Complete traceability from PO to store shelf |
-| **Sharia Ledger** | • Automated balanced double-entry journal for all sales and receipts<br/>• Real-time Trial Balance and Chart of Accounts<br/>• Dynamic **Zakat Tijarah** (2.5% Net Working Capital) calculation |
+| **Sharia Ledger** | • Automated balanced double-entry journal for sales, voids, receipts, and shrinkage ($\sum \text{Debits} = \sum \text{Credits}$)<br/>• Real-time Trial Balance, Chart of Accounts, and Manager Business Dashboard<br/>• Dynamic **Zakat Tijarah** (2.5% Net Working Capital) calculation |
 | **Continuous AI Auditor** | • Asynchronous Python worker running scheduled weekly audits<br/>• Heuristic anomaly detection (Benford's law, off-hours sales, round-number clustering)<br/>• Categorized severity alerts (`INFO`, `WARNING`, `CRITICAL`) |
 
 ---
@@ -140,6 +142,7 @@ Our documentation is structured for enterprise architects, security auditors, an
 - 🏗️ [**Technical Architecture Deep-Dive**](docs/ARCHITECTURE.md): Multi-tenancy isolation, distributed locking, idempotency mechanics, and offline sync lifecycle.
 - 🗄️ [**Database Schema & DDL Specification**](docs/DATABASE_SCHEMA.md): Complete PostgreSQL DDL, schema-per-tenant migration strategy, and double-entry ledger models.
 - 🔌 [**REST API Specification**](docs/API_SPECIFICATION.md): Comprehensive endpoint contracts, request/response payloads, headers, and error dictionary.
+- ⚡ [**Performance & Load Test Report (k6)**](docs/BENCHMARK_REPORT.md): High-concurrency benchmarks, throughput profiles (1,096 RPS read, 123.7 TPS write), P95/P99 latencies, and transaction entropy hardening.
 - ⚖️ [**Sharia Compliance & AI Auditor**](docs/SHARIA_COMPLIANCE.md): Halal certification governance, Zakat Tijarah formula, and continuous audit heuristics.
 - 🗺️ [**8-Week Implementation Roadmap**](docs/ROADMAP.md): Detailed sprint breakdowns, milestone deliverables, and risk mitigation strategies.
 - 🤝 [**Contributing Guidelines**](docs/CONTRIBUTING.md): Engineering standards, branching models, conventional commits, and local setup.
@@ -182,10 +185,10 @@ docker compose up -d --build
 
 The MVP is structured as an **8-Week Fast-Track Sprint**:
 
-- [x] **Phase 1: Foundation (Weeks 1-2):** Architecture, Multi-Tenant Postgres, JWT Auth & RBAC
-- [ ] **Phase 2: Core APIs (Weeks 3-4):** POS Engine, Redis Idempotency, Halal Supply Chain & Ledger
-- [ ] **Phase 3: Frontend & Offline-First (Weeks 5-6):** Next.js POS UI, IndexedDB Sync & Dashboards
-- [ ] **Phase 4: AI Auditor & Production Readiness (Weeks 7-8):** Python Worker, Zakat Engine, E2E Testing
+- [x] **Phase 1: Foundation (Weeks 1-2):** Architecture, Multi-Tenant Postgres, JWT Auth, RBAC & Structured Logging (`v0.1.0`)
+- [x] **Phase 2: Core Domain APIs & Extensions (Weeks 3-4):** POS Checkout Engine, Redis Idempotency, Halal Supply Chain Hard-Blocking, Double-Entry Ledger, Manager Dashboard, Retail Operations (Void, QRIS, Daily Summary), Bakery Inventory CRUD, and k6 Load Benchmarking (`v0.2.0` & `v0.3.0`)
+- [ ] **Phase 3: Frontend Client & Offline-First POS (Weeks 5-6):** Next.js 14 POS Cashier Interface, IndexedDB Sync & Supply Chain Dashboards (`v0.4.0`)
+- [ ] **Phase 4: Applied AI, Zakat Engine & Release (Weeks 7-8):** Python AI Auditor Worker, Zakat Tijarah Engine, and Production Docker Orchestration (`v0.5.0` & `v1.0.0`)
 
 *See [docs/ROADMAP.md](docs/ROADMAP.md) for full phase details and milestone deliverables.*
 
