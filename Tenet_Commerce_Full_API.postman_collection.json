@@ -1025,6 +1025,48 @@
                     }
                 }
             ]
+        },
+        {
+            "name": "5. Manager Analytics & Dashboard",
+            "item": [
+                {
+                    "name": "Get Manager Dashboard Summary",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{jwt_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/manager/dashboard",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "manager",
+                                "dashboard"
+                            ]
+                        },
+                        "description": "Returns aggregated business metrics including daily sales volume, average order value, low stock warnings, and impending Halal compliance certificate lapses."
+                    },
+                    "response": []
+                }
+            ]
         }
     ],
     "variable": [
