@@ -107,7 +107,7 @@ func (r *Repository) GetComplianceAlerts(ctx context.Context, conn *pgxpool.Conn
 			(cc.expiry_date - CURRENT_DATE) AS days_remaining
 		FROM compliance_certificates cc
 		JOIN suppliers s ON cc.supplier_id = s.id
-		WHERE cc.expiry_date <= (CURRENT_DATE + ($1 || ' days')::interval)
+		WHERE cc.expiry_date <= (CURRENT_DATE + $1::integer)
 		ORDER BY cc.expiry_date ASC
 		LIMIT 50
 	`
