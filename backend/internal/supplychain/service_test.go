@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/b45/tenet-commerce/backend/internal/ledger"
 )
 
 // This test requires a running database on localhost:5432 with the tenet_commerce db
@@ -30,7 +32,8 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 	}
 
 	repo := NewRepository()
-	svc := NewService(repo)
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	svc := NewService(repo, ledgerService)
 
 	// We use two different tenants seeded in init_dev_db.sql
 	// tenant_al_barakah_mart -> strict_compliance_mode = true

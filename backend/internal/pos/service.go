@@ -7,18 +7,21 @@ import (
 	"math"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Service handles business logic and orchestration for the POS domain
 type Service struct {
-	repo *Repository
+	repo          *Repository
+	ledgerService *ledger.Service
 }
 
 // NewService initializes a new POS service
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo *Repository, ledgerService *ledger.Service) *Service {
+	return &Service{repo: repo, ledgerService: ledgerService}
 }
 
 // GetCatalog retrieves all available products with live inventory quantities
@@ -67,6 +70,7 @@ func (s *Service) Checkout(
 
 	// 4. Validate stock availability and calculate subtotals
 	var subtotal float64
+	var totalCOGS float64
 	var lineItems []TransactionItem
 
 	for _, item := range req.Items {
@@ -83,6 +87,7 @@ func (s *Service) Checkout(
 
 		itemSubtotal := math.Round(product.UnitPrice*float64(item.Quantity)*100) / 100
 		subtotal += itemSubtotal
+		totalCOGS += math.Round(product.CostPrice*float64(item.Quantity)*100) / 100
 
 		lineItems = append(lineItems, TransactionItem{
 			ProductID: product.ID,
@@ -146,6 +151,15 @@ func (s *Service) Checkout(
 	}
 	itemsDuration := time.Since(tItems)
 
+	// 8.5. APM SPAN: Post automatic journal entry
+	tLedger := time.Now()
+	txnUUID, _ := uuid.Parse(masterTxn.ID)
+	if err := s.ledgerService.PostPOSSaleJournal(ctx, tx, txnUUID, masterTxn.TransactionNumber, masterTxn.TotalAmount, totalCOGS, masterTxn.PaymentMethod); err != nil {
+		reqLogger.Error("Failed to post POS sale journal entry", "error", err)
+		return nil, fmt.Errorf("failed posting ledger journal: %w", err)
+	}
+	ledgerDuration := time.Since(tLedger)
+
 	// 9. APM SPAN: Commit Transaction atomically
 	tCommit := time.Now()
 	if err := tx.Commit(ctx); err != nil {
@@ -165,6 +179,7 @@ func (s *Service) Checkout(
 		slog.Float64("duration_stock_decrement_ms", float64(decDuration.Microseconds())/1000.0),
 		slog.Float64("duration_insert_txn_ms", float64(txnDuration.Microseconds())/1000.0),
 		slog.Float64("duration_insert_items_ms", float64(itemsDuration.Microseconds())/1000.0),
+		slog.Float64("duration_post_journal_ms", float64(ledgerDuration.Microseconds())/1000.0),
 		slog.Float64("duration_commit_ms", float64(commitDuration.Microseconds())/1000.0),
 	)
 

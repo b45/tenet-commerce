@@ -58,7 +58,7 @@ gantt
   - [x] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions (`pkg/redis`).
   - [x] **Concurrency Stock Locking:** Database transaction (`pgx.Tx`) with row-level locks (`SELECT ... FOR UPDATE OF p, i`).
   - [x] **Compliance-Aware Supply Chain Module:** Supplier registry, Compliance Certificate tracking, and **configurable hard-validation interceptor** blocking invalid POs and Goods Receipts.
-  - [ ] **Double-Entry Ledger Engine:** Automated journal generation adhering to $\sum \text{Debits} = \sum \text{Credits}$ balance invariants.
+  - [x] **Double-Entry Ledger Engine:** Automated journal generation adhering to $\sum \text{Debits} = \sum \text{Credits}$ balance invariants.
 
 ---
 
