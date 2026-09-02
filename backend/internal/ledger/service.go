@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -292,4 +293,67 @@ func (s *Service) PostGoodsReceiptJournal(ctx context.Context, tx pgx.Tx, grID u
 	}
 
 	return s.repo.CreateEntryWithLines(ctx, tx, entry)
+}
+
+// PostInventoryAdjustmentJournal creates a balanced double-entry journal for inventory adjustments.
+// For inventory write-offs/shrinkage (damaged cake, expired food, negative quantityDelta):
+//   - Debit 5020 (Inventory Shrinkage & Loss)
+//   - Credit 1030 (Merchandise Inventory)
+// For positive adjustments (found inventory / physical count excess):
+//   - Debit 1030 (Merchandise Inventory)
+//   - Credit 5020 (Inventory Shrinkage & Loss)
+func (s *Service) PostInventoryAdjustmentJournal(ctx context.Context, tx pgx.Tx, adjID uuid.UUID, productName string, quantityDelta int, unitCost float64, reason string, notes string) (*Entry, error) {
+	totalValue := math.Abs(float64(quantityDelta)) * unitCost
+	if totalValue <= 0 {
+		return nil, nil // No monetary adjustment required if total value is 0
+	}
+
+	entryNumber := fmt.Sprintf("JE-ADJ-%s-%s", time.Now().Format("20060102150405"), adjID.String()[:8])
+	memo := fmt.Sprintf("Inventory adjustment (%s): %s (delta: %d, reason: %s)", reason, productName, quantityDelta, notes)
+	if len(memo) > 255 {
+		memo = memo[:255]
+	}
+
+	entry := &Entry{
+		ID:                 uuid.New(),
+		EntryNumber:        entryNumber,
+		EntryDate:          time.Now(),
+		SourceDocumentType: SourceDocManualAdjustment,
+		SourceDocumentID:   &adjID,
+		Memo:               memo,
+	}
+
+	inventoryAccount, err := s.repo.GetAccountByCode(ctx, tx, "1030")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get inventory account 1030: %w", err)
+	}
+
+	shrinkageAccount, err := s.repo.GetAccountByCode(ctx, tx, "5020")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shrinkage account 5020: %w", err)
+	}
+
+	if quantityDelta < 0 {
+		// Shrinkage/Loss write-off: Debit Expense 5020, Credit Asset 1030
+		entry.Lines = []EntryLine{
+			{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: shrinkageAccount.ID, DebitAmount: totalValue, CreditAmount: 0},
+			{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: inventoryAccount.ID, DebitAmount: 0, CreditAmount: totalValue},
+		}
+	} else {
+		// Found/Surplus inventory: Debit Asset 1030, Credit Expense/Gain 5020
+		entry.Lines = []EntryLine{
+			{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: inventoryAccount.ID, DebitAmount: totalValue, CreditAmount: 0},
+			{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: shrinkageAccount.ID, DebitAmount: 0, CreditAmount: totalValue},
+		}
+	}
+
+	if err := s.validateBalance(entry.Lines); err != nil {
+		return nil, fmt.Errorf("failed inventory adjustment journal balance validation: %w", err)
+	}
+
+	if err := s.repo.CreateEntryWithLines(ctx, tx, entry); err != nil {
+		return nil, err
+	}
+
+	return entry, nil
 }

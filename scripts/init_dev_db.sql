@@ -159,6 +159,23 @@ VALUES (
     '{"merchant_name": "Al Barakah Bakery & Mart", "nmid": "ID1020030040050", "qr_string": "00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924AL BARAKAH BAKERY & MART6010JAKARTA SE61051234062070703A0163041D2B", "qr_image_url": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924"}'::jsonb
 ) ON CONFLICT (key) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.inventory_adjustments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE CASCADE,
+    adjustment_type VARCHAR(31) NOT NULL CHECK (adjustment_type IN ('ADD', 'SUBTRACT', 'SET')),
+    quantity_delta INTEGER NOT NULL,
+    previous_quantity INTEGER NOT NULL,
+    new_quantity INTEGER NOT NULL,
+    reason VARCHAR(63) NOT NULL CHECK (reason IN ('DAMAGE', 'EXPIRED', 'AUDIT_CORRECTION', 'RESTOCK', 'OTHER')),
+    notes TEXT,
+    adjusted_by UUID NOT NULL,
+    ledger_entry_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_abm_inv_adj_product ON tenant_al_barakah_mart.inventory_adjustments(product_id);
+CREATE INDEX IF NOT EXISTS idx_abm_inv_adj_created ON tenant_al_barakah_mart.inventory_adjustments(created_at DESC);
+
 -- 5.5 Transaction Items Table
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.transaction_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -319,7 +336,11 @@ INSERT INTO tenant_al_barakah_mart.categories (id, name, code)
 VALUES
     ('c0000000-0000-0000-0000-000000000001', 'Fresh Meat & Poultry', 'CAT-FRESH-MEAT'),
     ('c0000000-0000-0000-0000-000000000002', 'Beverages & Syrups', 'CAT-BEVERAGES'),
-    ('c0000000-0000-0000-0000-000000000003', 'Pantry & Groceries', 'CAT-PANTRY')
+    ('c0000000-0000-0000-0000-000000000003', 'Pantry & Groceries', 'CAT-PANTRY'),
+    ('c0000000-0000-0000-0000-000000000010', 'Kue Tart & Custom Cake', 'CAT-CAKE'),
+    ('c0000000-0000-0000-0000-000000000020', 'Roti & Bolu', 'CAT-BREAD'),
+    ('c0000000-0000-0000-0000-000000000030', 'Pastry & Croissant', 'CAT-PASTRY'),
+    ('c0000000-0000-0000-0000-000000000040', 'Jajanan Pasar Halal', 'CAT-SNACK')
 ON CONFLICT (code) DO NOTHING;
 
 -- 5.7 Seed Products for tenant_al_barakah_mart
@@ -329,7 +350,13 @@ VALUES
     ('10000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001', 'SKU-CHICKEN-01', '8991001000028', 'Ayam Potong Segar 1kg', 'Ayam potong higienis dan halal', 38000.00, 30000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000002', 'SKU-HONEY-01', '8991001000035', 'Madu Murni Al-Barakah 350ml', 'Madu hutan murni tanpa bahan pengawet', 65000.00, 48000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000004', 'c0000000-0000-0000-0000-000000000003', 'SKU-OIL-01', '8991001000042', 'Minyak Goreng Kelapa Sawit 2L', 'Minyak goreng jernih berkualitas tinggi', 34000.00, 29000.00, '["HALAL_MUI"]', TRUE),
-    ('10000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000003', 'SKU-RICE-01', '8991001000059', 'Beras Ramos Organik 5kg', 'Beras putih pulen organik', 72000.00, 62000.00, '["ORGANIC"]', TRUE)
+    ('10000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000003', 'SKU-RICE-01', '8991001000059', 'Beras Ramos Organik 5kg', 'Beras putih pulen organik', 72000.00, 62000.00, '["ORGANIC"]', TRUE),
+    ('10000000-0000-0000-0000-000000000011', 'c0000000-0000-0000-0000-000000000010', 'SKU-CAKE-BF20', '8992001000010', 'Black Forest Cake 20cm', 'Kue Black Forest premium dengan dark cherry dan serutan cokelat halal', 185000.00, 120000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000012', 'c0000000-0000-0000-0000-000000000010', 'SKU-CAKE-RV18', '8992001000020', 'Red Velvet Cake 18cm', 'Kue Red Velvet lembut dengan cream cheese frosting gurih manis', 160000.00, 105000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-BG01', '8992001000030', 'Bolu Gulung Pandan Keju', 'Bolu gulung aroma pandan asli suji dengan taburan parutan keju melimpah', 45000.00, 28000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-RS01', '8992001000040', 'Roti Sisir Butter Premium', 'Roti sisir mentega jadul lembut, manis gurih nagih', 18000.00, 11000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000030', 'SKU-PASTRY-CA01', '8992001000050', 'Croissant Almond Halal', 'Croissant renyah berlapis dengan isian almond paste dan topping almond panggang', 25000.00, 15000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000040', 'SKU-SNACK-LL01', '8992001000060', 'Lapis Legit Prunes Slice', 'Lapis legit rempah klasik dengan potongan buah prunes pilihan', 28000.00, 18000.00, '["HALAL_MUI"]', TRUE)
 ON CONFLICT (sku) DO UPDATE SET 
     name = EXCLUDED.name,
     unit_price = EXCLUDED.unit_price,
@@ -439,6 +466,23 @@ VALUES (
     'qris',
     '{"merchant_name": "Darussalam Bakery & Store", "nmid": "ID1020030040050", "qr_string": "00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924DARUSSALAM BAKERY & STORE6010JAKARTA SE61051234062070703A0163041D2B", "qr_image_url": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5924"}'::jsonb
 ) ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.inventory_adjustments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE CASCADE,
+    adjustment_type VARCHAR(31) NOT NULL CHECK (adjustment_type IN ('ADD', 'SUBTRACT', 'SET')),
+    quantity_delta INTEGER NOT NULL,
+    previous_quantity INTEGER NOT NULL,
+    new_quantity INTEGER NOT NULL,
+    reason VARCHAR(63) NOT NULL CHECK (reason IN ('DAMAGE', 'EXPIRED', 'AUDIT_CORRECTION', 'RESTOCK', 'OTHER')),
+    notes TEXT,
+    adjusted_by UUID NOT NULL,
+    ledger_entry_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ds_inv_adj_product ON tenant_darussalam_store.inventory_adjustments(product_id);
+CREATE INDEX IF NOT EXISTS idx_ds_inv_adj_created ON tenant_darussalam_store.inventory_adjustments(created_at DESC);
 
 -- 6.5 Transaction Items Table
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.transaction_items (

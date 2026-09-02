@@ -335,3 +335,118 @@ func (s *Service) UpdateQRISConfig(ctx context.Context, conn *pgxpool.Conn, cfg 
 	return s.repo.UpdateQRISConfig(ctx, conn, cfg)
 }
 
+// GetCategories returns all categories
+func (s *Service) GetCategories(ctx context.Context, conn *pgxpool.Conn) ([]Category, error) {
+	return s.repo.GetCategories(ctx, conn)
+}
+
+// GetCategoryByID returns a category by ID
+func (s *Service) GetCategoryByID(ctx context.Context, conn *pgxpool.Conn, id string) (*Category, error) {
+	return s.repo.GetCategoryByID(ctx, conn, id)
+}
+
+// CreateCategory creates a new category
+func (s *Service) CreateCategory(ctx context.Context, conn *pgxpool.Conn, req CreateCategoryRequest) (*Category, error) {
+	return s.repo.CreateCategory(ctx, conn, req)
+}
+
+// UpdateCategory updates an existing category
+func (s *Service) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateCategoryRequest) (*Category, error) {
+	return s.repo.UpdateCategory(ctx, conn, id, req)
+}
+
+// DeleteCategory deletes a category
+func (s *Service) DeleteCategory(ctx context.Context, conn *pgxpool.Conn, id string) error {
+	return s.repo.DeleteCategory(ctx, conn, id)
+}
+
+// GetProduct retrieves a product by its UUID
+func (s *Service) GetProduct(ctx context.Context, conn *pgxpool.Conn, id string) (*Product, error) {
+	return s.repo.GetProductByID(ctx, conn, id)
+}
+
+// CreateProduct adds a new product to the catalog with initial inventory
+func (s *Service) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req CreateProductRequest) (*Product, error) {
+	return s.repo.CreateProduct(ctx, conn, req)
+}
+
+// UpdateProduct updates product metadata
+func (s *Service) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateProductRequest) (*Product, error) {
+	return s.repo.UpdateProduct(ctx, conn, id, req)
+}
+
+// DeleteProduct soft-deletes a product
+func (s *Service) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id string) error {
+	return s.repo.DeleteProduct(ctx, conn, id)
+}
+
+// AdjustStock executes an atomic inventory adjustment and posts a balanced Sharia ledger shrinkage journal if applicable
+func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID string, req StockAdjustmentRequest) (*StockAdjustmentResponse, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed starting adjustment transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	product, err := s.repo.GetProductByID(ctx, conn, req.ProductID)
+	if err != nil {
+		return nil, err
+	}
+
+	prevQty, newQty, deltaQty, err := s.repo.AdjustInventoryStock(ctx, tx, req.ProductID, req.AdjustmentType, req.Quantity)
+	if err != nil {
+		return nil, err
+	}
+
+	adjID := uuid.New()
+	var ledgerEntryNum *string
+	var ledgerEntryIDStr *string
+
+	if deltaQty != 0 && product.CostPrice > 0 {
+		entry, err := s.ledgerService.PostInventoryAdjustmentJournal(ctx, tx, adjID, product.Name, deltaQty, product.CostPrice, req.Reason, req.Notes)
+		if err != nil {
+			return nil, fmt.Errorf("failed posting inventory adjustment journal: %w", err)
+		}
+		if entry != nil {
+			ledgerEntryNum = &entry.EntryNumber
+			idStr := entry.ID.String()
+			ledgerEntryIDStr = &idStr
+		}
+	}
+
+	if err := s.repo.RecordInventoryAdjustment(ctx, tx, adjID.String(), req.ProductID, req.AdjustmentType, deltaQty, prevQty, newQty, req.Reason, req.Notes, userID, ledgerEntryIDStr); err != nil {
+		return nil, fmt.Errorf("failed recording adjustment audit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing stock adjustment: %w", err)
+	}
+
+	reqLogger := logger.FromContext(ctx)
+	reqLogger.Info("Inventory Stock Adjusted",
+		slog.String("product_id", req.ProductID),
+		slog.String("product_name", product.Name),
+		slog.Int("previous_quantity", prevQty),
+		slog.Int("new_quantity", newQty),
+		slog.Int("quantity_delta", deltaQty),
+		slog.String("reason", req.Reason),
+	)
+
+	return &StockAdjustmentResponse{
+		AdjustmentID:      adjID.String(),
+		ProductID:         req.ProductID,
+		ProductName:       product.Name,
+		PreviousQuantity:  prevQty,
+		NewQuantity:       newQty,
+		QuantityDelta:     deltaQty,
+		Reason:            req.Reason,
+		LedgerEntryNumber: ledgerEntryNum,
+		AdjustedAt:        time.Now(),
+	}, nil
+}
+
+// GetLowStock retrieves all products at or below their reorder threshold
+func (s *Service) GetLowStock(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
+	return s.repo.GetLowStockProducts(ctx, conn)
+}
+
