@@ -371,3 +371,62 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 `GET /api/v1/ledger/trial-balance`
 - **Description:** Retrieve trial balance as of a specific date.
 - **Permissions:** `ledger:read`
+
+---
+
+## 6. Store Manager Analytics & KPI Dashboard
+
+### 6.1 Get Aggregated Store Dashboard
+- **Endpoint:** `GET /api/v1/manager/dashboard`
+- **Auth:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN`)
+- **Description:** Real-time business aggregations across sales revenue, inventory depletion alerts, Halal certificate expirations, and ledger account status.
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "generated_at": "2026-09-02T12:00:00Z",
+    "sales_summary": {
+      "today_gross_sales": 3450000.00,
+      "today_net_sales": 3350000.00,
+      "today_orders_count": 48,
+      "all_time_orders_count": 1240,
+      "average_order_value": 71875.00
+    },
+    "inventory_alerts": {
+      "low_stock_count": 2,
+      "items": [
+        {
+          "product_id": "prod_7c8d9e0f-1a2b-3c4d-5e6f-7a8b9c0d1e2f",
+          "sku": "BEEF-RIBEYE-001",
+          "name": "Halal Fresh Ribeye Steak 500g",
+          "category_name": "Fresh Meat",
+          "current_stock": 4,
+          "threshold": 10,
+          "unit_price": 85000.00
+        }
+      ]
+    },
+    "compliance_alerts": {
+      "expiring_certificates_count": 1,
+      "expired_certificates_count": 0,
+      "items": [
+        {
+          "certificate_id": "cert_3f2b1a0e-9d8c-7b6a-5f4e-3d2c1b0a9f8e",
+          "supplier_id": "supp_1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+          "supplier_name": "PT Halal Boga Sejahtera",
+          "certificate_number": "BPJPH-2026-00192",
+          "issuing_authority": "BPJPH",
+          "expiry_date": "2026-09-25T00:00:00Z",
+          "days_remaining": 23,
+          "status": "EXPIRING_SOON"
+        }
+      ]
+    },
+    "financial_summary": {
+      "active_accounts_count": 12,
+      "today_journal_entries_count": 52
+    }
+  }
+}
+```

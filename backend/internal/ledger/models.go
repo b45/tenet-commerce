@@ -43,6 +43,8 @@ type Entry struct {
 	SourceDocumentID   *uuid.UUID  `json:"source_document_id,omitempty"`
 	Memo               string      `json:"memo"`
 	CreatedAt          time.Time   `json:"created_at"`
+	TotalDebit         float64     `json:"total_debit"`
+	TotalCredit        float64     `json:"total_credit"`
 	Lines              []EntryLine `json:"lines,omitempty"`
 }
 

@@ -26,6 +26,7 @@ type Meta struct {
 	Total  int `json:"total,omitempty"`
 	Page   int `json:"page,omitempty"`
 	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
 }
 
 // OK sends a 200 OK response with data
