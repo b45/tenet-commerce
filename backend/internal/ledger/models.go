@@ -62,14 +62,14 @@ type CreateEntryRequest struct {
 	SourceDocumentType string                   `json:"source_document_type" binding:"required"`
 	SourceDocumentID   *uuid.UUID               `json:"source_document_id"`
 	Memo               string                   `json:"memo" binding:"required"`
-	Lines              []CreateEntryLineRequest `json:"lines" binding:"required,min=2"`
+	Lines              []CreateEntryLineRequest `json:"lines" binding:"required,min=2,dive"`
 }
 
 // CreateEntryLineRequest represents a single line in CreateEntryRequest
 type CreateEntryLineRequest struct {
-	AccountCode  string  `json:"account_code" binding:"required"`
-	DebitAmount  float64 `json:"debit_amount"`
-	CreditAmount float64 `json:"credit_amount"`
+	AccountID    uuid.UUID `json:"account_id" binding:"required"`
+	DebitAmount  float64   `json:"debit_amount"`
+	CreditAmount float64   `json:"credit_amount"`
 }
 
 // TrialBalanceRow represents a single account's balance in the Trial Balance report

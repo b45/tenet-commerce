@@ -115,15 +115,10 @@ func (s *Service) CreateManualEntry(ctx context.Context, conn *pgxpool.Conn, req
 	}
 
 	for _, reqLine := range req.Lines {
-		account, err := s.repo.GetAccountByCode(ctx, tx, reqLine.AccountCode)
-		if err != nil {
-			return nil, fmt.Errorf("invalid account code %s: %w", reqLine.AccountCode, err)
-		}
-
 		entry.Lines = append(entry.Lines, EntryLine{
 			ID:            uuid.New(),
 			LedgerEntryID: entry.ID,
-			AccountID:     account.ID,
+			AccountID:     reqLine.AccountID,
 			DebitAmount:   reqLine.DebitAmount,
 			CreditAmount:  reqLine.CreditAmount,
 		})
