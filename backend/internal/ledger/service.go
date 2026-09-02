@@ -201,6 +201,63 @@ func (s *Service) PostPOSSaleJournal(ctx context.Context, tx pgx.Tx, txnID uuid.
 	return s.repo.CreateEntryWithLines(ctx, tx, entry)
 }
 
+// PostPOSVoidReversalJournal creates an automatic reversal journal entry for a voided/refunded POS sale.
+// It reverses revenue, asset (cash/bank), COGS, and inventory within the active transaction.
+func (s *Service) PostPOSVoidReversalJournal(ctx context.Context, tx pgx.Tx, txnID uuid.UUID, txnNumber string, totalAmount, totalCOGS float64, paymentMethod string, voidReason string) error {
+	entry := &Entry{
+		ID:                 uuid.New(),
+		EntryNumber:        "JE-VOID-" + time.Now().Format("20060102150405") + "-" + txnNumber[len(txnNumber)-6:],
+		EntryDate:          time.Now(),
+		SourceDocumentType: SourceDocPOSVoid,
+		SourceDocumentID:   &txnID,
+		Memo:               fmt.Sprintf("Void POS sale %s: %s", txnNumber, voidReason),
+	}
+
+	// 1. Credit Cash/Bank (Refund asset)
+	var assetAccountCode string
+	if paymentMethod == "CASH" {
+		assetAccountCode = "1010" // Cash on Hand
+	} else {
+		assetAccountCode = "1020" // Bank Operating Account (QRIS / Card)
+	}
+
+	assetAccount, err := s.repo.GetAccountByCode(ctx, tx, assetAccountCode)
+	if err != nil {
+		return fmt.Errorf("failed to get asset account for void: %w", err)
+	}
+
+	// 2. Debit Sales Revenue (Reverse Revenue)
+	revenueAccount, err := s.repo.GetAccountByCode(ctx, tx, "4010")
+	if err != nil {
+		return fmt.Errorf("failed to get revenue account for void: %w", err)
+	}
+
+	// 3. Credit COGS (Reverse Expense)
+	cogsAccount, err := s.repo.GetAccountByCode(ctx, tx, "5010")
+	if err != nil {
+		return fmt.Errorf("failed to get cogs account for void: %w", err)
+	}
+
+	// 4. Debit Inventory (Restock Asset value)
+	inventoryAccount, err := s.repo.GetAccountByCode(ctx, tx, "1030")
+	if err != nil {
+		return fmt.Errorf("failed to get inventory account for void: %w", err)
+	}
+
+	entry.Lines = []EntryLine{
+		{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: revenueAccount.ID, DebitAmount: totalAmount, CreditAmount: 0},
+		{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: assetAccount.ID, DebitAmount: 0, CreditAmount: totalAmount},
+		{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: inventoryAccount.ID, DebitAmount: totalCOGS, CreditAmount: 0},
+		{ID: uuid.New(), LedgerEntryID: entry.ID, AccountID: cogsAccount.ID, DebitAmount: 0, CreditAmount: totalCOGS},
+	}
+
+	if err := s.validateBalance(entry.Lines); err != nil {
+		return fmt.Errorf("failed POS void reversal journal balance validation: %w", err)
+	}
+
+	return s.repo.CreateEntryWithLines(ctx, tx, entry)
+}
+
 // PostGoodsReceiptJournal creates an automatic journal entry for a Goods Receipt.
 // It is intended to be called within the same transaction as the GR creation.
 func (s *Service) PostGoodsReceiptJournal(ctx context.Context, tx pgx.Tx, grID uuid.UUID, grNumber string, inboundValue float64) error {

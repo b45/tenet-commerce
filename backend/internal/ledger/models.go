@@ -17,9 +17,10 @@ const (
 
 // Source Document Types
 const (
-	SourceDocPOSSale          = "POS_SALE"
-	SourceDocGoodsReceipt     = "GOODS_RECEIPT"
-	SourceDocManualAdjustment = "MANUAL_ADJUSTMENT"
+	SourceDocPOSSale           = "POS_SALE"
+	SourceDocPOSVoid           = "POS_VOID"
+	SourceDocGoodsReceipt      = "GOODS_RECEIPT"
+	SourceDocManualAdjustment  = "MANUAL_ADJUSTMENT"
 	SourceDocZakatDisbursement = "ZAKAT_DISBURSEMENT"
 )
 

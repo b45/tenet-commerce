@@ -171,3 +171,306 @@ func TestPOS_Checkout_InsufficientStock(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 	assert.Contains(t, w.Body.String(), "INSUFFICIENT_STOCK")
 }
+
+func TestPOS_Checkout_WithCashChangeAndBakeryNotes(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.POST("/pos/checkout", posHandler.Checkout)
+
+	customerName := "Ibu Kartika"
+	notes := "Tulisan: Selamat Ulang Tahun ke-7 Salsa, Lilin angka 7"
+	cashTendered := 200000.00
+	idempotencyKey := fmt.Sprintf("pos-cash-test-%d", time.Now().UnixNano())
+
+	checkoutPayload := pos.CheckoutRequest{
+		Items: []pos.CartItemRequest{
+			{SKU: "SKU-BEEF-01", Quantity: 2}, // 75000 * 2 = 150000
+		},
+		PaymentMethod:  "CASH",
+		DiscountAmount: 5000.00, // Total = 145000
+		CashTendered:   &cashTendered,
+		CustomerName:   &customerName,
+		Notes:          &notes,
+	}
+
+	bodyBytes, _ := json.Marshal(checkoutPayload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/pos/checkout", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Contains(t, w.Body.String(), `"success":true`)
+	assert.Contains(t, w.Body.String(), `"cash_tendered":200000`)
+	assert.Contains(t, w.Body.String(), `"change_amount":55000`)
+	assert.Contains(t, w.Body.String(), "Ibu Kartika")
+	assert.Contains(t, w.Body.String(), "Selamat Ulang Tahun ke-7 Salsa")
+}
+
+func TestPOS_Checkout_QRIS_WithPaymentReference(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.POST("/pos/checkout", posHandler.Checkout)
+
+	rrn := "QRIS-RRN-99887766"
+	idempotencyKey := fmt.Sprintf("pos-qris-test-%d", time.Now().UnixNano())
+
+	checkoutPayload := pos.CheckoutRequest{
+		Items: []pos.CartItemRequest{
+			{SKU: "SKU-CHICKEN-01", Quantity: 1}, // 35000
+		},
+		PaymentMethod:    "QRIS",
+		PaymentReference: &rrn,
+	}
+
+	bodyBytes, _ := json.Marshal(checkoutPayload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/pos/checkout", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Contains(t, w.Body.String(), `"payment_method":"QRIS"`)
+	assert.Contains(t, w.Body.String(), "QRIS-RRN-99887766")
+}
+
+func TestPOS_GetOrders_And_OrderDetail(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/orders", posHandler.GetOrders)
+	router.GET("/pos/orders/:id", posHandler.GetOrderDetail)
+
+	// 1. Query Orders list
+	wList := httptest.NewRecorder()
+	reqList, _ := http.NewRequest("GET", "/pos/orders?limit=10&offset=0", nil)
+	router.ServeHTTP(wList, reqList)
+
+	assert.Equal(t, http.StatusOK, wList.Code)
+	assert.Contains(t, wList.Body.String(), `"success":true`)
+	assert.Contains(t, wList.Body.String(), `"meta"`)
+
+	var listRes struct {
+		Data []pos.OrderSummary `json:"data"`
+	}
+	err := json.Unmarshal(wList.Body.Bytes(), &listRes)
+	require.NoError(t, err)
+	require.NotEmpty(t, listRes.Data)
+
+	firstOrder := listRes.Data[0]
+
+	// 2. Query Single Order detail by ID
+	wDetail := httptest.NewRecorder()
+	reqDetail, _ := http.NewRequest("GET", "/pos/orders/"+firstOrder.ID, nil)
+	router.ServeHTTP(wDetail, reqDetail)
+
+	assert.Equal(t, http.StatusOK, wDetail.Code)
+	assert.Contains(t, wDetail.Body.String(), firstOrder.TransactionNumber)
+	assert.Contains(t, wDetail.Body.String(), `"items"`)
+}
+
+func TestPOS_VoidOrder_SuccessAndReversal(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.POST("/pos/checkout", posHandler.Checkout)
+	router.POST("/pos/orders/:id/void", posHandler.VoidOrder)
+
+	// 1. Checkout an order with 2 units of chicken
+	ctx := context.Background()
+	conn, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	_, _ = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public;")
+
+	var stockBefore int
+	_ = conn.QueryRow(ctx, "SELECT i.stock_quantity FROM products p JOIN inventory i ON p.id = i.product_id WHERE p.sku = 'SKU-CHICKEN-01'").Scan(&stockBefore)
+	conn.Release()
+
+	idempotencyKey := fmt.Sprintf("pos-void-test-%d", time.Now().UnixNano())
+	checkoutPayload := pos.CheckoutRequest{
+		Items: []pos.CartItemRequest{
+			{SKU: "SKU-CHICKEN-01", Quantity: 2},
+		},
+		PaymentMethod: "CASH",
+	}
+
+	bodyBytes, _ := json.Marshal(checkoutPayload)
+	wCheckout := httptest.NewRecorder()
+	reqCheckout, _ := http.NewRequest("POST", "/pos/checkout", bytes.NewBuffer(bodyBytes))
+	reqCheckout.Header.Set("Content-Type", "application/json")
+	reqCheckout.Header.Set("Idempotency-Key", idempotencyKey)
+	router.ServeHTTP(wCheckout, reqCheckout)
+	require.Equal(t, http.StatusCreated, wCheckout.Code)
+
+	var checkoutRes struct {
+		Data pos.CheckoutResponse `json:"data"`
+	}
+	_ = json.Unmarshal(wCheckout.Body.Bytes(), &checkoutRes)
+	orderID := checkoutRes.Data.TransactionID
+
+	// 2. Void the order
+	voidPayload := pos.VoidRequest{
+		Reason: "Customer cancel - wrong cake size selected",
+	}
+	voidBytes, _ := json.Marshal(voidPayload)
+	wVoid := httptest.NewRecorder()
+	reqVoid, _ := http.NewRequest("POST", "/pos/orders/"+orderID+"/void", bytes.NewBuffer(voidBytes))
+	reqVoid.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wVoid, reqVoid)
+
+	assert.Equal(t, http.StatusOK, wVoid.Code)
+	assert.Contains(t, wVoid.Body.String(), `"status":"VOIDED"`)
+	assert.Contains(t, wVoid.Body.String(), "Customer cancel - wrong cake size selected")
+
+	// 3. Verify stock has been restored back
+	connVerify, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	_, _ = connVerify.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public;")
+
+	var stockAfter int
+	_ = connVerify.QueryRow(ctx, "SELECT i.stock_quantity FROM products p JOIN inventory i ON p.id = i.product_id WHERE p.sku = 'SKU-CHICKEN-01'").Scan(&stockAfter)
+	connVerify.Release()
+
+	assert.Equal(t, stockBefore, stockAfter, "Stock should be restored to initial quantity after void")
+
+	// 4. Double void must be rejected with 409 Conflict
+	wVoidAgain := httptest.NewRecorder()
+	reqVoidAgain, _ := http.NewRequest("POST", "/pos/orders/"+orderID+"/void", bytes.NewBuffer(voidBytes))
+	reqVoidAgain.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wVoidAgain, reqVoidAgain)
+
+	assert.Equal(t, http.StatusConflict, wVoidAgain.Code)
+	assert.Contains(t, wVoidAgain.Body.String(), "TRANSACTION_ALREADY_VOIDED")
+}
+
+func TestPOS_DailySummary(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/daily-summary", posHandler.GetDailySummary)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/pos/daily-summary", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"total_orders"`)
+	assert.Contains(t, w.Body.String(), `"net_sales"`)
+	assert.Contains(t, w.Body.String(), `"payment_breakdown"`)
+}
+
+func TestPOS_QRISConfig(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/qris", posHandler.GetQRISConfig)
+	router.PUT("/pos/qris", posHandler.UpdateQRISConfig)
+
+	// 1. Get QRIS Config
+	wGet := httptest.NewRecorder()
+	reqGet, _ := http.NewRequest("GET", "/pos/qris", nil)
+	router.ServeHTTP(wGet, reqGet)
+
+	assert.Equal(t, http.StatusOK, wGet.Code)
+	assert.Contains(t, wGet.Body.String(), `"merchant_name"`)
+	assert.Contains(t, wGet.Body.String(), `"qr_string"`)
+
+	// 2. Update QRIS Config
+	updateCfg := pos.QRISConfig{
+		MerchantName: "Toko Kue B45 Bakery QRIS",
+		NMID:         "ID1987654321",
+		QRString:     "00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID19876543210303UMI5204549953033605802ID5925TOKO KUE B45 BAKERY QRIS6010JAKARTA SE61051234062070703A0163041D2B",
+		QRImageURL:   "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=sample-b45-bakery",
+	}
+	cfgBytes, _ := json.Marshal(updateCfg)
+	wPut := httptest.NewRecorder()
+	reqPut, _ := http.NewRequest("PUT", "/pos/qris", bytes.NewBuffer(cfgBytes))
+	reqPut.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wPut, reqPut)
+
+	assert.Equal(t, http.StatusOK, wPut.Code)
+	assert.Contains(t, wPut.Body.String(), "Toko Kue B45 Bakery QRIS")
+}
+

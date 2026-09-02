@@ -194,6 +194,111 @@
                         }
                     },
                     "response": []
+                },
+                {
+                    "name": "Login (Al-Barakah Mart - Super Admin [All Permissions])",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "pm.test(\"Role is SUPER_ADMIN with full permissions\", function () {",
+                                    "    pm.expect(jsonData.data.user.role).to.eql('SUPER_ADMIN');",
+                                    "    pm.expect(jsonData.data.user.permissions).to.include.members(['pos:checkout', 'pos:read', 'pos:void', 'inventory:read', 'inventory:write', 'ledger:read', 'ledger:write']);",
+                                    "});",
+                                    "if(jsonData.data && jsonData.data.access_token) {",
+                                    "    pm.collectionVariables.set(\"jwt_token\", jsonData.data.access_token);",
+                                    "    pm.collectionVariables.set(\"superadmin_jwt_token\", jsonData.data.access_token);",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"tenant_slug\": \"al-barakah-mart\",\n    \"email\": \"superadmin@albarakah.com\",\n    \"password\": \"Password123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/login",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "auth",
+                                "login"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Login (Darussalam Store - Super Admin [All Permissions])",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "pm.test(\"Role is SUPER_ADMIN with full permissions for Darussalam Store\", function () {",
+                                    "    pm.expect(jsonData.data.user.role).to.eql('SUPER_ADMIN');",
+                                    "    pm.expect(jsonData.data.user.tenant_slug).to.eql('darussalam-store');",
+                                    "    pm.expect(jsonData.data.user.permissions).to.include.members(['pos:checkout', 'pos:read', 'pos:void', 'inventory:read', 'inventory:write', 'ledger:read', 'ledger:write']);",
+                                    "});",
+                                    "if(jsonData.data && jsonData.data.access_token) {",
+                                    "    pm.collectionVariables.set(\"jwt_token\", jsonData.data.access_token);",
+                                    "    pm.collectionVariables.set(\"darussalam_superadmin_jwt_token\", jsonData.data.access_token);",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"tenant_slug\": \"darussalam-store\",\n    \"email\": \"superadmin@darussalam.com\",\n    \"password\": \"Password123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/login",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "auth",
+                                "login"
+                            ]
+                        }
+                    },
+                    "response": []
                 }
             ]
         },
@@ -468,6 +573,410 @@
                                 "v1",
                                 "pos",
                                 "checkout"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "6. POS Checkout (QRIS with RRN & Notes) - SUCCESS",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "var idempotencyKey = 'idemp_qris_' + Date.now();",
+                                    "pm.collectionVariables.set(\"last_idempotency_key\", idempotencyKey);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        },
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 201 Created\", function () {",
+                                    "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Transaction number and payment method present\", function () {",
+                                    "    pm.expect(jsonData.data.transaction_number).to.be.a('string');",
+                                    "    pm.expect(jsonData.data.payment_method).to.eql('QRIS');",
+                                    "    pm.expect(jsonData.data.payment_reference).to.eql('RRN-20260902-12345');",
+                                    "});",
+                                    "if (jsonData.data && jsonData.data.transaction_id) {",
+                                    "    pm.collectionVariables.set(\"last_transaction_id\", jsonData.data.transaction_id);",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{last_idempotency_key}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"payment_method\": \"QRIS\",\n    \"payment_reference\": \"RRN-20260902-12345\",\n    \"customer_name\": \"Ibu Ratna\",\n    \"notes\": \"Kue Ulang Tahun: Happy Birthday Arkan (Lilin angka 5)\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 1\n        }\n    ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/checkout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "checkout"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "7. POS Checkout (Cash with Tendered & Change) - SUCCESS",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "var idempotencyKey = 'idemp_cash_' + Date.now();",
+                                    "pm.collectionVariables.set(\"last_idempotency_key\", idempotencyKey);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        },
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 201 Created\", function () {",
+                                    "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Change calculated accurately\", function () {",
+                                    "    pm.expect(jsonData.data.change_amount).to.be.at.least(0);",
+                                    "    pm.expect(jsonData.data.cash_tendered).to.be.at.least(jsonData.data.total_amount);",
+                                    "});",
+                                    "if (jsonData.data && jsonData.data.transaction_id) {",
+                                    "    pm.collectionVariables.set(\"last_transaction_id\", jsonData.data.transaction_id);",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{last_idempotency_key}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 200000,\n    \"customer_name\": \"Pak Bambang\",\n    \"notes\": \"Bolu Gulung Pandan Keju\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 1\n        }\n    ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/checkout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "checkout"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "8. List Orders (Order History)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Orders array returned\", function () {",
+                                    "    pm.expect(jsonData.data).to.be.an('array');",
+                                    "    pm.expect(jsonData.meta).to.be.an('object');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/orders?limit=20&offset=0",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "orders"
+                            ],
+                            "query": [
+                                {
+                                    "key": "limit",
+                                    "value": "20"
+                                },
+                                {
+                                    "key": "offset",
+                                    "value": "0"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "9. Get Order Detail (Receipt by ID)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Order detail has transaction and items\", function () {",
+                                    "    pm.expect(jsonData.data.transaction).to.be.an('object');",
+                                    "    pm.expect(jsonData.data.items).to.be.an('array');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/orders/{{last_transaction_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "orders",
+                                "{{last_transaction_id}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "10. Void / Refund Order - SUCCESS",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "var idempotencyKey = 'idemp_void_' + Date.now();",
+                                    "pm.collectionVariables.set(\"last_void_idempotency_key\", idempotencyKey);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        },
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Status is VOIDED\", function () {",
+                                    "    pm.expect(jsonData.data.status).to.eql('VOIDED');",
+                                    "    pm.expect(jsonData.data.items_restocked).to.be.at.least(1);",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{last_void_idempotency_key}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Customer cancel - salah ukuran kue\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/orders/{{last_transaction_id}}/void",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "orders",
+                                "{{last_transaction_id}}",
+                                "void"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "11. Daily Sales Summary (X/Z-Report)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Summary metrics present\", function () {",
+                                    "    pm.expect(jsonData.data.total_orders).to.be.at.least(0);",
+                                    "    pm.expect(jsonData.data.payment_breakdown).to.be.an('object');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/daily-summary",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "daily-summary"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "12. Get Tenant QRIS Configuration",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"QRIS config fields present\", function () {",
+                                    "    pm.expect(jsonData.data.merchant_name).to.be.a('string');",
+                                    "    pm.expect(jsonData.data.qr_string).to.be.a('string');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/qris",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "qris"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "13. Update Tenant QRIS Configuration",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"merchant_name\": \"Al Barakah Bakery Syariah\",\n    \"nmid\": \"ID1020030040050\",\n    \"qr_string\": \"00020101021126580014ID.LINKAJA.WWW011893600914300000222202151234567890123450303UMI51440014ID.CO.QRIS.WWW0215ID10200300400500303UMI5204549953033605802ID5926AL BARAKAH BAKERY SYARIAH6010JAKARTA SE61051234062070703A0163041D2B\",\n    \"qr_image_url\": \"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=sample\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/qris",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "qris"
                             ]
                         }
                     },
