@@ -1,0 +1,47 @@
+# Environment & Secret files
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursor/
+.cursorrules
+
+# Local Development & Engineering Instructions
+AGENTS.md
+CLAUDE.md
+.agents/
+docs/local/
+docs/internal/
+*.local.md
+notes/
+local/
+
+# Go build artifacts & test coverage
+backend/bin/
+*.out
+*.test
+coverage.txt
+coverage.html
+
+# Node / Frontend artifacts
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/node_modules/
+
+# Python / AI-Worker artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+ai-worker/.venv/
+ai-worker/venv/
+ai-worker/env/
+ai-worker/.pytest_cache/

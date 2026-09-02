@@ -19,7 +19,7 @@ gantt
     section Phase 2: Core APIs
     POS & Catalog Engine (Go)               :p2_1, 2026-09-15, 7d
     Redis Idempotency & Distributed Locks   :p2_2, 2026-09-18, 7d
-    Halal Supply Chain & Cert Validation    :p2_3, 2026-09-22, 7d
+    Compliance-Aware Supply Chain & Cert Validation :p2_3, 2026-09-22, 7d
     Double-Entry Ledger Engine              :p2_4, 2026-09-25, 7d
 
     section Phase 3: Frontend & Offline
@@ -54,11 +54,11 @@ gantt
 ### Phase 2: Core Domain APIs & Transaction Engine (Weeks 3 – 4)
 - **Objective:** Implement the transactional backend in Go with strict concurrency controls and Sharia compliance rules.
 - **Key Deliverables:**
-  - [ ] **POS Catalog & Checkout API:** `POST /api/v1/transactions` with atomic inventory decrements.
-  - [ ] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions.
-  - [ ] **Distributed Inventory Locking:** Dual-layer concurrency control (Redis Redlock + `SELECT ... FOR UPDATE`).
-  - [ ] **Halal Supply Chain Module:** Supplier registry, Halal Certificate tracking, and **hard-validation interceptor** blocking invalid POs and Goods Receipts.
-  - [ ] **Double-Entry Ledger Engine:** Automated journal generation adhering to $\sum \text{Debits} = \sum \text{Credits}$ balance invariants.
+  - [x] **POS Catalog & Checkout API:** `GET /api/v1/pos/products` and `POST /api/v1/pos/checkout` with atomic inventory decrements.
+  - [x] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions (`pkg/redis`).
+  - [x] **Concurrency Stock Locking:** Database transaction (`pgx.Tx`) with row-level locks (`SELECT ... FOR UPDATE OF p, i`).
+  - [x] **Compliance-Aware Supply Chain Module:** Supplier registry, Compliance Certificate tracking, and **configurable hard-validation interceptor** blocking invalid POs and Goods Receipts.
+  - [x] **Double-Entry Ledger Engine:** Automated journal generation adhering to $\sum \text{Debits} = \sum \text{Credits}$ balance invariants.
 
 ---
 
@@ -89,7 +89,7 @@ gantt
 | **Inventory Overselling during Flash Sales** | Medium | High | Dual-layer concurrency: Redis distributed lock handles fast-path rate limiting; DB `SELECT ... FOR UPDATE` guarantees ACID consistency. |
 | **Double Charges on Offline Network Reconnect** | High | High | Client-generated UUIDv4 `Idempotency-Key` persisted in IndexedDB and validated via Redis `SETNX` before transaction execution. |
 | **Tenant Data Leakage in Monolith** | Low | Critical | Automated middleware sets `SET search_path TO tenant_{uuid}` on every database connection before handler execution. |
-| **Expired Halal Goods Entering Warehouse** | Low | Critical | Hard-block validation triggered on both Purchase Order creation and physical Goods Receipt confirmation. |
+| **Expired Compliance Goods Entering Warehouse** | Low | Critical | Hard-block validation triggered conditionally based on tenant configuration on both Purchase Order creation and physical Goods Receipt confirmation. |
 
 ---
 

@@ -6,16 +6,71 @@ on:
   pull_request:
     branches: [ "main", "develop" ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint-and-test:
-    name: Lint & Test Placeholder
+  backend-ci:
+    name: Backend (Go Build, Vet & Test)
     runs-on: ubuntu-latest
-    
+    defaults:
+      run:
+        working-directory: backend
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: CI Pipeline Initialized
-      run: |
-        echo "Repository documentation suite is complete."
-        echo "Ready for Phase 1 code implementation."
-        echo "Once Go/Python/TS code is pushed, real tests will execute here."
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'backend/go.mod'
+          cache-dependency-path: 'backend/go.sum'
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Build Go modules
+        run: go build -v ./...
+
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Run Unit Tests with Race Detector
+        run: go test -v -race -short -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload Backend Coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.txt
+          if-no-files-found: ignore
+
+  frontend-ci:
+    name: Frontend (Next.js Lint & Build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Build Next.js project
+        run: npm run build
