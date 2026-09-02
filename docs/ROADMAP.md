@@ -11,27 +11,30 @@ gantt
     dateFormat  YYYY-MM-DD
     axisFormat  %W (Week)
 
-    section Phase 1: Foundation
-    Scaffolding & CI/CD Pipelines           :p1_1, 2026-09-01, 7d
-    PostgreSQL Schema-per-Tenant Engine    :p1_2, 2026-09-04, 7d
-    JWT Auth & RBAC Middleware              :p1_3, 2026-09-08, 7d
+    section Phase 1: Foundation (v0.1.0)
+    Scaffolding & CI/CD Pipelines           :done, p1_1, 2026-09-01, 7d
+    PostgreSQL Schema-per-Tenant Engine    :done, p1_2, 2026-09-04, 7d
+    JWT Auth & RBAC Middleware              :done, p1_3, 2026-09-08, 7d
 
-    section Phase 2: Core APIs
-    POS & Catalog Engine (Go)               :p2_1, 2026-09-15, 7d
-    Redis Idempotency & Distributed Locks   :p2_2, 2026-09-18, 7d
-    Compliance-Aware Supply Chain & Cert Validation :p2_3, 2026-09-22, 7d
-    Double-Entry Ledger Engine              :p2_4, 2026-09-25, 7d
+    section Phase 2: Core APIs & Extensions (v0.2.0 - v0.3.0)
+    POS & Catalog Engine (Go)               :done, p2_1, 2026-09-15, 7d
+    Redis Idempotency & Distributed Locks   :done, p2_2, 2026-09-18, 7d
+    Compliance Supply Chain & Halal Certs   :done, p2_3, 2026-09-22, 7d
+    Double-Entry Ledger Engine              :done, p2_4, 2026-09-25, 7d
+    Retail POS Operations, QRIS & Void      :done, p2_5, 2026-09-27, 4d
+    Bakery Inventory CRUD & Shrinkage Engine:done, p2_6, 2026-09-29, 3d
+    Performance Benchmarking & Load Testing :done, p2_7, 2026-10-01, 3d
 
-    section Phase 3: Frontend & Offline
-    Next.js POS UI & Barcode Search         :p3_1, 2026-09-29, 7d
-    IndexedDB & Service Worker Sync Engine  :p3_2, 2026-10-02, 7d
-    Supply Chain & Ledger Dashboards        :p3_3, 2026-10-06, 7d
+    section Phase 3: Frontend & Offline (v0.4.0)
+    Next.js POS UI & Barcode Search         :active, p3_1, 2026-10-03, 7d
+    IndexedDB & Service Worker Sync Engine  :p3_2, 2026-10-07, 7d
+    Supply Chain & Ledger Dashboards        :p3_3, 2026-10-11, 7d
 
-    section Phase 4: AI & Deployment
-    Python AI Auditor Worker & Cron Jobs    :p4_1, 2026-10-10, 6d
-    Zakat Tijarah Dynamic Calculator        :p4_2, 2026-10-13, 4d
-    Testcontainers Integration & E2E Tests  :p4_3, 2026-10-16, 5d
-    Production Docker & Public Showcase Prep:p4_4, 2026-10-20, 6d
+    section Phase 4: AI & Deployment (v0.5.0 - v1.0.0)
+    Python AI Auditor Worker & Cron Jobs    :p4_1, 2026-10-15, 6d
+    Zakat Tijarah Dynamic Calculator        :p4_2, 2026-10-18, 4d
+    Testcontainers Integration & E2E Tests  :p4_3, 2026-10-21, 5d
+    Production Docker & Public Showcase Prep:p4_4, 2026-10-24, 6d
 ```
 
 ---
