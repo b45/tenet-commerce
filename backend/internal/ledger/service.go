@@ -150,7 +150,7 @@ func (s *Service) CreateManualEntry(ctx context.Context, conn *pgxpool.Conn, req
 func (s *Service) PostPOSSaleJournal(ctx context.Context, tx pgx.Tx, txnID uuid.UUID, txnNumber string, totalAmount, totalCOGS float64, paymentMethod string) error {
 	entry := &Entry{
 		ID:                 uuid.New(),
-		EntryNumber:        "JE-POS-" + time.Now().Format("20060102150405") + "-" + txnNumber[len(txnNumber)-6:],
+		EntryNumber:        "JE-POS-" + time.Now().Format("20060102150405") + "-" + txnID.String()[:8],
 		EntryDate:          time.Now(),
 		SourceDocumentType: SourceDocPOSSale,
 		SourceDocumentID:   &txnID,
@@ -207,7 +207,7 @@ func (s *Service) PostPOSSaleJournal(ctx context.Context, tx pgx.Tx, txnID uuid.
 func (s *Service) PostPOSVoidReversalJournal(ctx context.Context, tx pgx.Tx, txnID uuid.UUID, txnNumber string, totalAmount, totalCOGS float64, paymentMethod string, voidReason string) error {
 	entry := &Entry{
 		ID:                 uuid.New(),
-		EntryNumber:        "JE-VOID-" + time.Now().Format("20060102150405") + "-" + txnNumber[len(txnNumber)-6:],
+		EntryNumber:        "JE-VOID-" + time.Now().Format("20060102150405") + "-" + txnID.String()[:8],
 		EntryDate:          time.Now(),
 		SourceDocumentType: SourceDocPOSVoid,
 		SourceDocumentID:   &txnID,
