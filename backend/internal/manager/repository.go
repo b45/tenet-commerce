@@ -53,14 +53,14 @@ func (r *Repository) GetInventoryAlerts(ctx context.Context, conn *pgxpool.Conn,
 			p.sku,
 			p.name,
 			COALESCE(c.name, '') AS category_name,
-			COALESCE(i.stock_quantity, p.stock_quantity, 0) AS current_stock,
+			COALESCE(i.stock_quantity, 0) AS current_stock,
 			COALESCE(i.reorder_threshold, $1) AS threshold,
 			p.unit_price
 		FROM products p
 		LEFT JOIN categories c ON p.category_id = c.id
 		LEFT JOIN inventory i ON p.id = i.product_id
 		WHERE p.is_active = true
-		  AND COALESCE(i.stock_quantity, p.stock_quantity, 0) <= COALESCE(i.reorder_threshold, $1)
+		  AND COALESCE(i.stock_quantity, 0) <= COALESCE(i.reorder_threshold, $1)
 		ORDER BY current_stock ASC, p.name ASC
 		LIMIT 50
 	`
