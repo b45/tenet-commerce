@@ -114,7 +114,10 @@ func (s *Service) CreateManualEntry(ctx context.Context, conn *pgxpool.Conn, req
 		Memo:               req.Memo,
 	}
 
+	var totalDebit, totalCredit float64
 	for _, reqLine := range req.Lines {
+		totalDebit += reqLine.DebitAmount
+		totalCredit += reqLine.CreditAmount
 		entry.Lines = append(entry.Lines, EntryLine{
 			ID:            uuid.New(),
 			LedgerEntryID: entry.ID,
@@ -123,6 +126,8 @@ func (s *Service) CreateManualEntry(ctx context.Context, conn *pgxpool.Conn, req
 			CreditAmount:  reqLine.CreditAmount,
 		})
 	}
+	entry.TotalDebit = totalDebit
+	entry.TotalCredit = totalCredit
 
 	if err := s.validateBalance(entry.Lines); err != nil {
 		return nil, err
