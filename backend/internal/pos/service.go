@@ -108,15 +108,11 @@ func (s *Service) Checkout(
 	}
 	totalAmount := math.Round((subtotal-discountAmount+taxAmount)*100) / 100
 
-	// 5.1 Handle Cash change calculation
-	var cashTendered float64
-	var changeAmount float64
-	if req.PaymentMethod == "CASH" && req.CashTendered != nil && *req.CashTendered > 0 {
-		cashTendered = *req.CashTendered
-		if cashTendered < totalAmount {
-			return nil, fmt.Errorf("%w: paid %.2f, required %.2f", ErrInsufficientCashTendered, cashTendered, totalAmount)
-		}
-		changeAmount = math.Round((cashTendered-totalAmount)*100) / 100
+	// 5.1 Validate settlement before any inventory or ledger mutation.
+	// A completed CASH sale must have a tender amount sufficient to cover the receipt total.
+	cashTendered, changeAmount, err := validatePaymentSettlement(req.PaymentMethod, req.CashTendered, totalAmount)
+	if err != nil {
+		return nil, err
 	}
 
 	// 6. APM SPAN: Atomically decrement stock for each locked item
@@ -219,6 +215,25 @@ func (s *Service) Checkout(
 		TotalAmount:       masterTxn.TotalAmount,
 		CreatedAt:         masterTxn.CreatedAt,
 	}, nil
+}
+
+func validatePaymentSettlement(paymentMethod string, cashTendered *float64, totalAmount float64) (float64, float64, error) {
+	if paymentMethod != "CASH" {
+		if cashTendered != nil {
+			return 0, 0, ErrCashTenderedNotAllowed
+		}
+		return 0, 0, nil
+	}
+
+	if cashTendered == nil {
+		return 0, 0, fmt.Errorf("%w: cash_tendered is required", ErrInsufficientCashTendered)
+	}
+
+	if *cashTendered < totalAmount {
+		return 0, 0, fmt.Errorf("%w: paid %.2f, required %.2f", ErrInsufficientCashTendered, *cashTendered, totalAmount)
+	}
+
+	return *cashTendered, math.Round((*cashTendered-totalAmount)*100) / 100, nil
 }
 
 // VoidTransaction executes an atomic void/refund of a completed transaction.
@@ -449,4 +464,3 @@ func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID st
 func (s *Service) GetLowStock(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
 	return s.repo.GetLowStockProducts(ctx, conn)
 }
-

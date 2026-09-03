@@ -98,12 +98,14 @@ func TestPOS_Checkout_SuccessAndStockDecrement(t *testing.T) {
 
 	// Execute purchase of 2 units of SKU-BEEF-01
 	idempotencyKey := fmt.Sprintf("pos-test-key-%d", time.Now().UnixNano())
+	cashTendered := 150000.00
 	checkoutPayload := pos.CheckoutRequest{
 		Items: []pos.CartItemRequest{
 			{SKU: "SKU-BEEF-01", Quantity: 2},
 		},
 		PaymentMethod:  "CASH",
 		DiscountAmount: 5000.00,
+		CashTendered:   &cashTendered,
 	}
 
 	bodyBytes, _ := json.Marshal(checkoutPayload)
@@ -347,11 +349,13 @@ func TestPOS_VoidOrder_SuccessAndReversal(t *testing.T) {
 	conn.Release()
 
 	idempotencyKey := fmt.Sprintf("pos-void-test-%d", time.Now().UnixNano())
+	cashTendered := 200000.00
 	checkoutPayload := pos.CheckoutRequest{
 		Items: []pos.CartItemRequest{
 			{SKU: "SKU-CHICKEN-01", Quantity: 2},
 		},
 		PaymentMethod: "CASH",
+		CashTendered:  &cashTendered,
 	}
 
 	bodyBytes, _ := json.Marshal(checkoutPayload)
@@ -746,4 +750,3 @@ func TestPOS_InventoryLowStockAlert(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"data"`)
 	assert.Contains(t, w.Body.String(), `"meta"`)
 }
-
