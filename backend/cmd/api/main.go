@@ -23,6 +23,11 @@ func main() {
 		port = "8081"
 	}
 
+	if err := pkgAuth.ValidateConfiguration(); err != nil {
+		logger.Error("Invalid authentication configuration", "error", err)
+		os.Exit(1)
+	}
+
 	ctx := context.Background()
 
 	// 1. Initialize PostgreSQL Database Connection Pool

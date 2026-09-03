@@ -1,6 +1,8 @@
 # Technical Architecture & System Design
 ## Tenet Commerce: Multi-Tenant Enterprise POS & Halal Supply Chain
 
+> **Implementation boundary (2026-09-03):** the Phase 1–2 Go backend is the implemented system. Diagrams and sections that describe the Next.js offline client, AI auditor, Zakat engine, production CI/CD, durable idempotency, Redlock, or a tenant-migration runner are target designs for later phases unless explicitly identified as current runtime behavior. See [Implementation Status](IMPLEMENTATION_STATUS.md).
+
 ---
 
 ## 1. Architectural Philosophy & Overview
@@ -199,7 +201,7 @@ Tenet Commerce supports Indonesian Standard QR Code (**QRIS**) payment flows:
 
 ---
 
-## 4. Offline-First Synchronization Architecture
+## 4. Target Design — Phase 3 Offline-First Synchronization
 
 The Next.js 14 POS client is built with an offline-first foundation to operate without disruption during network outages.
 
@@ -274,7 +276,7 @@ The Next.js 14 POS client is built with an offline-first foundation to operate w
 
 ---
 
-## 6. Asynchronous AI Sharia Auditor Worker
+## 6. Target Design — Phase 4 Asynchronous AI Sharia Auditor
 
 The AI Auditor is an isolated, asynchronous worker written in **Python 3.12** that connects to tenant schemas with **read-only database privileges**.
 
@@ -312,7 +314,7 @@ The AI Auditor is an isolated, asynchronous worker written in **Python 3.12** th
 
 ---
 
-## 7. CI/CD & DevOps Pipeline
+## 7. CI/CD & DevOps: Current Pipeline and Target Design
 
 ```yaml
 name: CI/CD Pipeline
@@ -420,7 +422,7 @@ Client Request (X-Trace-ID optional)
 
 ---
 
-## 8. POS Transaction Engine & Idempotency Architecture
+## 8. POS Transaction Engine: Current Behavior and Hardening Target
 
 The Point of Sale (POS) checkout engine executes sales with strict ACID guarantees, atomic stock decrements, and double-charge prevention.
 

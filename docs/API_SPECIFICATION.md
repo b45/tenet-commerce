@@ -1,38 +1,44 @@
 # REST API Specification & Endpoint Contracts
 ## Tenet Commerce: Enterprise POS & Halal Supply Chain API
 
+> **Implementation boundary (2026-09-03):** this specification documents the routes registered by `backend/cmd/api/router.go`. Tenant provisioning, Zakat, and AI-audit endpoints below are future design references only and are **not registered**. Phase 3/4 work must not rely on them.
+
 ---
 
 ## 1. Global API Standards & Protocols
 
 ### 1.1 Base URL & Content Negotiation
-- **Base URL:** `https://api.tenet-commerce.internal/api/v1`
+- **Local base URL:** `http://localhost:8081/api/v1`
 - **Content-Type:** `application/json; charset=utf-8`
-- **Protocol:** HTTP/2 over TLS 1.3
+- **Production transport:** deployment-specific; this repository does not yet provide a production TLS/API-gateway deployment.
 
 ### 1.2 Required Request Headers
 ```http
 Authorization: Bearer <JWT_ACCESS_TOKEN>
-Idempotency-Key: <UUIDv4>             # Mandatory on all POST / PUT mutating requests
-X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted from JWT)
+Idempotency-Key: <client-generated key> # Required by current middleware only for POS checkout, void, and stock adjustment
+X-Tenant-ID: <TENANT_SLUG>              # Fallback only; authenticated JWT tenant context has priority
 ```
 
-### 1.3 Standard Response Envelope
+### 1.3 Health Check
+- **Endpoint:** `GET /health`
+- **Auth:** Public
+- **Response:** `200 OK` with the application health payload. This endpoint is outside the `/api/v1` namespace.
+
+### 1.4 Standard Response Envelope
 ```json
 {
   "success": true,
   "data": {},
   "meta": {
-    "timestamp": "2026-08-30T10:00:00Z",
-    "request_id": "req_8f12c3e4-a1b2-4c3d-8e5f-123456789abc",
+    "total": 120,
     "page": 1,
     "limit": 50,
-    "total": 120
+    "offset": 0
   }
 }
 ```
 
-### 1.4 Standard Error Envelope
+### 1.5 Standard Error Envelope
 ```json
 {
   "success": false,
@@ -51,7 +57,7 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 
 ---
 
-## 2. Authentication & Tenant Management
+## 2. Authentication
 
 ### 2.1 Authenticate User (Login)
 - **Endpoint:** `POST /api/v1/auth/login`
@@ -97,7 +103,25 @@ Password for all seeded dev accounts: `Password123!`
 | **FINANCIAL_ADMIN** | `al-barakah-mart` | `finance1@albarakah.com` | Ledger Read/Write, Inventory Read, AI Audit |
 | **COMPLIANCE_OFFICER** | `al-barakah-mart` | `compliance1@albarakah.com` | Supply Chain Management, Inventory Read, AI Audit |
 
-### 2.2 Provision New Tenant
+### 2.2 Refresh Token
+- **Endpoint:** `POST /api/v1/auth/refresh`
+- **Auth:** Public
+- **Request Body:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+- **Response:** The same token-pair envelope as login. The current implementation issues a new access and refresh token after validating the submitted refresh token.
+
+### 2.3 Current Identity
+- **Endpoint:** `GET /api/v1/auth/me`
+- **Auth:** Bearer access token
+- **Response:** The authenticated JWT identity (`id`, `tenant_slug`, `role`, and `permissions`).
+
+### 2.4 Tenant Provisioning — Planned / Not Registered
+- **Status:** Not implemented as an HTTP endpoint. Tenant registry and schema provisioning are currently development/setup concerns and will be formalized by the tenant-migration hardening workstream.
+- **Future design reference (not an active contract):**
 - **Endpoint:** `POST /api/v1/tenants`
 - **Auth:** `SUPER_ADMIN`
 - **Request Body:**
@@ -179,6 +203,7 @@ Password for all seeded dev accounts: `Password123!`
   "discount_amount": 5000.00
 }
 ```
+- **Cash settlement rule:** when `payment_method` is `CASH`, `cash_tendered` is required and must be at least the calculated total. For `QRIS` and `SIMULATED_CARD`, omit `cash_tendered`.
 - **Response (201 Created):**
 ```json
 {
@@ -591,7 +616,8 @@ Password for all seeded dev accounts: `Password123!`
 
 ## 5. Sharia Ledger & Financial Reporting
 
-### 5.1 Query Real-Time Zakat Tijarah
+### 5.1 Zakat Tijarah — Planned / Not Registered
+- **Status:** No Zakat route is registered in the backend. The following payload is a future-design reference, not an active contract.
 - **Endpoint:** `GET /api/v1/ledger/zakat`
 - **Auth:** `FINANCIAL_ADMIN`, `MANAGER`
 - **Query Params:** `gold_price_per_gram=1350000` (in IDR)
@@ -619,9 +645,10 @@ Password for all seeded dev accounts: `Password123!`
 
 ---
 
-## 6. Continuous AI Auditor Endpoints
+## 6. Continuous AI Auditor — Planned / Not Registered
 
 ### 6.1 Retrieve AI Audit Reports
+- **Status:** No AI-audit route is registered in the backend. The following payload is a future-design reference, not an active contract.
 - **Endpoint:** `GET /api/v1/ai/audit-reports`
 - **Auth:** `FINANCIAL_ADMIN`, `COMPLIANCE_OFFICER`
 - **Response (200 OK):**
@@ -663,8 +690,6 @@ Password for all seeded dev accounts: `Password123!`
 
 ---
 
-*Tenet Commerce — REST API Specification v1.0.0*
-
 ### Ledger Module
 `GET /api/v1/ledger/accounts`
 - **Description:** Retrieve Chart of Accounts.
@@ -684,9 +709,9 @@ Password for all seeded dev accounts: `Password123!`
 
 ---
 
-## 6. Store Manager Analytics & KPI Dashboard
+## 7. Store Manager Analytics & KPI Dashboard
 
-### 6.1 Get Aggregated Store Dashboard
+### 7.1 Get Aggregated Store Dashboard
 - **Endpoint:** `GET /api/v1/manager/dashboard`
 - **Auth:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN`)
 - **Description:** Real-time business aggregations across sales revenue, inventory depletion alerts, Halal certificate expirations, and ledger account status.

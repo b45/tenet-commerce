@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.tenant_config (
 );
 
 INSERT INTO tenant_al_barakah_mart.tenant_config (config_key, config_value)
-VALUES ('compliance', '{"strict_compliance_mode": true}')
+VALUES ('compliance', '{"strict_compliance_mode": true, "required_compliance": ["HALAL_MUI"]}')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 
 
@@ -382,7 +382,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.tenant_config (
 );
 
 INSERT INTO tenant_darussalam_store.tenant_config (config_key, config_value)
-VALUES ('compliance', '{"strict_compliance_mode": false}')
+VALUES ('compliance', '{"strict_compliance_mode": false, "required_compliance": []}')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 
 
@@ -655,4 +655,3 @@ INSERT INTO tenant_darussalam_store.ledger_accounts (code, name, account_type, i
     ('5010', 'Cost of Goods Sold', 'EXPENSE', FALSE),
     ('5020', 'Inventory Shrinkage & Loss', 'EXPENSE', FALSE)
 ON CONFLICT (code) DO NOTHING;
-

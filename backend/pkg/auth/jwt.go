@@ -14,6 +14,8 @@ var (
 	ErrInvalidType  = errors.New("invalid token type")
 )
 
+const defaultDevelopmentJWTSecret = "super_secret_default_jwt_key_32_chars_long_minimum!"
+
 // CustomClaims encapsulates user and tenant context in the JWT payload
 type CustomClaims struct {
 	UserID      string   `json:"sub"`
@@ -36,7 +38,7 @@ type JWTService struct {
 func NewJWTService() *JWTService {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "super_secret_default_jwt_key_32_chars_long_minimum!"
+		secret = defaultDevelopmentJWTSecret
 	}
 
 	return &JWTService{
@@ -44,6 +46,22 @@ func NewJWTService() *JWTService {
 		accessExpiry:  15 * time.Minute,
 		refreshExpiry: 7 * 24 * time.Hour,
 	}
+}
+
+// ValidateConfiguration rejects development-only JWT credentials outside a development runtime.
+// It is called by the API composition root before accepting HTTP traffic.
+func ValidateConfiguration() error {
+	environment := os.Getenv("APP_ENV")
+	if environment == "" || environment == "development" {
+		return nil
+	}
+
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" || secret == defaultDevelopmentJWTSecret {
+		return fmt.Errorf("JWT_SECRET must be configured with a non-development value when APP_ENV=%q", environment)
+	}
+
+	return nil
 }
 
 // GetPermissionsForRole returns the predefined permissions for each RBAC role

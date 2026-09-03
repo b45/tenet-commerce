@@ -196,6 +196,11 @@ func (h *Handler) Checkout(c *gin.Context) {
 			response.BadRequest(c, "INSUFFICIENT_CASH_TENDERED", err.Error())
 			return
 		}
+		if errors.Is(err, ErrCashTenderedNotAllowed) {
+			log.Warn("Checkout rejected: cash tendered supplied for non-cash payment", "cashier_id", cashierID)
+			response.BadRequest(c, "INVALID_CASH_TENDERED", err.Error())
+			return
+		}
 		if errors.Is(err, ErrInsufficientStock) {
 			log.Warn("Checkout rejected due to insufficient stock", "error", err, "cashier_id", cashierID)
 			response.Conflict(c, "INSUFFICIENT_STOCK", err.Error())
@@ -827,4 +832,3 @@ func (h *Handler) GetLowStock(c *gin.Context) {
 		Total: len(products),
 	})
 }
-
