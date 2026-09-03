@@ -253,6 +253,28 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipt_items (
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
 );
 
+-- 5.6 Durable Idempotency Requests
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.idempotency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key VARCHAR(255) NOT NULL,
+    target_route VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    response_status_code INT,
+    response_headers JSONB,
+    response_body JSONB,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_idempotency_key_route_al_barakah UNIQUE (idempotency_key, target_route)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_lookup_al_barakah 
+    ON tenant_al_barakah_mart.idempotency_requests (idempotency_key, target_route);
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_expires_al_barakah 
+    ON tenant_al_barakah_mart.idempotency_requests (expires_at);
+
 -- 5.5 Ledger Engine
 
 -- Sharia Double-Entry General Ledger
@@ -561,6 +583,28 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipt_items (
     product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE RESTRICT,
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
 );
+
+-- 6.5.1 Durable Idempotency Requests
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.idempotency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key VARCHAR(255) NOT NULL,
+    target_route VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    response_status_code INT,
+    response_headers JSONB,
+    response_body JSONB,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_idempotency_key_route_darussalam UNIQUE (idempotency_key, target_route)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_lookup_darussalam 
+    ON tenant_darussalam_store.idempotency_requests (idempotency_key, target_route);
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_expires_darussalam 
+    ON tenant_darussalam_store.idempotency_requests (expires_at);
 
 -- 6.6 Seed Products for tenant_darussalam_store
 INSERT INTO tenant_darussalam_store.products (id, sku, barcode, name, unit_price, cost_price, compliance_tags, is_active)

@@ -324,3 +324,12 @@ func stockForSKU(t *testing.T, db *database.PostgresDB, sku string) int {
 
 	return stock
 }
+
+func newTestRedisClient(t *testing.T) *pkgRedis.Client {
+	t.Helper()
+	client, err := pkgRedis.NewRedisClient(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+	require.NoError(t, client.RDB.FlushDB(context.Background()).Err())
+	return client
+}
