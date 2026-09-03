@@ -78,8 +78,8 @@ gantt
 
 ### Phase 2 Hardening Gate (v0.3.1)
 - **Objective:** Prove Phase 1–2 invariants before expanding the product surface in Phase 3.
-- **Exit criteria:** Hermetic PostgreSQL/Redis integration tests; transaction-scoped tenant context; durable idempotency; atomic PO/GR reconciliation; exact-money and append-only-ledger decisions; synchronized API/benchmark evidence.
-- **Status:** Active. Phase 3 is intentionally on hold until this gate is passed.
+- **Exit criteria:** Hermetic PostgreSQL/Redis integration tests; transaction-scoped tenant context; durable idempotency; atomic PO/GR reconciliation; exact-money and append-only-ledger decisions; synchronized API/benchmark evidence; E2E Golden Journey verification.
+- **Status:** **PASSED & SIGNED OFF.** All 24 hermetic integration tests pass; full-lifecycle E2E verified; real-database benchmarks documented. Phase 3 is officially unlocked.
 
 ### Phase 3: Frontend Client & Offline-First POS
 - **Objective:** Build a responsive, high-performance web POS using Next.js 14 and shadcn/ui with offline resilience.

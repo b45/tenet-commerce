@@ -155,6 +155,21 @@ func newPoolSizeOneDatabase(t *testing.T) *database.PostgresDB {
 	return &database.PostgresDB{Pool: pool}
 }
 
+func newTestDatabase(t *testing.T) *database.PostgresDB {
+	t.Helper()
+
+	config, err := pgxpool.ParseConfig(integrationDSN)
+	require.NoError(t, err)
+	config.MaxConns = 10
+	config.MinConns = 1
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	return &database.PostgresDB{Pool: pool}
+}
+
 func TestCanonicalInitScriptCreatesRequiredInfrastructure(t *testing.T) {
 	db := newPoolSizeOneDatabase(t)
 
