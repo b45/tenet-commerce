@@ -276,9 +276,11 @@ CREATE TABLE ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT', 'REVERSAL')),
     source_document_id UUID,
     memo TEXT NOT NULL,
+    status VARCHAR(31) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
+    reversed_by_entry_id UUID REFERENCES ledger_entries(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -296,6 +298,13 @@ CREATE TABLE ledger_entry_lines (
 
 CREATE INDEX idx_ledger_lines_account ON ledger_entry_lines(account_id);
 CREATE INDEX idx_ledger_entries_date ON ledger_entries(entry_date);
+CREATE INDEX idx_ledger_entries_status ON ledger_entries(status);
+CREATE INDEX idx_ledger_entries_reversed_by ON ledger_entries(reversed_by_entry_id);
+
+-- Immutability & Double-Entry Constraints:
+-- 1. trg_verify_ledger_balance (CONSTRAINT TRIGGER): Hard-enforces line_count >= 2, total_debit > 0, and total_debit == total_credit.
+-- 2. trg_immutable_ledger_entries (BEFORE UPDATE OR DELETE): Blocks all deletions; permits updates ONLY for transitioning status from POSTED to REVERSED with a valid reversed_by_entry_id.
+-- 3. trg_immutable_ledger_lines (BEFORE UPDATE OR DELETE): Blocks any update or deletion on posted entry lines.
 
 -- 4.5 Zakat Tijarah Calculations
 CREATE TABLE zakat_calculations (

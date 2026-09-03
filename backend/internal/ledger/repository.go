@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -64,13 +65,17 @@ func (r *Repository) GetAccountByCode(ctx context.Context, db pgx.Tx, code strin
 
 // CreateEntryWithLines inserts an entry and its lines atomically within the provided transaction.
 func (r *Repository) CreateEntryWithLines(ctx context.Context, tx pgx.Tx, entry *Entry) error {
+	if entry.Status == "" {
+		entry.Status = StatusPosted
+	}
+
 	queryEntry := `
-		INSERT INTO ledger_entries (id, entry_number, entry_date, source_document_type, source_document_id, memo)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO ledger_entries (id, entry_number, entry_date, source_document_type, source_document_id, memo, status, reversed_by_entry_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING created_at
 	`
 	err := tx.QueryRow(ctx, queryEntry,
-		entry.ID, entry.EntryNumber, entry.EntryDate, entry.SourceDocumentType, entry.SourceDocumentID, entry.Memo,
+		entry.ID, entry.EntryNumber, entry.EntryDate, entry.SourceDocumentType, entry.SourceDocumentID, entry.Memo, entry.Status, entry.ReversedByEntryID,
 	).Scan(&entry.CreatedAt)
 	if err != nil {
 		return err
@@ -96,7 +101,7 @@ func (r *Repository) CreateEntryWithLines(ctx context.Context, tx pgx.Tx, entry 
 // GetEntries fetches journal entries with their lines
 func (r *Repository) GetEntries(ctx context.Context, conn *pgxpool.Conn, limit, offset int) ([]Entry, error) {
 	queryEntries := `
-		SELECT id, entry_number, entry_date, source_document_type, source_document_id, memo, created_at
+		SELECT id, entry_number, entry_date, source_document_type, source_document_id, memo, status, reversed_by_entry_id, created_at
 		FROM ledger_entries
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -110,13 +115,13 @@ func (r *Repository) GetEntries(ctx context.Context, conn *pgxpool.Conn, limit, 
 	var entries []Entry
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.EntryNumber, &e.EntryDate, &e.SourceDocumentType, &e.SourceDocumentID, &e.Memo, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.EntryNumber, &e.EntryDate, &e.SourceDocumentType, &e.SourceDocumentID, &e.Memo, &e.Status, &e.ReversedByEntryID, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
 	}
 
-	// Fetch lines for each entry (N+1 query is acceptable here for small limits, otherwise could use IN clause)
+	// Fetch lines for each entry
 	for i := range entries {
 		queryLines := `
 			SELECT l.id, l.ledger_entry_id, l.account_id, a.code, a.name, l.debit_amount, l.credit_amount
@@ -128,7 +133,7 @@ func (r *Repository) GetEntries(ctx context.Context, conn *pgxpool.Conn, limit, 
 		if err != nil {
 			return nil, err
 		}
-		
+
 		var lines []EntryLine
 		var totalDebit, totalCredit float64
 		for lineRows.Next() {
@@ -148,6 +153,70 @@ func (r *Repository) GetEntries(ctx context.Context, conn *pgxpool.Conn, limit, 
 	}
 
 	return entries, nil
+}
+
+// GetEntryByID loads an entry and its lines within a transaction with row lock
+func (r *Repository) GetEntryByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Entry, error) {
+	query := `
+		SELECT id, entry_number, entry_date, source_document_type, source_document_id, memo, status, reversed_by_entry_id, created_at
+		FROM ledger_entries
+		WHERE id = $1
+		FOR UPDATE
+	`
+	var e Entry
+	err := tx.QueryRow(ctx, query, id).Scan(&e.ID, &e.EntryNumber, &e.EntryDate, &e.SourceDocumentType, &e.SourceDocumentID, &e.Memo, &e.Status, &e.ReversedByEntryID, &e.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	queryLines := `
+		SELECT l.id, l.ledger_entry_id, l.account_id, a.code, a.name, l.debit_amount, l.credit_amount
+		FROM ledger_entry_lines l
+		JOIN ledger_accounts a ON l.account_id = a.id
+		WHERE l.ledger_entry_id = $1
+	`
+	lineRows, err := tx.Query(ctx, queryLines, e.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer lineRows.Close()
+
+	var lines []EntryLine
+	var totalDebit, totalCredit float64
+	for lineRows.Next() {
+		var l EntryLine
+		if err := lineRows.Scan(&l.ID, &l.LedgerEntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.DebitAmount, &l.CreditAmount); err != nil {
+			return nil, err
+		}
+		totalDebit += l.DebitAmount
+		totalCredit += l.CreditAmount
+		lines = append(lines, l)
+	}
+	e.Lines = lines
+	e.TotalDebit = totalDebit
+	e.TotalCredit = totalCredit
+
+	return &e, nil
+}
+
+// MarkEntryReversed sets status = REVERSED and sets reversed_by_entry_id atomically
+func (r *Repository) MarkEntryReversed(ctx context.Context, tx pgx.Tx, originalEntryID, reversalEntryID uuid.UUID) error {
+	query := `
+		UPDATE ledger_entries
+		SET status = $1, reversed_by_entry_id = $2
+		WHERE id = $3 AND status = $4
+	`
+	cmd, err := tx.Exec(ctx, query, StatusReversed, reversalEntryID, originalEntryID, StatusPosted)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return errors.New("entry not found or already reversed")
+	}
+	return nil
 }
 
 // GetTrialBalance computes the Trial Balance as of a specific date

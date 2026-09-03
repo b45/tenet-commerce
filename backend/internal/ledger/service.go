@@ -10,12 +10,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/b45/tenet-commerce/backend/pkg/money"
 )
 
 var (
-	ErrUnbalancedEntry = errors.New("ledger entry is unbalanced: total debits must equal total credits")
-	ErrZeroAmountEntry = errors.New("ledger entry has zero amount")
-	ErrInsufficientLines = errors.New("ledger entry must have at least two lines")
+	ErrUnbalancedEntry      = errors.New("ledger entry is unbalanced: total debits must equal total credits")
+	ErrZeroAmountEntry      = errors.New("ledger entry has zero amount")
+	ErrInsufficientLines    = errors.New("ledger entry must have at least two lines")
+	ErrInvalidLineDirection = errors.New("ledger entry line must have either positive debit or positive credit, not both or negative")
+	ErrAlreadyReversed      = errors.New("journal entry has already been reversed")
 )
 
 type Service struct {
@@ -53,45 +57,84 @@ func (s *Service) GetTrialBalance(ctx context.Context, conn *pgxpool.Conn, asOfD
 		return nil, err
 	}
 
+	totalDebitMoney := money.IDR(0)
+	totalCreditMoney := money.IDR(0)
 	var totalDebit, totalCredit float64
 	for _, row := range rows {
 		totalDebit += row.TotalDebit
 		totalCredit += row.TotalCredit
-	}
 
-	// Deal with floating point issues by rounding to 2 decimal places before comparison
-	totalDebitRounded := float64(int(totalDebit*100)) / 100
-	totalCreditRounded := float64(int(totalCredit*100)) / 100
+		dMoney, _ := money.FromFloat(row.TotalDebit, "IDR")
+		cMoney, _ := money.FromFloat(row.TotalCredit, "IDR")
+		totalDebitMoney, _ = totalDebitMoney.Add(dMoney)
+		totalCreditMoney, _ = totalCreditMoney.Add(cMoney)
+	}
 
 	return &TrialBalanceSummary{
 		AsOfDate:     asOfDate,
 		Rows:         rows,
 		TotalDebits:  totalDebit,
 		TotalCredits: totalCredit,
-		IsBalanced:   totalDebitRounded == totalCreditRounded,
+		IsBalanced:   totalDebitMoney.Amount() == totalCreditMoney.Amount(),
 	}, nil
 }
 
-// validateBalance checks if an entry satisfies the accounting invariants before hitting DB
+// validateBalance checks if an entry satisfies the accounting invariants using exact-money arithmetic
 func (s *Service) validateBalance(lines []EntryLine) error {
 	if len(lines) < 2 {
 		return ErrInsufficientLines
 	}
 
-	var sumDebit, sumCredit float64
+	allZero := true
 	for _, line := range lines {
-		sumDebit += line.DebitAmount
-		sumCredit += line.CreditAmount
+		if line.DebitAmount != 0 || line.CreditAmount != 0 {
+			allZero = false
+			break
+		}
 	}
-
-	sumDebitRounded := float64(int(sumDebit*100)) / 100
-	sumCreditRounded := float64(int(sumCredit*100)) / 100
-
-	if sumDebitRounded == 0 && sumCreditRounded == 0 {
+	if allZero {
 		return ErrZeroAmountEntry
 	}
 
-	if sumDebitRounded != sumCreditRounded {
+	sumDebit := money.IDR(0)
+	sumCredit := money.IDR(0)
+
+	for _, line := range lines {
+		if line.DebitAmount < 0 || line.CreditAmount < 0 {
+			return ErrInvalidLineDirection
+		}
+		if (line.DebitAmount > 0 && line.CreditAmount > 0) || (line.DebitAmount == 0 && line.CreditAmount == 0) {
+			return ErrInvalidLineDirection
+		}
+
+		if line.DebitAmount > 0 {
+			dMoney, err := money.FromFloat(line.DebitAmount, "IDR")
+			if err != nil {
+				return fmt.Errorf("invalid debit amount: %w", err)
+			}
+			sumDebit, err = sumDebit.Add(dMoney)
+			if err != nil {
+				return err
+			}
+		}
+
+		if line.CreditAmount > 0 {
+			cMoney, err := money.FromFloat(line.CreditAmount, "IDR")
+			if err != nil {
+				return fmt.Errorf("invalid credit amount: %w", err)
+			}
+			sumCredit, err = sumCredit.Add(cMoney)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if sumDebit.IsZero() && sumCredit.IsZero() {
+		return ErrZeroAmountEntry
+	}
+
+	if sumDebit.Amount() != sumCredit.Amount() {
 		return ErrUnbalancedEntry
 	}
 
@@ -113,6 +156,7 @@ func (s *Service) CreateManualEntry(ctx context.Context, conn *pgxpool.Conn, req
 		SourceDocumentType: req.SourceDocumentType,
 		SourceDocumentID:   req.SourceDocumentID,
 		Memo:               req.Memo,
+		Status:             StatusPosted,
 	}
 
 	var totalDebit, totalCredit float64
@@ -143,6 +187,66 @@ func (s *Service) CreateManualEntry(ctx context.Context, conn *pgxpool.Conn, req
 	}
 
 	return entry, nil
+}
+
+// ReverseManualEntry creates an exact opposite double-entry reversal journal and updates the original entry's status
+func (s *Service) ReverseManualEntry(ctx context.Context, conn *pgxpool.Conn, entryID uuid.UUID, reason string) (*Entry, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	orig, err := s.repo.GetEntryByID(ctx, tx, entryID)
+	if err != nil {
+		return nil, err
+	}
+
+	if orig.Status == StatusReversed {
+		return nil, ErrAlreadyReversed
+	}
+
+	revID := uuid.New()
+	reversalEntry := &Entry{
+		ID:                 revID,
+		EntryNumber:        "JE-REV-" + time.Now().Format("20060102150405") + "-" + orig.ID.String()[:8],
+		EntryDate:          time.Now(),
+		SourceDocumentType: SourceDocReversal,
+		SourceDocumentID:   &orig.ID,
+		Memo:               fmt.Sprintf("Reversal of %s: %s", orig.EntryNumber, reason),
+		Status:             StatusPosted,
+		TotalDebit:         orig.TotalCredit,
+		TotalCredit:        orig.TotalDebit,
+	}
+
+	// Invert debits and credits
+	for _, l := range orig.Lines {
+		reversalEntry.Lines = append(reversalEntry.Lines, EntryLine{
+			ID:            uuid.New(),
+			LedgerEntryID: revID,
+			AccountID:     l.AccountID,
+			DebitAmount:   l.CreditAmount,
+			CreditAmount:  l.DebitAmount,
+		})
+	}
+
+	if err := s.validateBalance(reversalEntry.Lines); err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.CreateEntryWithLines(ctx, tx, reversalEntry); err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.MarkEntryReversed(ctx, tx, orig.ID, revID); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return reversalEntry, nil
 }
 
 // PostPOSSaleJournal creates an automatic journal entry for a POS checkout.

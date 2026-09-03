@@ -22,6 +22,13 @@ const (
 	SourceDocGoodsReceipt      = "GOODS_RECEIPT"
 	SourceDocManualAdjustment  = "MANUAL_ADJUSTMENT"
 	SourceDocZakatDisbursement = "ZAKAT_DISBURSEMENT"
+	SourceDocReversal          = "REVERSAL"
+)
+
+// Journal Entry Statuses
+const (
+	StatusPosted   = "POSTED"
+	StatusReversed = "REVERSED"
 )
 
 // Account represents a ledger account (COA)
@@ -43,6 +50,8 @@ type Entry struct {
 	SourceDocumentType string      `json:"source_document_type"`
 	SourceDocumentID   *uuid.UUID  `json:"source_document_id,omitempty"`
 	Memo               string      `json:"memo"`
+	Status             string      `json:"status"`
+	ReversedByEntryID  *uuid.UUID  `json:"reversed_by_entry_id,omitempty"`
 	CreatedAt          time.Time   `json:"created_at"`
 	TotalDebit         float64     `json:"total_debit"`
 	TotalCredit        float64     `json:"total_credit"`
@@ -58,6 +67,11 @@ type EntryLine struct {
 	AccountName   string    `json:"account_name,omitempty"` // For convenience in responses
 	DebitAmount   float64   `json:"debit_amount"`
 	CreditAmount  float64   `json:"credit_amount"`
+}
+
+// ReverseEntryRequest represents payload for reversing an existing journal entry
+type ReverseEntryRequest struct {
+	Reason string `json:"reason" binding:"required,min=3,max=255"`
 }
 
 // CreateEntryRequest represents the payload for creating a manual journal entry
