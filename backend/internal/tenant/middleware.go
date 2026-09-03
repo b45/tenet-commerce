@@ -3,8 +3,10 @@ package tenant
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
@@ -22,9 +24,22 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 		reqLogger := logger.FromContext(c.Request.Context())
 
 		// 1. Resolve tenant slug: JWT context takes priority over manual header.
-		tenantSlug := c.GetString("tenant_slug")
+		tokenSlug := strings.TrimSpace(c.GetString("tenant_slug"))
+		headerSlug := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+
+		// Cross-tenant guard: prevent sending a token for tenant A while targeting tenant B in header.
+		if tokenSlug != "" && headerSlug != "" && tokenSlug != headerSlug {
+			reqLogger.Warn("Conflicting tenant identifiers in header and token",
+				"header_tenant", headerSlug,
+				"token_tenant", tokenSlug,
+			)
+			response.AbortBadRequest(c, "TENANT_CONTEXT_CONFLICT", "X-Tenant-ID header conflicts with authenticated token tenant")
+			return
+		}
+
+		tenantSlug := tokenSlug
 		if tenantSlug == "" {
-			tenantSlug = c.GetHeader("X-Tenant-ID")
+			tenantSlug = headerSlug
 		}
 
 		if tenantSlug == "" {
@@ -44,7 +59,36 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 			return
 		}
 
-		// 3. Acquire a dedicated connection from the pool for this request lifetime
+		// 3. Cross-tenant token verification: verify JWT claims match resolved tenant attributes
+		if claimsVal, exists := c.Get("jwt_claims"); exists {
+			if claims, ok := claimsVal.(*pkgAuth.CustomClaims); ok {
+				if claims.TenantID != "" && claims.TenantID != tenantData.ID {
+					reqLogger.Warn("Token tenant ID does not match active tenant context",
+						"claims_tenant_id", claims.TenantID,
+						"resolved_tenant_id", tenantData.ID,
+					)
+					response.AbortForbidden(c, "TENANT_ACCESS_DENIED", "Token tenant ID does not match active tenant")
+					return
+				}
+				if claims.TenantSlug != "" && claims.TenantSlug != tenantData.Slug {
+					reqLogger.Warn("Token tenant slug does not match active tenant context",
+						"claims_tenant_slug", claims.TenantSlug,
+						"resolved_tenant_slug", tenantData.Slug,
+					)
+					response.AbortForbidden(c, "TENANT_ACCESS_DENIED", "Token tenant slug does not match active tenant")
+					return
+				}
+			}
+		}
+
+		// 4. Validate schema name against strict identifier invariants
+		if !IsValidSchemaName(tenantData.SchemaName) {
+			reqLogger.Error("Invalid or unsafe schema name in tenant registry", "schema_name", tenantData.SchemaName)
+			response.AbortInternalServerError(c, "INVALID_SCHEMA_CONFIGURATION", "Tenant schema configuration is invalid")
+			return
+		}
+
+		// 5. Acquire a dedicated connection from the pool for this request lifetime
 		conn, err := db.Pool.Acquire(c.Request.Context())
 		if err != nil {
 			reqLogger.Error("Failed to acquire DB connection from pool",
@@ -70,7 +114,7 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 			conn.Release()
 		}()
 
-		// 4. Set the schema search path dynamically.
+		// 6. Set the schema search path dynamically.
 		// SECURITY: schemaName is retrieved from our trusted public.tenants registry,
 		// never directly from user input, and sanitized by pgx.Identifier to prevent SQL injection.
 		searchPathQuery := fmt.Sprintf("SET search_path TO %s, public;",
@@ -86,8 +130,16 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 			return
 		}
 
-		// 5. Inject the scoped connection and tenant data into Gin context.
-		// Downstream handlers MUST use c.Get("db_conn") and NOT touch the global pool directly.
+		// 7. Initialize ScopedDB wrapper for transaction-local SET LOCAL search_path execution
+		scopedDB, err := NewScopedDB(conn, tenantData)
+		if err != nil {
+			reqLogger.Error("Failed to initialize scoped tenant database wrapper", "error", err)
+			response.AbortInternalServerError(c, "TENANT_CONTEXT_FAILURE", "Failed to initialize scoped tenant database context")
+			return
+		}
+
+		// 8. Inject the scoped wrapper, raw connection, and tenant data into Gin context.
+		c.Set("tenant_db", scopedDB)
 		c.Set("db_conn", conn)
 		c.Set("tenant", tenantData)
 
