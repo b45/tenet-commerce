@@ -652,6 +652,102 @@ Password for all seeded dev accounts: `Password123!`
   - `409 Conflict` (`IDEMPOTENCY_KEY_CONFLICT`, `INVALID_PO_STATUS`)
   - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `COMPLIANCE_ERROR`)
 
+### 4.4 List Suppliers
+- **Endpoint:** `GET /api/v1/supply-chain/suppliers`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Query Params:**
+  - `is_active` (optional, boolean): Filter by active status (`true` / `false`).
+  - `limit` (optional, default: 50): Number of records.
+  - `offset` (optional, default: 0): Pagination offset.
+- **Response (200 OK):** Returns list of suppliers with their latest compliance certificate summary.
+
+### 4.5 Get Supplier Details
+- **Endpoint:** `GET /api/v1/supply-chain/suppliers/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Returns full supplier entity including all historical certificates and current validity status.
+
+### 4.6 Update Supplier
+- **Endpoint:** `PUT /api/v1/supply-chain/suppliers/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Request Body:**
+```json
+{
+  "company_name": "PT Berkah Pangan Mandiri",
+  "contact_person": "Ahmad Fauzi",
+  "contact_email": "fauzi@berkahpangan.id",
+  "contact_phone": "+628123456789",
+  "is_active": true
+}
+```
+- **Response (200 OK):** Returns updated supplier.
+
+### 4.7 List Supplier Certificates
+- **Endpoint:** `GET /api/v1/supply-chain/suppliers/:id/certificates`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Returns list of certificates for the specified supplier with dynamic `computed_status` (`VALID`, `EXPIRING_SOON`, `EXPIRED`, `NOT_YET_VALID`).
+
+### 4.8 Register Certificate Renewal
+- **Endpoint:** `POST /api/v1/supply-chain/suppliers/:id/certificates`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Request Body:**
+```json
+{
+  "cert_type": "HALAL_MUI",
+  "certificate_number": "ID31110000998877665",
+  "issuing_authority": "BPJPH",
+  "scope": "Poultry & Meat Processing",
+  "valid_from": "2026-09-01",
+  "expiry_date": "2028-09-01"
+}
+```
+- **Response (201 Created):** Returns registered certificate with computed validity.
+
+### 4.9 Revoke Certificate
+- **Endpoint:** `PUT /api/v1/supply-chain/certificates/:id/revoke`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Immediately marks certificate expired (`{"success": true, "data": {"revoked": true}}`).
+
+### 4.10 List Purchase Orders
+- **Endpoint:** `GET /api/v1/supply-chain/purchase-orders`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Query Params:**
+  - `status` (optional): Filter by `DRAFT`, `ISSUED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED`.
+  - `limit` (optional, default: 50)
+  - `offset` (optional, default: 0)
+- **Response (200 OK):** List of purchase order summaries with supplier name, total amount, status, and item count.
+
+### 4.11 Get Purchase Order Detail & Balance
+- **Endpoint:** `GET /api/v1/supply-chain/purchase-orders/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Complete purchase order record with:
+  - Line items with `quantity`, `received_quantity`, and `remaining_quantity`.
+  - Associated Goods Receipts with total valuation.
+
+### 4.12 Cancel Purchase Order
+- **Endpoint:** `PUT /api/v1/supply-chain/purchase-orders/:id/cancel`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Rules:** Only `DRAFT` or `ISSUED` purchase orders with zero received goods can be cancelled.
+- **Response (200 OK):** `{"success": true, "data": {"cancelled": true}}`.
+
+### 4.13 List Goods Receipts
+- **Endpoint:** `GET /api/v1/supply-chain/goods-receipts`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** List of goods receipt summaries with PO numbers, supplier names, and inbound valuations.
+
+### 4.14 Get Goods Receipt Detail
+- **Endpoint:** `GET /api/v1/supply-chain/goods-receipts/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Detail of goods receipt with product names, SKU, received quantities, total inbound valuation, and cross-referenced Sharia ledger entry number.
+
+### 4.15 Document-Level Product Traceability
+- **Endpoint:** `GET /api/v1/supply-chain/traceability/product/:product_id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** End-to-end document lineage for a product:
+  - Product metadata and current warehouse inventory stock.
+  - Suppliers who have provided this product along with active BPJPH/MUI Halal compliance certificates.
+  - Historical Purchase Orders containing the product.
+  - Historical Goods Receipts with receipt dates, quantities, and receiving officers.
+
 ---
 
 ## 5. Sharia Ledger & Financial Reporting

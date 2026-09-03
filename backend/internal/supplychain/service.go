@@ -367,3 +367,125 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 	}
 	return inboundValue, true, nil
 }
+
+// ListSuppliers returns a paginated list of suppliers with optional is_active filter
+func (s *Service) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isActive *bool, limit, offset int) ([]Supplier, error) {
+	return s.repo.ListSuppliers(ctx, conn, isActive, limit, offset)
+}
+
+// GetSupplier retrieves a single supplier along with all its compliance certificates
+func (s *Service) GetSupplier(ctx context.Context, conn *pgxpool.Conn, id uuid.UUID) (*SupplierDetail, error) {
+	return s.repo.GetSupplierWithCertificates(ctx, conn, id)
+}
+
+// UpdateSupplier updates supplier contact and active status
+func (s *Service) UpdateSupplier(ctx context.Context, conn *pgxpool.Conn, id uuid.UUID, req *UpdateSupplierRequest) (*Supplier, error) {
+	return s.repo.UpdateSupplier(ctx, conn, id, req)
+}
+
+// GetSupplierCertificates returns all certificates for a supplier
+func (s *Service) GetSupplierCertificates(ctx context.Context, conn *pgxpool.Conn, supplierID uuid.UUID) ([]ComplianceCertificate, error) {
+	// Verify supplier exists first
+	_, err := s.repo.GetSupplierByID(ctx, conn, supplierID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.GetCertificatesBySupplierID(ctx, conn, supplierID)
+}
+
+// RegisterCertificate adds a new or renewal compliance certificate for a supplier
+func (s *Service) RegisterCertificate(ctx context.Context, conn *pgxpool.Conn, supplierID uuid.UUID, req *CreateComplianceCertRequest) (*ComplianceCertificate, error) {
+	// Verify supplier exists
+	_, err := s.repo.GetSupplierByID(ctx, conn, supplierID)
+	if err != nil {
+		return nil, err
+	}
+
+	validFrom, err := time.Parse("2006-01-02", req.ValidFrom)
+	if err != nil {
+		return nil, fmt.Errorf("invalid valid_from date format (must be YYYY-MM-DD): %w", err)
+	}
+	expiryDate, err := time.Parse("2006-01-02", req.ExpiryDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expiry_date date format (must be YYYY-MM-DD): %w", err)
+	}
+	if expiryDate.Before(validFrom) {
+		return nil, errors.New("expiry_date cannot be before valid_from")
+	}
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	cert := &ComplianceCertificate{
+		ID:                uuid.New(),
+		SupplierID:        supplierID,
+		CertType:          req.CertType,
+		CertificateNumber: req.CertificateNumber,
+		IssuingAuthority:  req.IssuingAuthority,
+		Scope:             req.Scope,
+		ValidFrom:         validFrom,
+		ExpiryDate:        expiryDate,
+		DocumentURL:       req.DocumentURL,
+	}
+
+	if err := s.repo.CreateComplianceCertificate(ctx, tx, cert); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	// Calculate dynamic status
+	now := time.Now()
+	switch {
+	case validFrom.After(now):
+		cert.ComputedStatus = "NOT_YET_VALID"
+	case expiryDate.Before(now):
+		cert.ComputedStatus = "EXPIRED"
+	case expiryDate.Before(now.AddDate(0, 0, 30)):
+		cert.ComputedStatus = "EXPIRING_SOON"
+	default:
+		cert.ComputedStatus = "VALID"
+	}
+
+	return cert, nil
+}
+
+// RevokeCertificate marks an existing certificate expired
+func (s *Service) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, certID uuid.UUID) error {
+	return s.repo.RevokeCertificate(ctx, conn, certID)
+}
+
+// ListPurchaseOrders returns a paginated list of purchase order summaries
+func (s *Service) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn, status string, limit, offset int) ([]PurchaseOrderSummary, error) {
+	return s.repo.ListPurchaseOrders(ctx, conn, status, limit, offset)
+}
+
+// GetPurchaseOrderDetail returns comprehensive PO details including lines and linked goods receipts
+func (s *Service) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) (*PurchaseOrderDetail, error) {
+	return s.repo.GetPurchaseOrderDetail(ctx, conn, poID)
+}
+
+// CancelPurchaseOrder atomically cancels an unfulfilled purchase order
+func (s *Service) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) error {
+	return s.repo.CancelPurchaseOrder(ctx, conn, poID)
+}
+
+// ListGoodsReceipts returns a paginated list of goods receipts
+func (s *Service) ListGoodsReceipts(ctx context.Context, conn *pgxpool.Conn, limit, offset int) ([]GoodsReceiptSummary, error) {
+	return s.repo.ListGoodsReceipts(ctx, conn, limit, offset)
+}
+
+// GetGoodsReceiptDetail returns full detail of a goods receipt with product valuation and ledger cross-reference
+func (s *Service) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Conn, grID uuid.UUID) (*GoodsReceiptDetail, error) {
+	return s.repo.GetGoodsReceiptDetail(ctx, conn, grID)
+}
+
+// GetProductTraceability reconstructs product provenance from Halal cert to current shelf stock
+func (s *Service) GetProductTraceability(ctx context.Context, conn *pgxpool.Conn, productID uuid.UUID) (*ProductTraceabilityReport, error) {
+	return s.repo.GetProductTraceability(ctx, conn, productID)
+}
