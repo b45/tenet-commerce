@@ -389,7 +389,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 200000,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -441,7 +441,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 200000,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -503,7 +503,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 999999\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 999999999,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 999999\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -561,7 +561,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"NON-EXISTENT-SKU-999\",\n            \"quantity\": 1\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 100000,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"NON-EXISTENT-SKU-999\",\n            \"quantity\": 1\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -1511,6 +1511,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1653,6 +1658,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1753,6 +1763,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1850,6 +1865,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
                                 "type": "text"
                             },
                             {
@@ -1965,6 +1985,11 @@
                         "method": "POST",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1984,6 +2009,42 @@
                                 "v1",
                                 "ledger",
                                 "entries"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Reverse Journal Entry",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Auditor correction: expense mistakenly assigned to operating asset\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/ledger/entries/{{entry_id}}/reverse",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "ledger",
+                                "entries",
+                                "{{entry_id}}",
+                                "reverse"
                             ]
                         }
                     }

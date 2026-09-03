@@ -742,6 +742,51 @@ Password for all seeded dev accounts: `Password123!`
 `POST /api/v1/ledger/entries`
 - **Description:** Create a manual journal entry (MANUAL_ADJUSTMENT only).
 - **Permissions:** `ledger:write`
+- **Headers:** `Idempotency-Key` (required)
+
+`POST /api/v1/ledger/entries/:id/reverse`
+- **Description:** Reverse an existing posted journal entry by generating an immutable opposite double-entry reversal journal and transitioning original status to REVERSED.
+- **Permissions:** `ledger:write`
+- **Headers:** `Idempotency-Key` (required)
+- **Request Body:**
+```json
+{
+  "reason": "Auditor adjustment: incorrect account classification"
+}
+```
+- **Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "b70eca80-dd2b-460e-9a15-daca21c2cb45",
+    "entry_number": "JE-REV-20260904005900-1ab54ec7",
+    "entry_date": "2026-09-04T00:59:00.634Z",
+    "source_document_type": "REVERSAL",
+    "source_document_id": "1ab54ec7-5e07-468f-b1ec-7ccba06c7719",
+    "memo": "Reversal of JE-20260904005900: Auditor adjustment: incorrect account classification",
+    "status": "POSTED",
+    "total_debit": 175000,
+    "total_credit": 175000,
+    "lines": [
+      {
+        "id": "f85764d2-23c2-4824-a28a-785d0dcf813a",
+        "ledger_entry_id": "b70eca80-dd2b-460e-9a15-daca21c2cb45",
+        "account_id": "20000000-0000-0000-0000-000000000001",
+        "debit_amount": 0,
+        "credit_amount": 175000
+      },
+      {
+        "id": "c613e54b-6ea9-42b7-84bc-29da2cbfa01a",
+        "ledger_entry_id": "b70eca80-dd2b-460e-9a15-daca21c2cb45",
+        "account_id": "20000000-0000-0000-0000-000000000002",
+        "debit_amount": 175000,
+        "credit_amount": 0
+      }
+    ]
+  }
+}
+```
 
 `GET /api/v1/ledger/trial-balance`
 - **Description:** Retrieve trial balance as of a specific date.

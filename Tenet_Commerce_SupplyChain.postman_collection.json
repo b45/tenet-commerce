@@ -508,6 +508,11 @@
 								"type": "text"
 							},
 							{
+								"key": "Idempotency-Key",
+								"value": "{{$guid}}",
+								"type": "text"
+							},
+							{
 								"key": "Content-Type",
 								"value": "application/json",
 								"type": "text"
@@ -650,6 +655,11 @@
 								"type": "text"
 							},
 							{
+								"key": "Idempotency-Key",
+								"value": "{{$guid}}",
+								"type": "text"
+							},
+							{
 								"key": "Content-Type",
 								"value": "application/json",
 								"type": "text"
@@ -750,6 +760,11 @@
 								"type": "text"
 							},
 							{
+								"key": "Idempotency-Key",
+								"value": "{{$guid}}",
+								"type": "text"
+							},
+							{
 								"key": "Content-Type",
 								"value": "application/json",
 								"type": "text"
@@ -847,6 +862,11 @@
 							{
 								"key": "X-Tenant-ID",
 								"value": "al-barakah-mart",
+								"type": "text"
+							},
+							{
+								"key": "Idempotency-Key",
+								"value": "{{$guid}}",
 								"type": "text"
 							},
 							{

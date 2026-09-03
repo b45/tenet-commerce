@@ -55,6 +55,38 @@ func TestValidateBalance(t *testing.T) {
 			},
 			wantErr: nil,
 		},
+		{
+			name: "Negative Debit Rejected",
+			lines: []EntryLine{
+				{ID: uuid.New(), DebitAmount: -100, CreditAmount: 0},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 100},
+			},
+			wantErr: ErrInvalidLineDirection,
+		},
+		{
+			name: "Both Debit and Credit On Same Line Rejected",
+			lines: []EntryLine{
+				{ID: uuid.New(), DebitAmount: 100, CreditAmount: 100},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 100},
+			},
+			wantErr: ErrInvalidLineDirection,
+		},
+		{
+			name: "1 Rupiah Minor Unit Imbalance Rejected",
+			lines: []EntryLine{
+				{ID: uuid.New(), DebitAmount: 10000000, CreditAmount: 0},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 10000001},
+			},
+			wantErr: ErrUnbalancedEntry,
+		},
+		{
+			name: "Large Billions Exact Balanced Entry Succeeds",
+			lines: []EntryLine{
+				{ID: uuid.New(), DebitAmount: 5000000000, CreditAmount: 0},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 5000000000},
+			},
+			wantErr: nil,
+		},
 	}
 
 	for _, tt := range tests {
