@@ -3,12 +3,15 @@ package ledger
 import (
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	pkgIdempotency "github.com/b45/tenet-commerce/backend/pkg/idempotency"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
+	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
@@ -21,7 +24,7 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes mounts all ledger accounting endpoints with RBAC permission guards
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	rg.GET("/accounts",
 		internalAuth.RequirePermission("ledger:read"),
 		h.GetChartOfAccounts,
@@ -32,6 +35,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	)
 	rg.POST("/entries",
 		internalAuth.RequirePermission("ledger:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.CreateManualEntry,
 	)
 	rg.GET("/trial-balance",

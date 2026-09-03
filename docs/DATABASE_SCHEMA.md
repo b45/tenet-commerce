@@ -244,6 +244,23 @@ CREATE TABLE goods_receipt_items (
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
 );
 
+-- 4.3.1 Durable Idempotency Requests
+CREATE TABLE idempotency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key VARCHAR(255) NOT NULL,
+    target_route VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    response_status_code INT,
+    response_headers JSONB,
+    response_body JSONB,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_idempotency_key_route UNIQUE (idempotency_key, target_route)
+);
+
 -- 4.4 Sharia Double-Entry General Ledger
 CREATE TABLE ledger_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

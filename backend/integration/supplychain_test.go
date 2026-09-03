@@ -48,7 +48,8 @@ func setupSupplyChainTestRouter(t *testing.T, db *database.PostgresDB) *gin.Engi
 		c.Next()
 	})
 	router.Use(tenant.ContextMiddleware(db, tenantRepo))
-	scHandler.RegisterRoutes(router.Group("/api/v1/supply-chain"))
+	rdb := newTestRedisClient(t)
+	scHandler.RegisterRoutes(router.Group("/api/v1/supply-chain"), rdb)
 
 	return router
 }
@@ -106,6 +107,7 @@ func TestSupplyChain_GoodsReceiptAtomicityAndReconciliation(t *testing.T) {
 
 	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
 	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-key-%d", time.Now().UnixNano()))
 	wPO := httptest.NewRecorder()
 	router.ServeHTTP(wPO, reqPO)
 	require.Equal(t, http.StatusCreated, wPO.Code)
@@ -172,6 +174,7 @@ func TestSupplyChain_GoodsReceiptAtomicityAndReconciliation(t *testing.T) {
 	// Create another PO first
 	reqPO2 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
 	reqPO2.Header.Set("Content-Type", "application/json")
+	reqPO2.Header.Set("Idempotency-Key", fmt.Sprintf("po2-key-%d", time.Now().UnixNano()))
 	wPO2 := httptest.NewRecorder()
 	router.ServeHTTP(wPO2, reqPO2)
 	require.Equal(t, http.StatusCreated, wPO2.Code)
@@ -279,6 +282,7 @@ func TestSupplyChain_HalalComplianceHardBlocksReceiptOnExpiredCert(t *testing.T)
 	poBody, _ := json.Marshal(poReq)
 	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
 	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-key-%d", time.Now().UnixNano()))
 	wPO := httptest.NewRecorder()
 	router.ServeHTTP(wPO, reqPO)
 	require.Equal(t, http.StatusCreated, wPO.Code)

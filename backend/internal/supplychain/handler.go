@@ -3,13 +3,16 @@ package supplychain
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
+	pkgIdempotency "github.com/b45/tenet-commerce/backend/pkg/idempotency"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
+	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
@@ -22,12 +25,18 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes sets up the HTTP endpoints for the supply chain module with RBAC guards
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	rg.Use(internalAuth.RequirePermission("supply_chain:manage"))
 	{
 		rg.POST("/suppliers", h.CreateSupplier)
-		rg.POST("/purchase-orders", h.CreatePurchaseOrder)
-		rg.POST("/goods-receipts", h.CreateGoodsReceipt)
+		rg.POST("/purchase-orders",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.CreatePurchaseOrder,
+		)
+		rg.POST("/goods-receipts",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.CreateGoodsReceipt,
+		)
 	}
 }
 

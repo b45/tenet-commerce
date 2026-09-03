@@ -91,10 +91,10 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 		cfg.POSHandler.RegisterRoutes(protected.Group("/pos"), cfg.RedisClient)
 
 		// Core Domain 2: Halal Supply Chain & Vendor Compliance Engine
-		cfg.SupplyChainHandler.RegisterRoutes(protected.Group("/supply-chain"))
+		cfg.SupplyChainHandler.RegisterRoutes(protected.Group("/supply-chain"), cfg.RedisClient)
 
 		// Core Domain 3: Sharia Double-Entry General Ledger (AAOIFI Invariants)
-		cfg.LedgerHandler.RegisterRoutes(protected.Group("/ledger"))
+		cfg.LedgerHandler.RegisterRoutes(protected.Group("/ledger"), cfg.RedisClient)
 
 		// Extension Domain: Store Manager Aggregated Analytics & Alerts
 		cfg.ManagerHandler.RegisterRoutes(protected.Group("/manager"))
