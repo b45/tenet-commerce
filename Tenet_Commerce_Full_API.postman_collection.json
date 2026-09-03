@@ -389,7 +389,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 200000,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -441,7 +441,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 200000,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 2\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -503,7 +503,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 999999\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 999999999,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"{{pos_sample_sku}}\",\n            \"quantity\": 999999\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -561,7 +561,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"NON-EXISTENT-SKU-999\",\n            \"quantity\": 1\n        }\n    ]\n}"
+                            "raw": "{\n    \"payment_method\": \"CASH\",\n    \"cash_tendered\": 100000,\n    \"discount_amount\": 0,\n    \"items\": [\n        {\n            \"sku\": \"NON-EXISTENT-SKU-999\",\n            \"quantity\": 1\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/checkout",
@@ -1511,6 +1511,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1543,6 +1548,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "darussalam-store",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
                                 "type": "text"
                             },
                             {
@@ -1648,6 +1658,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1748,6 +1763,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1845,6 +1865,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
                                 "type": "text"
                             },
                             {
@@ -1960,6 +1985,11 @@
                         "method": "POST",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1979,6 +2009,42 @@
                                 "v1",
                                 "ledger",
                                 "entries"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Reverse Journal Entry",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Auditor correction: expense mistakenly assigned to operating asset\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/ledger/entries/{{entry_id}}/reverse",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "ledger",
+                                "entries",
+                                "{{entry_id}}",
+                                "reverse"
                             ]
                         }
                     }
@@ -2026,6 +2092,507 @@
                     "response": []
                 }
             ]
+        },
+        {
+            "name": "5. Supply Chain Operational & Traceability Queries",
+            "item": [
+                {
+                    "name": "List Suppliers",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/suppliers?is_active=true&limit=50",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "suppliers"
+                            ],
+                            "query": [
+                                {
+                                    "key": "is_active",
+                                    "value": "true"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "50"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Supplier Details",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/suppliers/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "suppliers",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_supplier_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Supplier",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"company_name\": \"PT Berkah Pangan Mandiri Updated\",\n    \"contact_person\": \"Ahmad Fauzi\",\n    \"contact_phone\": \"+628123456789\",\n    \"is_active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/suppliers/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "suppliers",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_supplier_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Supplier Certificates",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/suppliers/:id/certificates",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "suppliers",
+                                ":id",
+                                "certificates"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_supplier_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Register Certificate Renewal",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"cert_type\": \"HALAL_MUI\",\n    \"certificate_number\": \"ID31110000998877665\",\n    \"issuing_authority\": \"BPJPH\",\n    \"scope\": \"Poultry & Meat Processing\",\n    \"valid_from\": \"2026-09-01\",\n    \"expiry_date\": \"2028-09-01\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/suppliers/:id/certificates",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "suppliers",
+                                ":id",
+                                "certificates"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_supplier_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Revoke Certificate",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/certificates/:id/revoke",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "certificates",
+                                ":id",
+                                "revoke"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_cert_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Purchase Orders",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/purchase-orders?status=ISSUED&limit=50",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "purchase-orders"
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "ISSUED"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "50"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Purchase Order Detail & Balance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/purchase-orders/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "purchase-orders",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_po_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Cancel Purchase Order",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/purchase-orders/:id/cancel",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "purchase-orders",
+                                ":id",
+                                "cancel"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_po_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Goods Receipts",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/goods-receipts?limit=50",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "goods-receipts"
+                            ],
+                            "query": [
+                                {
+                                    "key": "limit",
+                                    "value": "50"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Goods Receipt Detail",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/goods-receipts/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "goods-receipts",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{ab_gr_id}}"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Product Traceability Lineage",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/traceability/product/:product_id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "traceability",
+                                "product",
+                                ":product_id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "product_id",
+                                    "value": "10000000-0000-0000-0000-000000000001"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "0. Runtime & Session",
+            "item": [
+                {
+                    "name": "Health Check",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/health",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "health"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Refresh Token",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/refresh",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "auth",
+                                "refresh"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Current Identity",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/me",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "auth",
+                                "me"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
         }
     ],
     "variable": [
@@ -2035,6 +2602,10 @@
         },
         {
             "key": "jwt_token",
+            "value": ""
+        },
+        {
+            "key": "refresh_token",
             "value": ""
         },
         {

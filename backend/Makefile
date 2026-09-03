@@ -19,8 +19,12 @@ lint: ## Run golangci-lint
 
 # --- Testing ---
 .PHONY: test
-test: ## Run all unit and integration tests with coverage
+test: ## Run all tests, including hermetic PostgreSQL/Redis integration tests
 	go test -v -race -coverprofile=coverage.out $(PKG)
+
+.PHONY: test-integration
+test-integration: ## Run the Testcontainers PostgreSQL/Redis integration suite
+	go test -v -race ./integration
 
 .PHONY: test-short
 test-short: ## Run only unit tests (skips integration tests requiring DB)

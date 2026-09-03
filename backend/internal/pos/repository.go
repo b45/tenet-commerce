@@ -20,6 +20,7 @@ var (
 	ErrTransactionNotFound      = errors.New("transaction not found")
 	ErrAlreadyVoided            = errors.New("transaction is already voided")
 	ErrInsufficientCashTendered = errors.New("insufficient cash tendered")
+	ErrCashTenderedNotAllowed   = errors.New("cash tendered is only valid for CASH payments")
 	ErrCategoryNotFound         = errors.New("category not found")
 	ErrCategoryCodeExists       = errors.New("category code already exists")
 	ErrSKUAlreadyExists         = errors.New("product SKU already exists")
@@ -1313,4 +1314,3 @@ func (r *Repository) GetLowStockProducts(ctx context.Context, conn *pgxpool.Conn
 	}
 	return products, nil
 }
-

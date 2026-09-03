@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	pkgIdempotency "github.com/b45/tenet-commerce/backend/pkg/idempotency"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
@@ -74,7 +75,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	// Inventory Stock Adjustment (Stock Opname & Spoilage Write-Offs)
 	rg.POST("/inventory/adjust",
 		internalAuth.RequirePermission("inventory:write"),
-		pkgRedis.IdempotencyMiddleware(rdb, 24*time.Hour),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.AdjustStock,
 	)
 	rg.GET("/inventory/low-stock",
@@ -85,7 +86,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	// Checkout & Orders
 	rg.POST("/checkout",
 		internalAuth.RequirePermission("pos:checkout"),
-		pkgRedis.IdempotencyMiddleware(rdb, 24*time.Hour),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.Checkout,
 	)
 	rg.GET("/orders",
@@ -98,7 +99,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.POST("/orders/:id/void",
 		internalAuth.RequirePermission("pos:void"),
-		pkgRedis.IdempotencyMiddleware(rdb, 24*time.Hour),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.VoidOrder,
 	)
 	rg.GET("/daily-summary",
@@ -194,6 +195,11 @@ func (h *Handler) Checkout(c *gin.Context) {
 		if errors.Is(err, ErrInsufficientCashTendered) {
 			log.Warn("Checkout rejected: insufficient cash tendered", "error", err, "cashier_id", cashierID)
 			response.BadRequest(c, "INSUFFICIENT_CASH_TENDERED", err.Error())
+			return
+		}
+		if errors.Is(err, ErrCashTenderedNotAllowed) {
+			log.Warn("Checkout rejected: cash tendered supplied for non-cash payment", "cashier_id", cashierID)
+			response.BadRequest(c, "INVALID_CASH_TENDERED", err.Error())
 			return
 		}
 		if errors.Is(err, ErrInsufficientStock) {
@@ -827,4 +833,3 @@ func (h *Handler) GetLowStock(c *gin.Context) {
 		Total: len(products),
 	})
 }
-

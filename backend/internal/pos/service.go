@@ -9,6 +9,7 @@ import (
 
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
+	"github.com/b45/tenet-commerce/backend/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -68,9 +69,9 @@ func (s *Service) Checkout(
 		return nil, fmt.Errorf("database lock failure: %w", err)
 	}
 
-	// 4. Validate stock availability and calculate subtotals
-	var subtotal float64
-	var totalCOGS float64
+	// 4. Validate stock availability and calculate subtotals with exact-money precision
+	subtotalMoney := money.IDR(0)
+	totalCOGSMoney := money.IDR(0)
 	var lineItems []TransactionItem
 
 	for _, item := range req.Items {
@@ -85,9 +86,13 @@ func (s *Service) Checkout(
 				ErrInsufficientStock, product.Name, totalRequested, product.StockQuantity)
 		}
 
-		itemSubtotal := math.Round(product.UnitPrice*float64(item.Quantity)*100) / 100
-		subtotal += itemSubtotal
-		totalCOGS += math.Round(product.CostPrice*float64(item.Quantity)*100) / 100
+		unitPriceMoney, _ := money.FromFloat(product.UnitPrice, "IDR")
+		itemSubtotalMoney, _ := unitPriceMoney.Mul(int64(item.Quantity))
+		subtotalMoney, _ = subtotalMoney.Add(itemSubtotalMoney)
+
+		costPriceMoney, _ := money.FromFloat(product.CostPrice, "IDR")
+		itemCOGSMoney, _ := costPriceMoney.Mul(int64(item.Quantity))
+		totalCOGSMoney, _ = totalCOGSMoney.Add(itemCOGSMoney)
 
 		lineItems = append(lineItems, TransactionItem{
 			ProductID: product.ID,
@@ -96,27 +101,23 @@ func (s *Service) Checkout(
 			Quantity:  item.Quantity,
 			UnitPrice: product.UnitPrice,
 			CostPrice: product.CostPrice,
-			Subtotal:  itemSubtotal,
+			Subtotal:  itemSubtotalMoney.ToFloat(),
 		})
 	}
 
-	// 5. Calculate final amounts
+	// 5. Calculate final amounts using exact-money precision
 	taxAmount := 0.00
-	discountAmount := req.DiscountAmount
-	if discountAmount > subtotal {
-		discountAmount = subtotal
+	discountMoney, _ := money.FromFloat(req.DiscountAmount, "IDR")
+	if discountMoney.Amount() > subtotalMoney.Amount() {
+		discountMoney = subtotalMoney
 	}
-	totalAmount := math.Round((subtotal-discountAmount+taxAmount)*100) / 100
+	totalAmountMoney, _ := subtotalMoney.Sub(discountMoney)
 
-	// 5.1 Handle Cash change calculation
-	var cashTendered float64
-	var changeAmount float64
-	if req.PaymentMethod == "CASH" && req.CashTendered != nil && *req.CashTendered > 0 {
-		cashTendered = *req.CashTendered
-		if cashTendered < totalAmount {
-			return nil, fmt.Errorf("%w: paid %.2f, required %.2f", ErrInsufficientCashTendered, cashTendered, totalAmount)
-		}
-		changeAmount = math.Round((cashTendered-totalAmount)*100) / 100
+	// 5.1 Validate settlement before any inventory or ledger mutation.
+	// A completed CASH sale must have a tender amount sufficient to cover the receipt total.
+	cashTendered, changeAmount, err := validatePaymentSettlement(req.PaymentMethod, req.CashTendered, totalAmountMoney.ToFloat())
+	if err != nil {
+		return nil, err
 	}
 
 	// 6. APM SPAN: Atomically decrement stock for each locked item
@@ -136,10 +137,10 @@ func (s *Service) Checkout(
 		TransactionNumber: txnNumber,
 		IdempotencyKey:    idempotencyKey,
 		CashierID:         cashierID,
-		SubtotalAmount:    subtotal,
+		SubtotalAmount:    subtotalMoney.ToFloat(),
 		TaxAmount:         taxAmount,
-		DiscountAmount:    discountAmount,
-		TotalAmount:       totalAmount,
+		DiscountAmount:    discountMoney.ToFloat(),
+		TotalAmount:       totalAmountMoney.ToFloat(),
 		PaymentMethod:     req.PaymentMethod,
 		Status:            "COMPLETED",
 		CustomerName:      req.CustomerName,
@@ -170,7 +171,7 @@ func (s *Service) Checkout(
 	// 8.5. APM SPAN: Post automatic journal entry
 	tLedger := time.Now()
 	txnUUID, _ := uuid.Parse(masterTxn.ID)
-	if err := s.ledgerService.PostPOSSaleJournal(ctx, tx, txnUUID, masterTxn.TransactionNumber, masterTxn.TotalAmount, totalCOGS, masterTxn.PaymentMethod); err != nil {
+	if err := s.ledgerService.PostPOSSaleJournal(ctx, tx, txnUUID, masterTxn.TransactionNumber, masterTxn.TotalAmount, totalCOGSMoney.ToFloat(), masterTxn.PaymentMethod); err != nil {
 		reqLogger.Error("Failed to post POS sale journal entry", "error", err)
 		return nil, fmt.Errorf("failed posting ledger journal: %w", err)
 	}
@@ -219,6 +220,40 @@ func (s *Service) Checkout(
 		TotalAmount:       masterTxn.TotalAmount,
 		CreatedAt:         masterTxn.CreatedAt,
 	}, nil
+}
+
+func validatePaymentSettlement(paymentMethod string, cashTendered *float64, totalAmount float64) (float64, float64, error) {
+	if paymentMethod != "CASH" {
+		if cashTendered != nil {
+			return 0, 0, ErrCashTenderedNotAllowed
+		}
+		return 0, 0, nil
+	}
+
+	if cashTendered == nil {
+		return 0, 0, fmt.Errorf("%w: cash_tendered is required", ErrInsufficientCashTendered)
+	}
+
+	tenderMoney, err := money.FromFloat(*cashTendered, "IDR")
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid cash tendered amount: %w", err)
+	}
+
+	totalMoney, err := money.FromFloat(totalAmount, "IDR")
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid total amount: %w", err)
+	}
+
+	if tenderMoney.Amount() < totalMoney.Amount() {
+		return 0, 0, fmt.Errorf("%w: paid %.2f, required %.2f", ErrInsufficientCashTendered, *cashTendered, totalAmount)
+	}
+
+	changeMoney, err := tenderMoney.Sub(totalMoney)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return tenderMoney.ToFloat(), changeMoney.ToFloat(), nil
 }
 
 // VoidTransaction executes an atomic void/refund of a completed transaction.
@@ -449,4 +484,3 @@ func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID st
 func (s *Service) GetLowStock(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
 	return s.repo.GetLowStockProducts(ctx, conn)
 }
-

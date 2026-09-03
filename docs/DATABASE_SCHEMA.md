@@ -212,7 +212,7 @@ CREATE TABLE purchase_orders (
     supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
     compliance_cert_id UUID REFERENCES compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
-    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
+    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -229,6 +229,7 @@ CREATE TABLE purchase_order_items (
 CREATE TABLE goods_receipts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     gr_number VARCHAR(63) NOT NULL UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
     purchase_order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE RESTRICT,
     received_by UUID NOT NULL,
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -241,6 +242,23 @@ CREATE TABLE goods_receipt_items (
     goods_receipt_id UUID NOT NULL REFERENCES goods_receipts(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
+);
+
+-- 4.3.1 Durable Idempotency Requests
+CREATE TABLE idempotency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key VARCHAR(255) NOT NULL,
+    target_route VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    response_status_code INT,
+    response_headers JSONB,
+    response_body JSONB,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_idempotency_key_route UNIQUE (idempotency_key, target_route)
 );
 
 -- 4.4 Sharia Double-Entry General Ledger
@@ -258,9 +276,11 @@ CREATE TABLE ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT', 'REVERSAL')),
     source_document_id UUID,
     memo TEXT NOT NULL,
+    status VARCHAR(31) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
+    reversed_by_entry_id UUID REFERENCES ledger_entries(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -278,6 +298,13 @@ CREATE TABLE ledger_entry_lines (
 
 CREATE INDEX idx_ledger_lines_account ON ledger_entry_lines(account_id);
 CREATE INDEX idx_ledger_entries_date ON ledger_entries(entry_date);
+CREATE INDEX idx_ledger_entries_status ON ledger_entries(status);
+CREATE INDEX idx_ledger_entries_reversed_by ON ledger_entries(reversed_by_entry_id);
+
+-- Immutability & Double-Entry Constraints:
+-- 1. trg_verify_ledger_balance (CONSTRAINT TRIGGER): Hard-enforces line_count >= 2, total_debit > 0, and total_debit == total_credit.
+-- 2. trg_immutable_ledger_entries (BEFORE UPDATE OR DELETE): Blocks all deletions; permits updates ONLY for transitioning status from POSTED to REVERSED with a valid reversed_by_entry_id.
+-- 3. trg_immutable_ledger_lines (BEFORE UPDATE OR DELETE): Blocks any update or deletion on posted entry lines.
 
 -- 4.5 Zakat Tijarah Calculations
 CREATE TABLE zakat_calculations (

@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.tenant_config (
 );
 
 INSERT INTO tenant_al_barakah_mart.tenant_config (config_key, config_value)
-VALUES ('compliance', '{"strict_compliance_mode": true}')
+VALUES ('compliance', '{"strict_compliance_mode": true, "required_compliance": ["HALAL_MUI"]}')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 
 
@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_orders (
     supplier_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.suppliers(id) ON DELETE RESTRICT,
     compliance_cert_id UUID REFERENCES tenant_al_barakah_mart.compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
-    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
+    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -238,6 +238,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_order_items (
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     gr_number VARCHAR(63) NOT NULL UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
     purchase_order_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.purchase_orders(id) ON DELETE RESTRICT,
     received_by UUID NOT NULL,
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -251,6 +252,28 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipt_items (
     product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE RESTRICT,
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
 );
+
+-- 5.6 Durable Idempotency Requests
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.idempotency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key VARCHAR(255) NOT NULL,
+    target_route VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    response_status_code INT,
+    response_headers JSONB,
+    response_body JSONB,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_idempotency_key_route_al_barakah UNIQUE (idempotency_key, target_route)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_lookup_al_barakah 
+    ON tenant_al_barakah_mart.idempotency_requests (idempotency_key, target_route);
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_expires_al_barakah 
+    ON tenant_al_barakah_mart.idempotency_requests (expires_at);
 
 -- 5.5 Ledger Engine
 
@@ -269,11 +292,17 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT', 'REVERSAL')),
     source_document_id UUID,
     memo TEXT NOT NULL,
+    status VARCHAR(31) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
+    reversed_by_entry_id UUID REFERENCES tenant_al_barakah_mart.ledger_entries(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE tenant_al_barakah_mart.ledger_entries 
+    ADD COLUMN IF NOT EXISTS status VARCHAR(31) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
+    ADD COLUMN IF NOT EXISTS reversed_by_entry_id UUID REFERENCES tenant_al_barakah_mart.ledger_entries(id);
 
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_entry_lines (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -289,18 +318,31 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.ledger_entry_lines (
 
 CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_al_barakah_mart ON tenant_al_barakah_mart.ledger_entry_lines(account_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_al_barakah_mart ON tenant_al_barakah_mart.ledger_entries(entry_date);
+CREATE INDEX IF NOT EXISTS idx_abm_ledger_entries_status ON tenant_al_barakah_mart.ledger_entries(status);
+CREATE INDEX IF NOT EXISTS idx_abm_ledger_entries_reversed_by ON tenant_al_barakah_mart.ledger_entries(reversed_by_entry_id);
 
--- Ledger Balance Invariant Trigger
+-- Ledger Balance Invariant Trigger (Enforces >=2 lines, >0 amount, and sum(debit) == sum(credit))
 CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.verify_ledger_entry_balance()
 RETURNS TRIGGER AS $$
 DECLARE
     total_debit NUMERIC(15, 2);
     total_credit NUMERIC(15, 2);
+    line_count INTEGER;
 BEGIN
-    SELECT COALESCE(SUM(debit_amount), 0), COALESCE(SUM(credit_amount), 0)
-    INTO total_debit, total_credit
+    SELECT COUNT(*), COALESCE(SUM(debit_amount), 0), COALESCE(SUM(credit_amount), 0)
+    INTO line_count, total_debit, total_credit
     FROM tenant_al_barakah_mart.ledger_entry_lines
     WHERE ledger_entry_id = NEW.ledger_entry_id;
+
+    IF line_count < 2 THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Journal Entry % must have at least 2 lines (found %)',
+            NEW.ledger_entry_id, line_count;
+    END IF;
+
+    IF total_debit <= 0 THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Journal Entry % total amount must be greater than zero',
+            NEW.ledger_entry_id;
+    END IF;
 
     IF total_debit <> total_credit THEN
         RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Total Debits (%) must equal Total Credits (%) for Entry %', 
@@ -317,6 +359,47 @@ AFTER INSERT OR UPDATE ON tenant_al_barakah_mart.ledger_entry_lines
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW
 EXECUTE FUNCTION tenant_al_barakah_mart.verify_ledger_entry_balance();
+
+-- Immutability Triggers (Append-Only Ledger Protection)
+CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.prevent_ledger_entries_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Posted ledger entries are immutable and cannot be deleted. Use a reversal entry instead.';
+    END IF;
+
+    IF TG_OP = 'UPDATE' THEN
+        -- Only permit status transition from POSTED to REVERSED with a valid reversed_by_entry_id
+        IF OLD.status = 'POSTED' AND NEW.status = 'REVERSED' AND NEW.reversed_by_entry_id IS NOT NULL AND
+           OLD.id = NEW.id AND OLD.entry_number = NEW.entry_number AND OLD.entry_date = NEW.entry_date AND
+           OLD.source_document_type = NEW.source_document_type AND OLD.source_document_id IS NOT DISTINCT FROM NEW.source_document_id AND
+           OLD.memo = NEW.memo AND OLD.created_at = NEW.created_at THEN
+            RETURN NEW;
+        ELSE
+            RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Posted ledger entries cannot be modified. Only reversal status transition is permitted.';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_ledger_entries ON tenant_al_barakah_mart.ledger_entries;
+CREATE TRIGGER trg_immutable_ledger_entries
+BEFORE UPDATE OR DELETE ON tenant_al_barakah_mart.ledger_entries
+FOR EACH ROW EXECUTE FUNCTION tenant_al_barakah_mart.prevent_ledger_entries_mutation();
+
+CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.prevent_ledger_lines_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Posted ledger entry lines are strictly immutable and cannot be updated or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_ledger_lines ON tenant_al_barakah_mart.ledger_entry_lines;
+CREATE TRIGGER trg_immutable_ledger_lines
+BEFORE UPDATE OR DELETE ON tenant_al_barakah_mart.ledger_entry_lines
+FOR EACH ROW EXECUTE FUNCTION tenant_al_barakah_mart.prevent_ledger_lines_mutation();
 
 -- Seed Chart of Accounts
 INSERT INTO tenant_al_barakah_mart.ledger_accounts (code, name, account_type, is_zakat_eligible) VALUES
@@ -382,7 +465,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.tenant_config (
 );
 
 INSERT INTO tenant_darussalam_store.tenant_config (config_key, config_value)
-VALUES ('compliance', '{"strict_compliance_mode": false}')
+VALUES ('compliance', '{"strict_compliance_mode": false, "required_compliance": []}')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 
 
@@ -529,7 +612,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.purchase_orders (
     supplier_id UUID NOT NULL REFERENCES tenant_darussalam_store.suppliers(id) ON DELETE RESTRICT,
     compliance_cert_id UUID REFERENCES tenant_darussalam_store.compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
-    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
+    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -546,6 +629,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.purchase_order_items (
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     gr_number VARCHAR(63) NOT NULL UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
     purchase_order_id UUID NOT NULL REFERENCES tenant_darussalam_store.purchase_orders(id) ON DELETE RESTRICT,
     received_by UUID NOT NULL,
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -559,6 +643,28 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipt_items (
     product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE RESTRICT,
     received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
 );
+
+-- 6.5.1 Durable Idempotency Requests
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.idempotency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key VARCHAR(255) NOT NULL,
+    target_route VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    response_status_code INT,
+    response_headers JSONB,
+    response_body JSONB,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_idempotency_key_route_darussalam UNIQUE (idempotency_key, target_route)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_lookup_darussalam 
+    ON tenant_darussalam_store.idempotency_requests (idempotency_key, target_route);
+CREATE INDEX IF NOT EXISTS idx_idempotency_requests_expires_darussalam 
+    ON tenant_darussalam_store.idempotency_requests (expires_at);
 
 -- 6.6 Seed Products for tenant_darussalam_store
 INSERT INTO tenant_darussalam_store.products (id, sku, barcode, name, unit_price, cost_price, compliance_tags, is_active)
@@ -594,11 +700,17 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entry_number VARCHAR(63) NOT NULL UNIQUE,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT')),
+    source_document_type VARCHAR(63) NOT NULL CHECK (source_document_type IN ('POS_SALE', 'POS_VOID', 'GOODS_RECEIPT', 'MANUAL_ADJUSTMENT', 'ZAKAT_DISBURSEMENT', 'REVERSAL')),
     source_document_id UUID,
     memo TEXT NOT NULL,
+    status VARCHAR(31) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
+    reversed_by_entry_id UUID REFERENCES tenant_darussalam_store.ledger_entries(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE tenant_darussalam_store.ledger_entries 
+    ADD COLUMN IF NOT EXISTS status VARCHAR(31) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
+    ADD COLUMN IF NOT EXISTS reversed_by_entry_id UUID REFERENCES tenant_darussalam_store.ledger_entries(id);
 
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_entry_lines (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -614,18 +726,31 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.ledger_entry_lines (
 
 CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_darussalam_store ON tenant_darussalam_store.ledger_entry_lines(account_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_darussalam_store ON tenant_darussalam_store.ledger_entries(entry_date);
+CREATE INDEX IF NOT EXISTS idx_ds_ledger_entries_status ON tenant_darussalam_store.ledger_entries(status);
+CREATE INDEX IF NOT EXISTS idx_ds_ledger_entries_reversed_by ON tenant_darussalam_store.ledger_entries(reversed_by_entry_id);
 
--- Ledger Balance Invariant Trigger
+-- Ledger Balance Invariant Trigger (Enforces >=2 lines, >0 amount, and sum(debit) == sum(credit))
 CREATE OR REPLACE FUNCTION tenant_darussalam_store.verify_ledger_entry_balance()
 RETURNS TRIGGER AS $$
 DECLARE
     total_debit NUMERIC(15, 2);
     total_credit NUMERIC(15, 2);
+    line_count INTEGER;
 BEGIN
-    SELECT COALESCE(SUM(debit_amount), 0), COALESCE(SUM(credit_amount), 0)
-    INTO total_debit, total_credit
+    SELECT COUNT(*), COALESCE(SUM(debit_amount), 0), COALESCE(SUM(credit_amount), 0)
+    INTO line_count, total_debit, total_credit
     FROM tenant_darussalam_store.ledger_entry_lines
     WHERE ledger_entry_id = NEW.ledger_entry_id;
+
+    IF line_count < 2 THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Journal Entry % must have at least 2 lines (found %)',
+            NEW.ledger_entry_id, line_count;
+    END IF;
+
+    IF total_debit <= 0 THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Journal Entry % total amount must be greater than zero',
+            NEW.ledger_entry_id;
+    END IF;
 
     IF total_debit <> total_credit THEN
         RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Total Debits (%) must equal Total Credits (%) for Entry %', 
@@ -643,6 +768,47 @@ DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW
 EXECUTE FUNCTION tenant_darussalam_store.verify_ledger_entry_balance();
 
+-- Immutability Triggers (Append-Only Ledger Protection)
+CREATE OR REPLACE FUNCTION tenant_darussalam_store.prevent_ledger_entries_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Posted ledger entries are immutable and cannot be deleted. Use a reversal entry instead.';
+    END IF;
+
+    IF TG_OP = 'UPDATE' THEN
+        -- Only permit status transition from POSTED to REVERSED with a valid reversed_by_entry_id
+        IF OLD.status = 'POSTED' AND NEW.status = 'REVERSED' AND NEW.reversed_by_entry_id IS NOT NULL AND
+           OLD.id = NEW.id AND OLD.entry_number = NEW.entry_number AND OLD.entry_date = NEW.entry_date AND
+           OLD.source_document_type = NEW.source_document_type AND OLD.source_document_id IS NOT DISTINCT FROM NEW.source_document_id AND
+           OLD.memo = NEW.memo AND OLD.created_at = NEW.created_at THEN
+            RETURN NEW;
+        ELSE
+            RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Posted ledger entries cannot be modified. Only reversal status transition is permitted.';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_ledger_entries ON tenant_darussalam_store.ledger_entries;
+CREATE TRIGGER trg_immutable_ledger_entries
+BEFORE UPDATE OR DELETE ON tenant_darussalam_store.ledger_entries
+FOR EACH ROW EXECUTE FUNCTION tenant_darussalam_store.prevent_ledger_entries_mutation();
+
+CREATE OR REPLACE FUNCTION tenant_darussalam_store.prevent_ledger_lines_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Sharia Ledger Invariant Violation: Posted ledger entry lines are strictly immutable and cannot be updated or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_ledger_lines ON tenant_darussalam_store.ledger_entry_lines;
+CREATE TRIGGER trg_immutable_ledger_lines
+BEFORE UPDATE OR DELETE ON tenant_darussalam_store.ledger_entry_lines
+FOR EACH ROW EXECUTE FUNCTION tenant_darussalam_store.prevent_ledger_lines_mutation();
+
 -- Seed Chart of Accounts
 INSERT INTO tenant_darussalam_store.ledger_accounts (code, name, account_type, is_zakat_eligible) VALUES
     ('1010', 'Cash on Hand', 'ASSET', TRUE),
@@ -655,4 +821,3 @@ INSERT INTO tenant_darussalam_store.ledger_accounts (code, name, account_type, i
     ('5010', 'Cost of Goods Sold', 'EXPENSE', FALSE),
     ('5020', 'Inventory Shrinkage & Loss', 'EXPENSE', FALSE)
 ON CONFLICT (code) DO NOTHING;
-

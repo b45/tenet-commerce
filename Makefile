@@ -22,7 +22,6 @@ db-reset: ## Reset local PostgreSQL database and re-apply seed data
 	@echo "Waiting for postgres to be ready..."
 	@sleep 3
 	docker exec -i tenet_postgres psql -U postgres -d tenet_commerce < scripts/init_dev_db.sql
-	docker exec -i tenet_postgres psql -U postgres -d tenet_commerce < scripts/02_supply_chain.sql
 	@echo "Database reset and seeded successfully!"
 
 # --- Backend Commands ---
@@ -31,8 +30,12 @@ run: ## Run the backend Go API server in development mode
 	cd backend && APP_DEBUG=true go run ./cmd/api
 
 .PHONY: test
-test: ## Run backend unit and integration tests
+test: ## Run backend tests, including the Testcontainers integration suite
 	cd backend && go test -v -race ./...
+
+.PHONY: test-integration
+test-integration: ## Run hermetic PostgreSQL/Redis integration tests only
+	cd backend && go test -v -race ./integration
 
 .PHONY: build
 build: ## Build backend production binary

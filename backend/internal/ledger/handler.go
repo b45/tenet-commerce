@@ -3,12 +3,16 @@ package ledger
 import (
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	pkgIdempotency "github.com/b45/tenet-commerce/backend/pkg/idempotency"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
+	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
@@ -21,7 +25,7 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes mounts all ledger accounting endpoints with RBAC permission guards
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	rg.GET("/accounts",
 		internalAuth.RequirePermission("ledger:read"),
 		h.GetChartOfAccounts,
@@ -32,7 +36,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	)
 	rg.POST("/entries",
 		internalAuth.RequirePermission("ledger:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.CreateManualEntry,
+	)
+	rg.POST("/entries/:id/reverse",
+		internalAuth.RequirePermission("ledger:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+		h.ReverseEntry,
 	)
 	rg.GET("/trial-balance",
 		internalAuth.RequirePermission("ledger:read"),
@@ -172,4 +182,56 @@ func (h *Handler) GetTrialBalance(c *gin.Context) {
 		"is_balanced", summary.IsBalanced,
 	)
 	response.OK(c, summary)
+}
+
+// ReverseEntry handles POST /api/v1/ledger/entries/:id/reverse
+func (h *Handler) ReverseEntry(c *gin.Context) {
+	log := logger.FromContext(c.Request.Context())
+
+	connVal, exists := c.Get("db_conn")
+	if !exists {
+		log.Error("Database connection context not found during journal entry reversal")
+		response.InternalServerError(c, "DATABASE_CONTEXT_LOST", "Database connection context not found")
+		return
+	}
+	conn := connVal.(*pgxpool.Conn)
+
+	idStr := c.Param("id")
+	entryID, err := uuid.Parse(idStr)
+	if err != nil {
+		log.Warn("Invalid journal entry UUID in reversal request", "id", idStr)
+		response.BadRequest(c, "INVALID_ENTRY_ID", "Invalid journal entry ID format")
+		return
+	}
+
+	var req ReverseEntryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Warn("Invalid reversal request payload", "error", err)
+		response.BadRequest(c, "VALIDATION_ERROR", "Invalid reversal request payload", err.Error())
+		return
+	}
+
+	reversalEntry, err := h.service.ReverseManualEntry(c.Request.Context(), conn, entryID, req.Reason)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			log.Warn("Attempted to reverse non-existent journal entry", "entry_id", entryID)
+			response.NotFound(c, "ENTRY_NOT_FOUND", "Journal entry not found")
+			return
+		}
+		if errors.Is(err, ErrAlreadyReversed) {
+			log.Warn("Attempted to reverse already reversed journal entry", "entry_id", entryID)
+			response.UnprocessableEntity(c, "ENTRY_ALREADY_REVERSED", "Journal entry has already been reversed")
+			return
+		}
+		log.Error("Failed to reverse journal entry", "entry_id", entryID, "error", err)
+		response.InternalServerError(c, "REVERSAL_FAILED", err.Error())
+		return
+	}
+
+	log.Info("Journal entry reversed successfully",
+		"original_entry_id", entryID,
+		"reversal_entry_id", reversalEntry.ID,
+		"reversal_entry_number", reversalEntry.EntryNumber,
+	)
+	response.Created(c, reversalEntry)
 }

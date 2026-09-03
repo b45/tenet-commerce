@@ -1,38 +1,44 @@
 # REST API Specification & Endpoint Contracts
 ## Tenet Commerce: Enterprise POS & Halal Supply Chain API
 
+> **Implementation boundary (2026-09-03):** this specification documents the routes registered by `backend/cmd/api/router.go`. Tenant provisioning, Zakat, and AI-audit endpoints below are future design references only and are **not registered**. Phase 3/4 work must not rely on them.
+
 ---
 
 ## 1. Global API Standards & Protocols
 
 ### 1.1 Base URL & Content Negotiation
-- **Base URL:** `https://api.tenet-commerce.internal/api/v1`
+- **Local base URL:** `http://localhost:8081/api/v1`
 - **Content-Type:** `application/json; charset=utf-8`
-- **Protocol:** HTTP/2 over TLS 1.3
+- **Production transport:** deployment-specific; this repository does not yet provide a production TLS/API-gateway deployment.
 
 ### 1.2 Required Request Headers
 ```http
 Authorization: Bearer <JWT_ACCESS_TOKEN>
-Idempotency-Key: <UUIDv4>             # Mandatory on all POST / PUT mutating requests
-X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted from JWT)
+Idempotency-Key: <client-generated key> # Required by current middleware only for POS checkout, void, and stock adjustment
+X-Tenant-ID: <TENANT_SLUG>              # Fallback only; authenticated JWT tenant context has priority
 ```
 
-### 1.3 Standard Response Envelope
+### 1.3 Health Check
+- **Endpoint:** `GET /health`
+- **Auth:** Public
+- **Response:** `200 OK` with the application health payload. This endpoint is outside the `/api/v1` namespace.
+
+### 1.4 Standard Response Envelope
 ```json
 {
   "success": true,
   "data": {},
   "meta": {
-    "timestamp": "2026-08-30T10:00:00Z",
-    "request_id": "req_8f12c3e4-a1b2-4c3d-8e5f-123456789abc",
+    "total": 120,
     "page": 1,
     "limit": 50,
-    "total": 120
+    "offset": 0
   }
 }
 ```
 
-### 1.4 Standard Error Envelope
+### 1.5 Standard Error Envelope
 ```json
 {
   "success": false,
@@ -51,7 +57,7 @@ X-Tenant-ID: <TENANT_SLUG_OR_UUID>     # Optional override (default extracted fr
 
 ---
 
-## 2. Authentication & Tenant Management
+## 2. Authentication
 
 ### 2.1 Authenticate User (Login)
 - **Endpoint:** `POST /api/v1/auth/login`
@@ -97,7 +103,25 @@ Password for all seeded dev accounts: `Password123!`
 | **FINANCIAL_ADMIN** | `al-barakah-mart` | `finance1@albarakah.com` | Ledger Read/Write, Inventory Read, AI Audit |
 | **COMPLIANCE_OFFICER** | `al-barakah-mart` | `compliance1@albarakah.com` | Supply Chain Management, Inventory Read, AI Audit |
 
-### 2.2 Provision New Tenant
+### 2.2 Refresh Token
+- **Endpoint:** `POST /api/v1/auth/refresh`
+- **Auth:** Public
+- **Request Body:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+- **Response:** The same token-pair envelope as login. The current implementation issues a new access and refresh token after validating the submitted refresh token.
+
+### 2.3 Current Identity
+- **Endpoint:** `GET /api/v1/auth/me`
+- **Auth:** Bearer access token
+- **Response:** The authenticated JWT identity (`id`, `tenant_slug`, `role`, and `permissions`).
+
+### 2.4 Tenant Provisioning — Planned / Not Registered
+- **Status:** Not implemented as an HTTP endpoint. Tenant registry and schema provisioning are currently development/setup concerns and will be formalized by the tenant-migration hardening workstream.
+- **Future design reference (not an active contract):**
 - **Endpoint:** `POST /api/v1/tenants`
 - **Auth:** `SUPER_ADMIN`
 - **Request Body:**
@@ -179,6 +203,7 @@ Password for all seeded dev accounts: `Password123!`
   "discount_amount": 5000.00
 }
 ```
+- **Cash settlement rule:** when `payment_method` is `CASH`, `cash_tendered` is required and must be at least the calculated total. For `QRIS` and `SIMULATED_CARD`, omit `cash_tendered`.
 - **Response (201 Created):**
 ```json
 {
@@ -573,10 +598,14 @@ Password for all seeded dev accounts: `Password123!`
 ### 4.3 Create Goods Receipt (GR) & Stock Inbound
 - **Endpoint:** `POST /api/v1/supply-chain/goods-receipts`
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
+- **Headers:**
+  - `Idempotency-Key`: `<UUID>` (Required, unique per goods receipt operation)
+  - `Content-Type`: `application/json`
+  - `X-Tenant-ID`: `<tenant-slug>`
 - **Request Body:**
 ```json
 {
-  "purchase_order_id": "po_uuid",
+  "purchase_order_id": "30000000-0000-0000-0000-000000000001",
   "notes": "Delivered in good condition",
   "items": [
     {
@@ -586,12 +615,145 @@ Password for all seeded dev accounts: `Password123!`
   ]
 }
 ```
+- **Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "40000000-0000-0000-0000-000000000001",
+    "gr_number": "GR-20260903120000-a1b2c3d4",
+    "idempotency_key": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "purchase_order_id": "30000000-0000-0000-0000-000000000001",
+    "received_by": "11111111-1111-1111-1111-111111111111",
+    "received_date": "2026-09-03T00:00:00Z",
+    "notes": "Delivered in good condition",
+    "created_at": "2026-09-03T12:00:00Z",
+    "items": [
+      {
+        "id": "50000000-0000-0000-0000-000000000001",
+        "goods_receipt_id": "40000000-0000-0000-0000-000000000001",
+        "product_id": "10000000-0000-0000-0000-000000000001",
+        "received_quantity": 50
+      }
+    ]
+  }
+}
+```
+- **State Transition & Reconciliation Rules:**
+  - PO status must be `ISSUED` or `PARTIALLY_RECEIVED`.
+  - Serialized row lock (`SELECT ... FOR UPDATE`) prevents concurrent double-receiving.
+  - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments.
+  - Receipt quantities must not exceed unreceived outstanding quantities on the PO.
+  - If cumulative received quantities match ordered quantities across all PO lines, PO status transitions to `RECEIVED`; otherwise it transitions to `PARTIALLY_RECEIVED`.
+  - In strict compliance mode, re-validates that the PO's supplier Halal certificate is currently valid.
+  - Automatically posts a balanced double-entry ledger journal (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`).
+- **Error Responses:**
+  - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`)
+  - `409 Conflict` (`IDEMPOTENCY_KEY_CONFLICT`, `INVALID_PO_STATUS`)
+  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `COMPLIANCE_ERROR`)
+
+### 4.4 List Suppliers
+- **Endpoint:** `GET /api/v1/supply-chain/suppliers`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Query Params:**
+  - `is_active` (optional, boolean): Filter by active status (`true` / `false`).
+  - `limit` (optional, default: 50): Number of records.
+  - `offset` (optional, default: 0): Pagination offset.
+- **Response (200 OK):** Returns list of suppliers with their latest compliance certificate summary.
+
+### 4.5 Get Supplier Details
+- **Endpoint:** `GET /api/v1/supply-chain/suppliers/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Returns full supplier entity including all historical certificates and current validity status.
+
+### 4.6 Update Supplier
+- **Endpoint:** `PUT /api/v1/supply-chain/suppliers/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Request Body:**
+```json
+{
+  "company_name": "PT Berkah Pangan Mandiri",
+  "contact_person": "Ahmad Fauzi",
+  "contact_email": "fauzi@berkahpangan.id",
+  "contact_phone": "+628123456789",
+  "is_active": true
+}
+```
+- **Response (200 OK):** Returns updated supplier.
+
+### 4.7 List Supplier Certificates
+- **Endpoint:** `GET /api/v1/supply-chain/suppliers/:id/certificates`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Returns list of certificates for the specified supplier with dynamic `computed_status` (`VALID`, `EXPIRING_SOON`, `EXPIRED`, `NOT_YET_VALID`).
+
+### 4.8 Register Certificate Renewal
+- **Endpoint:** `POST /api/v1/supply-chain/suppliers/:id/certificates`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Request Body:**
+```json
+{
+  "cert_type": "HALAL_MUI",
+  "certificate_number": "ID31110000998877665",
+  "issuing_authority": "BPJPH",
+  "scope": "Poultry & Meat Processing",
+  "valid_from": "2026-09-01",
+  "expiry_date": "2028-09-01"
+}
+```
+- **Response (201 Created):** Returns registered certificate with computed validity.
+
+### 4.9 Revoke Certificate
+- **Endpoint:** `PUT /api/v1/supply-chain/certificates/:id/revoke`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Immediately marks certificate expired (`{"success": true, "data": {"revoked": true}}`).
+
+### 4.10 List Purchase Orders
+- **Endpoint:** `GET /api/v1/supply-chain/purchase-orders`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Query Params:**
+  - `status` (optional): Filter by `DRAFT`, `ISSUED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED`.
+  - `limit` (optional, default: 50)
+  - `offset` (optional, default: 0)
+- **Response (200 OK):** List of purchase order summaries with supplier name, total amount, status, and item count.
+
+### 4.11 Get Purchase Order Detail & Balance
+- **Endpoint:** `GET /api/v1/supply-chain/purchase-orders/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Complete purchase order record with:
+  - Line items with `quantity`, `received_quantity`, and `remaining_quantity`.
+  - Associated Goods Receipts with total valuation.
+
+### 4.12 Cancel Purchase Order
+- **Endpoint:** `PUT /api/v1/supply-chain/purchase-orders/:id/cancel`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Rules:** Only `DRAFT` or `ISSUED` purchase orders with zero received goods can be cancelled.
+- **Response (200 OK):** `{"success": true, "data": {"cancelled": true}}`.
+
+### 4.13 List Goods Receipts
+- **Endpoint:** `GET /api/v1/supply-chain/goods-receipts`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** List of goods receipt summaries with PO numbers, supplier names, and inbound valuations.
+
+### 4.14 Get Goods Receipt Detail
+- **Endpoint:** `GET /api/v1/supply-chain/goods-receipts/:id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** Detail of goods receipt with product names, SKU, received quantities, total inbound valuation, and cross-referenced Sharia ledger entry number.
+
+### 4.15 Document-Level Product Traceability
+- **Endpoint:** `GET /api/v1/supply-chain/traceability/product/:product_id`
+- **Auth:** Requires permission: `supply_chain:manage`
+- **Response (200 OK):** End-to-end document lineage for a product:
+  - Product metadata and current warehouse inventory stock.
+  - Suppliers who have provided this product along with active BPJPH/MUI Halal compliance certificates.
+  - Historical Purchase Orders containing the product.
+  - Historical Goods Receipts with receipt dates, quantities, and receiving officers.
 
 ---
 
 ## 5. Sharia Ledger & Financial Reporting
 
-### 5.1 Query Real-Time Zakat Tijarah
+### 5.1 Zakat Tijarah — Planned / Not Registered
+- **Status:** No Zakat route is registered in the backend. The following payload is a future-design reference, not an active contract.
 - **Endpoint:** `GET /api/v1/ledger/zakat`
 - **Auth:** `FINANCIAL_ADMIN`, `MANAGER`
 - **Query Params:** `gold_price_per_gram=1350000` (in IDR)
@@ -619,9 +781,10 @@ Password for all seeded dev accounts: `Password123!`
 
 ---
 
-## 6. Continuous AI Auditor Endpoints
+## 6. Continuous AI Auditor — Planned / Not Registered
 
 ### 6.1 Retrieve AI Audit Reports
+- **Status:** No AI-audit route is registered in the backend. The following payload is a future-design reference, not an active contract.
 - **Endpoint:** `GET /api/v1/ai/audit-reports`
 - **Auth:** `FINANCIAL_ADMIN`, `COMPLIANCE_OFFICER`
 - **Response (200 OK):**
@@ -663,8 +826,6 @@ Password for all seeded dev accounts: `Password123!`
 
 ---
 
-*Tenet Commerce — REST API Specification v1.0.0*
-
 ### Ledger Module
 `GET /api/v1/ledger/accounts`
 - **Description:** Retrieve Chart of Accounts.
@@ -677,6 +838,51 @@ Password for all seeded dev accounts: `Password123!`
 `POST /api/v1/ledger/entries`
 - **Description:** Create a manual journal entry (MANUAL_ADJUSTMENT only).
 - **Permissions:** `ledger:write`
+- **Headers:** `Idempotency-Key` (required)
+
+`POST /api/v1/ledger/entries/:id/reverse`
+- **Description:** Reverse an existing posted journal entry by generating an immutable opposite double-entry reversal journal and transitioning original status to REVERSED.
+- **Permissions:** `ledger:write`
+- **Headers:** `Idempotency-Key` (required)
+- **Request Body:**
+```json
+{
+  "reason": "Auditor adjustment: incorrect account classification"
+}
+```
+- **Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "b70eca80-dd2b-460e-9a15-daca21c2cb45",
+    "entry_number": "JE-REV-20260904005900-1ab54ec7",
+    "entry_date": "2026-09-04T00:59:00.634Z",
+    "source_document_type": "REVERSAL",
+    "source_document_id": "1ab54ec7-5e07-468f-b1ec-7ccba06c7719",
+    "memo": "Reversal of JE-20260904005900: Auditor adjustment: incorrect account classification",
+    "status": "POSTED",
+    "total_debit": 175000,
+    "total_credit": 175000,
+    "lines": [
+      {
+        "id": "f85764d2-23c2-4824-a28a-785d0dcf813a",
+        "ledger_entry_id": "b70eca80-dd2b-460e-9a15-daca21c2cb45",
+        "account_id": "20000000-0000-0000-0000-000000000001",
+        "debit_amount": 0,
+        "credit_amount": 175000
+      },
+      {
+        "id": "c613e54b-6ea9-42b7-84bc-29da2cbfa01a",
+        "ledger_entry_id": "b70eca80-dd2b-460e-9a15-daca21c2cb45",
+        "account_id": "20000000-0000-0000-0000-000000000002",
+        "debit_amount": 175000,
+        "credit_amount": 0
+      }
+    ]
+  }
+}
+```
 
 `GET /api/v1/ledger/trial-balance`
 - **Description:** Retrieve trial balance as of a specific date.
@@ -684,9 +890,9 @@ Password for all seeded dev accounts: `Password123!`
 
 ---
 
-## 6. Store Manager Analytics & KPI Dashboard
+## 7. Store Manager Analytics & KPI Dashboard
 
-### 6.1 Get Aggregated Store Dashboard
+### 7.1 Get Aggregated Store Dashboard
 - **Endpoint:** `GET /api/v1/manager/dashboard`
 - **Auth:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN`)
 - **Description:** Real-time business aggregations across sales revenue, inventory depletion alerts, Halal certificate expirations, and ledger account status.

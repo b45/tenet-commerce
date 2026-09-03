@@ -1,6 +1,8 @@
 # Technical Architecture & System Design
 ## Tenet Commerce: Multi-Tenant Enterprise POS & Halal Supply Chain
 
+> **Implementation boundary (2026-09-03):** the Phase 1–2 Go backend is the implemented system. Diagrams and sections that describe the Next.js offline client, AI auditor, Zakat engine, production CI/CD, durable idempotency, Redlock, or a tenant-migration runner are target designs for later phases unless explicitly identified as current runtime behavior. See [Implementation Status](IMPLEMENTATION_STATUS.md).
+
 ---
 
 ## 1. Architectural Philosophy & Overview
@@ -76,34 +78,19 @@ The modular monolith paradigm was selected over distributed microservices for th
    );
    ```
 
-2. **Per-Request Tenant Context Resolution:**
-   - The API Gateway extracts the `tenant_id` claim from the validated JWT token.
-   - The connection pool middleware allocates a connection and dynamically sets PostgreSQL's `search_path`:
-   ```go
-   func TenantMiddleware(db *pgxpool.Pool) gin.HandlerFunc {
-       return func(c *gin.Context) {
-           tenantSchema := c.GetString("tenant_schema") // e.g. "tenant_acme_retail"
-           
-           // Acquire connection from pool
-           conn, err := db.Acquire(c.Request.Context())
-           if err != nil {
-               c.AbortWithStatusJSON(500, gin.H{"error": "Database connection error"})
-               return
-           }
-           defer conn.Release()
-
-           // Dynamically set search_path
-           query := fmt.Sprintf("SET search_path TO %s, public;", pgx.Identifier{tenantSchema}.Sanitize())
-           if _, err := conn.Exec(c.Request.Context(), query); err != nil {
-               c.AbortWithStatusJSON(500, gin.H{"error": "Failed to set tenant context"})
-               return
-           }
-
-           c.Set("db_conn", conn)
-           c.Next()
-       }
-   }
-   ```
+2. **Per-Request Tenant Context Resolution & Transaction Isolation:**
+   - The API Gateway extracts and authenticates identity via `JWTAuthMiddleware`, injecting claims into the request context.
+   - `tenant.ContextMiddleware` resolves the active tenant from the trusted `public.tenants` registry and enforces cross-tenant guards:
+     - Rejects any mismatch between token tenant claims (`tenant_id`, `tenant_slug`) and resolved tenant.
+     - Rejects conflicting manual `X-Tenant-ID` headers.
+     - Validates tenant schema names against strict identifier patterns (`^[a-z0-9_]+$`).
+   - A dedicated connection is acquired from `pgxpool.Pool` and wrapped in `tenant.ScopedDB`.
+   - All tenant mutations and queries utilize transaction-local isolation:
+     ```sql
+     SET LOCAL search_path TO tenant_<slug>, public;
+     ```
+   - When the transaction commits or rolls back, PostgreSQL automatically reverts the local `search_path`.
+   - Upon connection release, a defensive `RESET ALL` session reset is executed to guarantee zero cross-tenant leakage across pooled connections.
 
 3. **Automated Migration Runner:**
    Database migrations are executed in parallel across all active tenant schemas using a transactional DDL migration tool (e.g., `golang-migrate` or `pressly/goose`):
@@ -199,7 +186,7 @@ Tenet Commerce supports Indonesian Standard QR Code (**QRIS**) payment flows:
 
 ---
 
-## 4. Offline-First Synchronization Architecture
+## 4. Target Design — Phase 3 Offline-First Synchronization
 
 The Next.js 14 POS client is built with an offline-first foundation to operate without disruption during network outages.
 
@@ -274,7 +261,7 @@ The Next.js 14 POS client is built with an offline-first foundation to operate w
 
 ---
 
-## 6. Asynchronous AI Sharia Auditor Worker
+## 6. Target Design — Phase 4 Asynchronous AI Sharia Auditor
 
 The AI Auditor is an isolated, asynchronous worker written in **Python 3.12** that connects to tenant schemas with **read-only database privileges**.
 
@@ -312,7 +299,7 @@ The AI Auditor is an isolated, asynchronous worker written in **Python 3.12** th
 
 ---
 
-## 7. CI/CD & DevOps Pipeline
+## 7. CI/CD & DevOps: Current Pipeline and Target Design
 
 ```yaml
 name: CI/CD Pipeline
@@ -420,7 +407,7 @@ Client Request (X-Trace-ID optional)
 
 ---
 
-## 8. POS Transaction Engine & Idempotency Architecture
+## 8. POS Transaction Engine: Current Behavior and Hardening Target
 
 The Point of Sale (POS) checkout engine executes sales with strict ACID guarantees, atomic stock decrements, and double-charge prevention.
 
