@@ -78,34 +78,19 @@ The modular monolith paradigm was selected over distributed microservices for th
    );
    ```
 
-2. **Per-Request Tenant Context Resolution:**
-   - The API Gateway extracts the `tenant_id` claim from the validated JWT token.
-   - The connection pool middleware allocates a connection and dynamically sets PostgreSQL's `search_path`:
-   ```go
-   func TenantMiddleware(db *pgxpool.Pool) gin.HandlerFunc {
-       return func(c *gin.Context) {
-           tenantSchema := c.GetString("tenant_schema") // e.g. "tenant_acme_retail"
-           
-           // Acquire connection from pool
-           conn, err := db.Acquire(c.Request.Context())
-           if err != nil {
-               c.AbortWithStatusJSON(500, gin.H{"error": "Database connection error"})
-               return
-           }
-           defer conn.Release()
-
-           // Dynamically set search_path
-           query := fmt.Sprintf("SET search_path TO %s, public;", pgx.Identifier{tenantSchema}.Sanitize())
-           if _, err := conn.Exec(c.Request.Context(), query); err != nil {
-               c.AbortWithStatusJSON(500, gin.H{"error": "Failed to set tenant context"})
-               return
-           }
-
-           c.Set("db_conn", conn)
-           c.Next()
-       }
-   }
-   ```
+2. **Per-Request Tenant Context Resolution & Transaction Isolation:**
+   - The API Gateway extracts and authenticates identity via `JWTAuthMiddleware`, injecting claims into the request context.
+   - `tenant.ContextMiddleware` resolves the active tenant from the trusted `public.tenants` registry and enforces cross-tenant guards:
+     - Rejects any mismatch between token tenant claims (`tenant_id`, `tenant_slug`) and resolved tenant.
+     - Rejects conflicting manual `X-Tenant-ID` headers.
+     - Validates tenant schema names against strict identifier patterns (`^[a-z0-9_]+$`).
+   - A dedicated connection is acquired from `pgxpool.Pool` and wrapped in `tenant.ScopedDB`.
+   - All tenant mutations and queries utilize transaction-local isolation:
+     ```sql
+     SET LOCAL search_path TO tenant_<slug>, public;
+     ```
+   - When the transaction commits or rolls back, PostgreSQL automatically reverts the local `search_path`.
+   - Upon connection release, a defensive `RESET ALL` session reset is executed to guarantee zero cross-tenant leakage across pooled connections.
 
 3. **Automated Migration Runner:**
    Database migrations are executed in parallel across all active tenant schemas using a transactional DDL migration tool (e.g., `golang-migrate` or `pressly/goose`):
