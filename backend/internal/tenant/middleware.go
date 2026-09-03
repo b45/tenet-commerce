@@ -1,14 +1,16 @@
 package tenant
 
 import (
+	"context"
 	"fmt"
+	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/b45/tenet-commerce/backend/pkg/database"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ContextMiddleware injects the tenant schema into the PostgreSQL search_path
@@ -52,7 +54,21 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 			response.AbortInternalServerError(c, "DATABASE_UNAVAILABLE", "Failed to connect to the database")
 			return
 		}
-		defer conn.Release()
+		defer func() {
+			// pgxpool reuses physical connections. Never return a tenant-scoped
+			// session to the pool before its session settings have been cleared.
+			resetCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			if _, err := conn.Exec(resetCtx, "RESET ALL"); err != nil {
+				reqLogger.Error("Failed to reset database session before pool release; closing connection",
+					"tenant_slug", tenantSlug,
+					"error", err.Error(),
+				)
+				_ = conn.Conn().Close(resetCtx)
+			}
+			conn.Release()
+		}()
 
 		// 4. Set the schema search path dynamically.
 		// SECURITY: schemaName is retrieved from our trusted public.tenants registry,

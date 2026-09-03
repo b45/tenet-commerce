@@ -37,7 +37,10 @@ jobs:
       - name: Run Go vet
         run: go vet ./...
 
-      - name: Run Unit Tests with Race Detector
+      - name: Verify Docker is available for integration tests
+        run: docker info
+
+      - name: Run Go Tests with Race Detector and Hermetic Integration Suite
         run: go test -v -race -short -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Upload Backend Coverage
