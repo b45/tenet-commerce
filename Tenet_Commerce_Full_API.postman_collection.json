@@ -2026,6 +2026,51 @@
                     "response": []
                 }
             ]
+        },
+        {
+            "name": "0. Runtime & Session",
+            "item": [
+                {
+                    "name": "Health Check",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/health",
+                            "host": ["{{base_url}}"],
+                            "path": ["health"]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Refresh Token",
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Content-Type", "value": "application/json", "type": "text"}],
+                        "body": {"mode": "raw", "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"},
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/refresh",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "v1", "auth", "refresh"]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Current Identity",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/me",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "v1", "auth", "me"]
+                        }
+                    },
+                    "response": []
+                }
+            ]
         }
     ],
     "variable": [
@@ -2035,6 +2080,10 @@
         },
         {
             "key": "jwt_token",
+            "value": ""
+        },
+        {
+            "key": "refresh_token",
             "value": ""
         },
         {

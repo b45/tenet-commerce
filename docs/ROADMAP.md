@@ -18,22 +18,26 @@ gantt
 
     section Phase 2: Core APIs & Extensions (v0.2.0 - v0.3.0)
     POS & Catalog Engine (Go)               :done, p2_1, 2026-09-15, 7d
-    Redis Idempotency & Distributed Locks   :done, p2_2, 2026-09-18, 7d
+    Redis Idempotency & POS Row Locking     :done, p2_2, 2026-09-18, 7d
     Compliance Supply Chain & Halal Certs   :done, p2_3, 2026-09-22, 7d
     Double-Entry Ledger Engine              :done, p2_4, 2026-09-25, 7d
     Retail POS Operations, QRIS & Void      :done, p2_5, 2026-09-27, 4d
     Bakery Inventory CRUD & Shrinkage Engine:done, p2_6, 2026-09-29, 3d
     Performance Benchmarking & Load Testing :done, p2_7, 2026-10-01, 3d
 
+    section Phase 2 Hardening Gate (v0.3.1)
+    Hermetic Integration Tests & Migrations  :active, h1, 2026-10-03, 7d
+    Transaction & Tenant Invariant Hardening :h2, after h1, 14d
+
     section Phase 3: Frontend & Offline (v0.4.0)
-    Next.js POS UI & Barcode Search         :active, p3_1, 2026-10-03, 7d
+    Next.js POS UI & Barcode Search         :p3_1, after h2, 7d
     IndexedDB & Service Worker Sync Engine  :p3_2, 2026-10-07, 7d
     Supply Chain & Ledger Dashboards        :p3_3, 2026-10-11, 7d
 
     section Phase 4: AI & Deployment (v0.5.0 - v1.0.0)
     Python AI Auditor Worker & Cron Jobs    :p4_1, 2026-10-15, 6d
     Zakat Tijarah Dynamic Calculator        :p4_2, 2026-10-18, 4d
-    Testcontainers Integration & E2E Tests  :p4_3, 2026-10-21, 5d
+    Playwright E2E Tests                    :p4_3, after p3_3, 5d
     Production Docker & Public Showcase Prep:p4_4, 2026-10-24, 6d
 ```
 
@@ -45,7 +49,7 @@ gantt
 - **Objective:** Establish the development environment, database multi-tenancy engine, CI/CD pipeline, authentication guards, and observability foundation.
 - **Key Deliverables:**
   - [x] Monorepo structure (`backend/`, `frontend/`, `ai-worker/`, `docs/`).
-  - [x] GitHub Actions CI pipeline for linting, security scanning, and multi-architecture Docker image builds.
+  - [x] GitHub Actions CI pipeline for Go build/vet/test and frontend lint/build.
   - [x] PostgreSQL dynamic `search_path` connection pool middleware for Schema-per-Tenant routing.
   - [x] JWT token lifecycle (access/refresh token issuance, verification, tenant context injection).
   - [x] RBAC permission guards protecting endpoint routes (`RequireRole`, `RequirePermission`).
@@ -65,14 +69,19 @@ gantt
   - [x] **Bakery / Retail Inventory Management API:** Full Category and Product CRUD (`GET`, `POST`, `PUT`, `DELETE`) with soft-delete support.
   - [x] **Stock Opname & Spoilage Write-Off Engine:** `POST /api/v1/pos/inventory/adjust` with audit trail and automated Sharia shrinkage journals (`5020 Inventory Shrinkage & Loss` $\leftrightarrow$ `1030 Merchandise Inventory`).
   - [x] **Low-Stock Replenishment Alerts:** `GET /api/v1/pos/inventory/low-stock` for proactive baking/purchasing triggers.
-  - [x] **Redis Idempotency Layer:** `Idempotency-Key` interceptor preventing duplicate submissions (`pkg/redis`).
+  - [x] **Redis Idempotency Layer (partial):** `Idempotency-Key` middleware on POS checkout, void, and stock adjustment.
   - [x] **Concurrency Stock Locking:** Database transaction (`pgx.Tx`) with row-level locks (`SELECT ... FOR UPDATE OF p, i`).
   - [x] **Compliance-Aware Supply Chain Module:** Supplier registry, Compliance Certificate tracking, and **configurable hard-validation interceptor** blocking invalid POs and Goods Receipts.
   - [x] **Double-Entry Ledger Engine:** Automated journal generation adhering to $\sum \text{Debits} = \sum \text{Credits}$ balance invariants.
 
 ---
 
-### Phase 3: Frontend Client & Offline-First POS (Weeks 5 – 6)
+### Phase 2 Hardening Gate (v0.3.1)
+- **Objective:** Prove Phase 1–2 invariants before expanding the product surface in Phase 3.
+- **Exit criteria:** Hermetic PostgreSQL/Redis integration tests; transaction-scoped tenant context; durable idempotency; atomic PO/GR reconciliation; exact-money and append-only-ledger decisions; synchronized API/benchmark evidence.
+- **Status:** Active. Phase 3 is intentionally on hold until this gate is passed.
+
+### Phase 3: Frontend Client & Offline-First POS
 - **Objective:** Build a responsive, high-performance web POS using Next.js 14 and shadcn/ui with offline resilience.
 - **Key Deliverables:**
   - [ ] **High-Velocity POS Cashier Interface:** Barcode scanner listener, rapid cart manipulation, and discount overrides.
@@ -87,7 +96,7 @@ gantt
 - **Key Deliverables:**
   - [ ] **AI Continuous Auditor (Python 3.12):** Scheduled batch analysis executing Benford's Law tests, off-hours sales outlier detection, and report generation.
   - [ ] **Zakat Tijarah Engine:** Real-time calculation of Net Working Capital Zakat with dynamic gold spot price inputs.
-  - [ ] **Automated Test Suite:** Full integration coverage using Testcontainers (PostgreSQL + Redis) and Playwright E2E smoke tests.
+  - [ ] **End-to-End Test Suite:** Playwright smoke tests after the Phase 3 client exists. PostgreSQL/Redis integration coverage belongs to the Phase 2 hardening gate.
   - [ ] **Container Deployment:** Multi-stage production Docker configurations and Docker Compose orchestrations.
 
 ---
@@ -96,9 +105,9 @@ gantt
 
 | Risk | Probability | Impact | Mitigation Strategy |
 |---|:---:|:---:|---|
-| **Inventory Overselling during Flash Sales** | Medium | High | Dual-layer concurrency: Redis distributed lock handles fast-path rate limiting; DB `SELECT ... FOR UPDATE` guarantees ACID consistency. |
-| **Double Charges on Offline Network Reconnect** | High | High | Client-generated UUIDv4 `Idempotency-Key` persisted in IndexedDB and validated via Redis `SETNX` before transaction execution. |
-| **Tenant Data Leakage in Monolith** | Low | Critical | Automated middleware sets `SET search_path TO tenant_{uuid}` on every database connection before handler execution. |
+| **Inventory Overselling during Flash Sales** | Medium | High | Checkout uses PostgreSQL row locking. Concurrent mutation tests are a Phase 2 hardening requirement. |
+| **Double Charges on Offline Network Reconnect** | High | High | Current Redis idempotency is limited to selected POS mutations; durable idempotency is required before offline replay is introduced. |
+| **Tenant Data Leakage in Monolith** | Low | Critical | Current middleware sets a trusted search path on a request-scoped connection. Transaction-scoped pool isolation is a hardening requirement. |
 | **Expired Compliance Goods Entering Warehouse** | Low | Critical | Hard-block validation triggered conditionally based on tenant configuration on both Purchase Order creation and physical Goods Receipt confirmation. |
 
 ---
