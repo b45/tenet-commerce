@@ -76,7 +76,7 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 				{ProductID: "20000000-0000-0000-0000-000000000001", ReceivedQuantity: 10},
 			},
 		}
-		gr, err := svc.CreateGoodsReceipt(ctx, conn, uuid.New(), reqGR)
+		gr, err := svc.CreateGoodsReceipt(ctx, conn, uuid.New(), "test-gr-key-"+uuid.NewString(), reqGR)
 		require.NoError(t, err)
 		require.NotNil(t, gr)
 	})
@@ -174,5 +174,120 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 		}
 		_, err = svc.CreatePurchaseOrder(ctx, conn, reqPOExpired)
 		require.ErrorIs(t, err, ErrComplianceCertExpired)
+	})
+}
+
+func TestReconcileReceiptItems(t *testing.T) {
+	prod1 := uuid.New()
+	prod2 := uuid.New()
+	unknownProd := uuid.New()
+
+	poItems := []PurchaseOrderItem{
+		{
+			ID:              uuid.New(),
+			PurchaseOrderID: uuid.New(),
+			ProductID:       prod1,
+			Quantity:        10,
+			UnitCost:        25000,
+			Subtotal:        250000,
+		},
+		{
+			ID:              uuid.New(),
+			PurchaseOrderID: uuid.New(),
+			ProductID:       prod2,
+			Quantity:        5,
+			UnitCost:        50000,
+			Subtotal:        250000,
+		},
+	}
+
+	t.Run("empty receipt items rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		_, _, err := reconcileReceiptItems(gr, nil, poItems, map[uuid.UUID]int{})
+		require.ErrorIs(t, err, ErrEmptyReceipt)
+	})
+
+	t.Run("invalid product UUID format rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		requested := []CreateGRItemRequest{
+			{ProductID: "invalid-uuid", ReceivedQuantity: 5},
+		}
+		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parse goods receipt product id")
+	})
+
+	t.Run("duplicate product in requested items rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		requested := []CreateGRItemRequest{
+			{ProductID: prod1.String(), ReceivedQuantity: 3},
+			{ProductID: prod1.String(), ReceivedQuantity: 2},
+		}
+		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		require.ErrorIs(t, err, ErrDuplicateReceiptItem)
+	})
+
+	t.Run("product not on purchase order rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		requested := []CreateGRItemRequest{
+			{ProductID: unknownProd.String(), ReceivedQuantity: 2},
+		}
+		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		require.ErrorIs(t, err, ErrReceiptItemNotOnPO)
+	})
+
+	t.Run("zero or negative quantity rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		requested := []CreateGRItemRequest{
+			{ProductID: prod1.String(), ReceivedQuantity: 0},
+		}
+		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		require.ErrorIs(t, err, ErrReceiptQuantityExceeds)
+	})
+
+	t.Run("quantity exceeding remaining outstanding quantity rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		// Already received 7 of 10. Outstanding is 3. Attempt to receive 4.
+		received := map[uuid.UUID]int{prod1: 7}
+		requested := []CreateGRItemRequest{
+			{ProductID: prod1.String(), ReceivedQuantity: 4},
+		}
+		_, _, err := reconcileReceiptItems(gr, requested, poItems, received)
+		require.ErrorIs(t, err, ErrReceiptQuantityExceeds)
+	})
+
+	t.Run("partial receipt returns fullyReceived false and correct valuation", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		received := map[uuid.UUID]int{}
+		requested := []CreateGRItemRequest{
+			{ProductID: prod1.String(), ReceivedQuantity: 4},
+		}
+		val, fullyReceived, err := reconcileReceiptItems(gr, requested, poItems, received)
+		require.NoError(t, err)
+		assert.False(t, fullyReceived)
+		assert.Equal(t, 4*25000.0, val)
+		require.Len(t, gr.Items, 1)
+		assert.Equal(t, prod1, gr.Items[0].ProductID)
+		assert.Equal(t, 4, gr.Items[0].ReceivedQuantity)
+	})
+
+	t.Run("full receipt completing all lines returns fullyReceived true", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		// Already received 4 of prod1 and 2 of prod2
+		received := map[uuid.UUID]int{
+			prod1: 4,
+			prod2: 2,
+		}
+		// Now receiving remaining 6 of prod1 and 3 of prod2
+		requested := []CreateGRItemRequest{
+			{ProductID: prod1.String(), ReceivedQuantity: 6},
+			{ProductID: prod2.String(), ReceivedQuantity: 3},
+		}
+		val, fullyReceived, err := reconcileReceiptItems(gr, requested, poItems, received)
+		require.NoError(t, err)
+		assert.True(t, fullyReceived)
+		expectedVal := (6 * 25000.0) + (3 * 50000.0)
+		assert.Equal(t, expectedVal, val)
+		require.Len(t, gr.Items, 2)
 	})
 }

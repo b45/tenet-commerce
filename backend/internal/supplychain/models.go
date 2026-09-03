@@ -69,6 +69,7 @@ type PurchaseOrderItem struct {
 type GoodsReceipt struct {
 	ID                uuid.UUID          `json:"id"`
 	GRNumber          string             `json:"gr_number"`
+	IdempotencyKey    string             `json:"idempotency_key"`
 	PurchaseOrderID   uuid.UUID          `json:"purchase_order_id"`
 	ReceivedBy        uuid.UUID          `json:"received_by"`
 	ReceivedDate      time.Time          `json:"received_date"`
@@ -128,5 +129,5 @@ type CreateGoodsReceiptRequest struct {
 
 type CreateGRItemRequest struct {
 	ProductID        string `json:"product_id" binding:"required,uuid"`
-	ReceivedQuantity int    `json:"received_quantity" binding:"required,min=0"`
+	ReceivedQuantity int    `json:"received_quantity" binding:"required,min=1"`
 }
