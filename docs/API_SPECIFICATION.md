@@ -598,10 +598,14 @@ Password for all seeded dev accounts: `Password123!`
 ### 4.3 Create Goods Receipt (GR) & Stock Inbound
 - **Endpoint:** `POST /api/v1/supply-chain/goods-receipts`
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
+- **Headers:**
+  - `Idempotency-Key`: `<UUID>` (Required, unique per goods receipt operation)
+  - `Content-Type`: `application/json`
+  - `X-Tenant-ID`: `<tenant-slug>`
 - **Request Body:**
 ```json
 {
-  "purchase_order_id": "po_uuid",
+  "purchase_order_id": "30000000-0000-0000-0000-000000000001",
   "notes": "Delivered in good condition",
   "items": [
     {
@@ -611,6 +615,42 @@ Password for all seeded dev accounts: `Password123!`
   ]
 }
 ```
+- **Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "40000000-0000-0000-0000-000000000001",
+    "gr_number": "GR-20260903120000-a1b2c3d4",
+    "idempotency_key": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "purchase_order_id": "30000000-0000-0000-0000-000000000001",
+    "received_by": "11111111-1111-1111-1111-111111111111",
+    "received_date": "2026-09-03T00:00:00Z",
+    "notes": "Delivered in good condition",
+    "created_at": "2026-09-03T12:00:00Z",
+    "items": [
+      {
+        "id": "50000000-0000-0000-0000-000000000001",
+        "goods_receipt_id": "40000000-0000-0000-0000-000000000001",
+        "product_id": "10000000-0000-0000-0000-000000000001",
+        "received_quantity": 50
+      }
+    ]
+  }
+}
+```
+- **State Transition & Reconciliation Rules:**
+  - PO status must be `ISSUED` or `PARTIALLY_RECEIVED`.
+  - Serialized row lock (`SELECT ... FOR UPDATE`) prevents concurrent double-receiving.
+  - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments.
+  - Receipt quantities must not exceed unreceived outstanding quantities on the PO.
+  - If cumulative received quantities match ordered quantities across all PO lines, PO status transitions to `RECEIVED`; otherwise it transitions to `PARTIALLY_RECEIVED`.
+  - In strict compliance mode, re-validates that the PO's supplier Halal certificate is currently valid.
+  - Automatically posts a balanced double-entry ledger journal (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`).
+- **Error Responses:**
+  - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`)
+  - `409 Conflict` (`IDEMPOTENCY_KEY_CONFLICT`, `INVALID_PO_STATUS`)
+  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `COMPLIANCE_ERROR`)
 
 ---
 

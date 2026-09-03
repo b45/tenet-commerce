@@ -543,6 +543,11 @@
 								"type": "text"
 							},
 							{
+								"key": "Idempotency-Key",
+								"value": "{{$guid}}",
+								"type": "text"
+							},
+							{
 								"key": "Content-Type",
 								"value": "application/json",
 								"type": "text"

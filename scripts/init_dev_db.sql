@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_orders (
     supplier_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.suppliers(id) ON DELETE RESTRICT,
     compliance_cert_id UUID REFERENCES tenant_al_barakah_mart.compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
-    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
+    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -238,6 +238,7 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_order_items (
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     gr_number VARCHAR(63) NOT NULL UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
     purchase_order_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.purchase_orders(id) ON DELETE RESTRICT,
     received_by UUID NOT NULL,
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -529,7 +530,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.purchase_orders (
     supplier_id UUID NOT NULL REFERENCES tenant_darussalam_store.suppliers(id) ON DELETE RESTRICT,
     compliance_cert_id UUID REFERENCES tenant_darussalam_store.compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
-    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
+    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -546,6 +547,7 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.purchase_order_items (
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     gr_number VARCHAR(63) NOT NULL UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
     purchase_order_id UUID NOT NULL REFERENCES tenant_darussalam_store.purchase_orders(id) ON DELETE RESTRICT,
     received_by UUID NOT NULL,
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,

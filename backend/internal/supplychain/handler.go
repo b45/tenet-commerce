@@ -2,6 +2,7 @@ package supplychain
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -100,6 +101,13 @@ func (h *Handler) CreatePurchaseOrder(c *gin.Context) {
 func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 	log := logger.FromContext(c.Request.Context())
 
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if idempotencyKey == "" {
+		log.Warn("Goods receipt creation attempted without Idempotency-Key header")
+		response.AbortBadRequest(c, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required")
+		return
+	}
+
 	var req CreateGoodsReceiptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Warn("Goods receipt validation failed", "error", err)
@@ -122,9 +130,20 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 	}
 	userID, _ := uuid.Parse(userIDVal.(string))
 
-	gr, err := h.service.CreateGoodsReceipt(c.Request.Context(), conn, userID, &req)
+	gr, err := h.service.CreateGoodsReceipt(c.Request.Context(), conn, userID, idempotencyKey, &req)
 	if err != nil {
-		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) {
+		if errors.Is(err, ErrEmptyReceipt) || errors.Is(err, ErrZeroValueReceipt) || errors.Is(err, ErrDuplicateReceiptItem) {
+			log.Warn("Goods receipt validation rejected", "error", err)
+			response.AbortBadRequest(c, "INVALID_RECEIPT_ITEMS", err.Error())
+			return
+		}
+		if errors.Is(err, ErrReceiptItemNotOnPO) || errors.Is(err, ErrReceiptQuantityExceeds) {
+			log.Warn("Goods receipt line reconciliation failed", "error", err)
+			response.UnprocessableEntity(c, "RECEIPT_RECONCILIATION_FAILED", err.Error())
+			c.Abort()
+			return
+		}
+		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) {
 			log.Warn("Goods receipt creation hard-blocked by Halal compliance engine", "po_id", req.PurchaseOrderID, "error", err)
 			response.UnprocessableEntity(c, "COMPLIANCE_ERROR", err.Error())
 			c.Abort()
@@ -133,6 +152,11 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 		if errors.Is(err, ErrInvalidPOStatus) {
 			log.Warn("Goods receipt rejected: invalid PO status", "po_id", req.PurchaseOrderID, "error", err)
 			response.AbortConflict(c, "INVALID_PO_STATUS", err.Error())
+			return
+		}
+		if errors.Is(err, ErrIdempotencyKeyConflict) {
+			log.Warn("Goods receipt rejected: idempotency key conflict", "idempotency_key", idempotencyKey, "error", err)
+			response.AbortConflict(c, "IDEMPOTENCY_KEY_CONFLICT", err.Error())
 			return
 		}
 		log.Error("Failed to process Goods Receipt", "po_id", req.PurchaseOrderID, "error", err)

@@ -212,7 +212,7 @@ CREATE TABLE purchase_orders (
     supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
     compliance_cert_id UUID REFERENCES compliance_certificates(id) ON DELETE RESTRICT,
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
-    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'RECEIVED', 'CANCELLED')),
+    status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -229,6 +229,7 @@ CREATE TABLE purchase_order_items (
 CREATE TABLE goods_receipts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     gr_number VARCHAR(63) NOT NULL UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
     purchase_order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE RESTRICT,
     received_by UUID NOT NULL,
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,
