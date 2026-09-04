@@ -11,9 +11,8 @@ func BenchmarkGenerateTokenPair(b *testing.B) {
 	tenantSlug := "al-barakah-mart"
 	role := "MANAGER"
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, _, err := jwtSvc.GenerateTokenPair(userID, tenantID, tenantSlug, role)
 		if err != nil {
 			b.Fatalf("failed to generate token: %v", err)
@@ -33,9 +32,8 @@ func BenchmarkValidateToken(b *testing.B) {
 		b.Fatalf("setup failed: %v", err)
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		claims, err := jwtSvc.ValidateToken(accessToken, "access")
 		if err != nil || claims.UserID != userID {
 			b.Fatalf("token validation failed: %v", err)
@@ -70,10 +68,11 @@ func BenchmarkValidateToken_Parallel(b *testing.B) {
 func BenchmarkGetPermissionsForRole(b *testing.B) {
 	roles := []string{"CASHIER", "MANAGER", "SUPER_ADMIN", "COMPLIANCE_OFFICER", "FINANCIAL_ADMIN"}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		role := roles[i%len(roles)]
+		i++
 		perms := GetPermissionsForRole(role)
 		if len(perms) == 0 {
 			b.Fatalf("expected permissions for role %s", role)
