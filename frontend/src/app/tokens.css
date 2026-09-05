@@ -1,90 +1,97 @@
 /**
- * Tenet Commerce Design Tokens
- * Generated from docs/design/tokens/base.tokens.json & docs/FRONTEND_GUIDELINES.md
+ * Tenet Commerce — Timeless Industrial Cupertino Design System
+ * Signature styling inspired by Apple design language:
+ * Minimalist, precise, tactile, frosted materials, hairline borders, and tabular numbers.
  */
 
 :root {
-  /* Primitive Colors */
-  --color-indigo-50: #eef2ff;
-  --color-indigo-600: #4f46e5;
-  --color-indigo-700: #4338ca;
-  --color-indigo-800: #3730a3;
-
-  --color-slate-50: #f8fafc;
-  --color-slate-100: #f1f5f9;
-  --color-slate-200: #e2e8f0;
-  --color-slate-400: #94a3b8;
-  --color-slate-600: #475569;
-  --color-slate-700: #334155;
-  --color-slate-900: #0f172a;
-
-  --color-green-50: #f0fdf4;
-  --color-green-200: #bbf7d0;
-  --color-green-700: #15803d;
-  --color-green-800: #166534;
-
-  --color-amber-50: #fffbeb;
-  --color-amber-200: #fde68a;
-  --color-amber-700: #b45309;
-  --color-amber-800: #92400e;
-
-  --color-red-50: #fef2f2;
-  --color-red-200: #fecaca;
-  --color-red-700: #b91c1c;
-  --color-red-800: #991b1b;
-
-  --color-blue-50: #eff6ff;
-  --color-blue-200: #bfdbfe;
-  --color-blue-700: #1d4ed8;
-  --color-blue-800: #1e40af;
-
-  /* Semantic Actions */
-  --color-action-primary: var(--color-indigo-700);
-  --color-action-primary-hover: var(--color-indigo-800);
-  --color-action-on-primary: #ffffff;
-  --color-action-focus-ring: var(--color-indigo-600);
-
-  /* Semantic Surfaces */
+  /* Canvas & Surfaces */
+  --color-canvas: #f5f5f7;
   --color-surface-base: #ffffff;
-  --color-surface-muted: var(--color-slate-50);
+  --color-surface-muted: #f8f8fa;
+  --color-surface-glass: rgba(255, 255, 255, 0.78);
   --color-surface-elevated: #ffffff;
-  --color-surface-border: var(--color-slate-200);
 
-  /* Semantic Typography */
-  --color-text-primary: var(--color-slate-900);
-  --color-text-secondary: var(--color-slate-600);
-  --color-text-muted: var(--color-slate-400);
+  /* Hairline Precision Borders */
+  --color-border-hairline: rgba(0, 0, 0, 0.07);
+  --color-border-subtle: rgba(0, 0, 0, 0.11);
+  --color-border-strong: rgba(0, 0, 0, 0.18);
+  --color-surface-border: var(--color-border-hairline);
+
+  /* Obsidian & Calibrated Typography */
+  --color-text-primary: #0b0f19;
+  --color-text-secondary: #555d6e;
+  --color-text-muted: #8b95a5;
   --color-text-inverse: #ffffff;
 
-  /* Semantic Statuses */
-  --color-status-success-text: var(--color-green-800);
-  --color-status-success-bg: var(--color-green-50);
-  --color-status-success-border: var(--color-green-200);
+  /* Cupertino Deep Sapphire Actions */
+  --color-action-primary: #0066cc;
+  --color-action-primary-hover: #0055b3;
+  --color-action-primary-active: #004c9e;
+  --color-action-on-primary: #ffffff;
+  --color-action-focus-ring: rgba(0, 102, 204, 0.35);
 
-  --color-status-warning-text: var(--color-amber-800);
-  --color-status-warning-bg: var(--color-amber-50);
-  --color-status-warning-border: var(--color-amber-200);
+  /* Status Colors — Natural & Calibrated (Never Neon) */
+  --color-status-success-text: #0d7a3e;
+  --color-status-success-bg: #eaf8f0;
+  --color-status-success-border: rgba(13, 122, 62, 0.18);
 
-  --color-status-danger-text: var(--color-red-800);
-  --color-status-danger-bg: var(--color-red-50);
-  --color-status-danger-border: var(--color-red-200);
+  --color-status-warning-text: #b25e00;
+  --color-status-warning-bg: #fff6e5;
+  --color-status-warning-border: rgba(178, 94, 0, 0.18);
 
-  --color-status-info-text: var(--color-blue-800);
-  --color-status-info-bg: var(--color-blue-50);
-  --color-status-info-border: var(--color-blue-200);
+  --color-status-danger-text: #d92d20;
+  --color-status-danger-bg: #fee4e2;
+  --color-status-danger-border: rgba(217, 45, 32, 0.18);
 
-  /* Radii */
-  --radius-sm: 0.25rem; /* 4px */
-  --radius-md: 0.5rem;  /* 8px */
-  --radius-lg: 0.75rem; /* 12px */
+  --color-status-info-text: #0066cc;
+  --color-status-info-bg: #eff6ff;
+  --color-status-info-border: rgba(0, 102, 204, 0.18);
+
+  /* Continuous Squircle Radii */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
   --radius-full: 9999px;
 
-  /* Spacing Scale */
-  --space-1: 0.25rem; /* 4px */
-  --space-2: 0.5rem;  /* 8px */
-  --space-3: 0.75rem; /* 12px */
-  --space-4: 1rem;    /* 16px */
-  --space-6: 1.5rem;  /* 24px */
-  --space-8: 2rem;    /* 32px */
-  --space-12: 3rem;   /* 48px */
+  /* Spacing Scale (4px Rhythm) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Apple Fluid Spring Motion */
+  --ease-apple: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-smooth: 320ms;
+
+  /* Ambient Multi-Tier Diffuse Shadows */
+  --shadow-hairline: 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.02), 0 4px 14px -2px rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 2px 6px rgba(0, 0, 0, 0.03), 0 16px 32px -4px rgba(0, 0, 0, 0.06);
+  --shadow-tactile: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Global Industrial Reset & Tabular Typography */
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.011em;
+}
+
+/* Tabular Financial Numbers Utility */
+.font-tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
 }
