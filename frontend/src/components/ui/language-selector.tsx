@@ -6,13 +6,26 @@ import { cn } from "@/lib/utils";
 
 interface LanguageSelectorProps {
   className?: string;
-  variant?: "segmented" | "compact";
+  variant?: "segmented" | "compact" | "select";
 }
 
 const AVAILABLE_LOCALES: Locale[] = ["id", "en", "ar"];
 
 export function LanguageSelector({ className, variant = "segmented" }: LanguageSelectorProps) {
-  const { locale, setLocale } = useTranslation();
+  const { locale, setLocale, t } = useTranslation();
+
+  if (variant === "select") {
+    return (
+      <select
+        aria-label={t("nav.language")}
+        value={locale}
+        onChange={event => setLocale(event.target.value as Locale)}
+        className={cn("h-12 max-w-full rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-base)] px-3 text-base text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-action-primary)]", className)}
+      >
+        {AVAILABLE_LOCALES.map(code => <option key={code} value={code} lang={code}>{LOCALES[code].nativeName}</option>)}
+      </select>
+    );
+  }
 
   if (variant === "compact") {
     return (

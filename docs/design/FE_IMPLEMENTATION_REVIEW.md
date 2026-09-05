@@ -8,6 +8,34 @@ Rujukan: [pedoman FE](../FRONTEND_GUIDELINES.md), [Phase 3](../FRONTEND_PHASE3_D
 
 ## Tindak lanjut implementasi: FE-S1, bagian pertama
 
+### Pembaruan berikutnya: FE-R1 shell/header responsive
+
+Baseline berikutnya adalah `b31225b` di develop: i18n dan sebagian navigasi mobile telah digabung sebelum patch ini. FE-R1 dikembangkan terpisah di branch lokal `fix/52-responsive-shell-header`; tidak mengubah logika/controller pembayaran.
+
+- Header memakai tinggi alami dan dua baris di bawah 480 CSS px. Tenant asli dapat wrap (tanpa fallback toko contoh), pemilih bahasa berupa native select berlabel, logout icon memiliki accessible name. Tombol menu/logout dan select setinggi 48px. Identitas role tersedia di sidebar/drawer, bukan memadati header.
+- Sidebar permanen dan POS split berbagi breakpoint `xl` 1280px. Di bawahnya, navigasi utama berupa native modal dialog dengan label, tombol tutup, Escape/backdrop dan focus restoration bawaan browser; drawer tertutup tidak menyisakan link offscreen yang masih aktif. Resize ke desktop menutup drawer dan mengarahkan fokus ke navigasi desktop. Interaksi perangkat ini belum diverifikasi manual.
+- Menggunakan logical start/end/border dan teks ID/EN/AR untuk label shell baru. `pos.catalog.title` yang sebelumnya tidak terdaftar sekarang tersedia pada ketiga kamus.
+- Katalog/cart memakai tinggi konten alami dan scroll halaman, bukan tinggi tetap berdasarkan `100vh`. Grid katalog menggunakan lebar minimum kartu 14rem (dibatasi 100% container), sehingga jumlah kolom mengikuti ruang setelah sidebar/cart. Mode katalog/cart compact yang sudah ada dipertahankan sampai 1280px. Cart shortcut memperhitungkan safe-area bawah dan mengizinkan isi membungkus.
+- Badge koneksi statis di header/POS dihapus; belum ada klaim bahwa API dapat dijangkau atau transaksi offline tersedia. Tidak menambah ping endpoint, dependency, layanan hosting, atau desain visual baru.
+
+Verifikasi FE-R1: 31 tes existing termasuk i18n parity lulus, lint/build FE exit 0, backend build/vet/race-short exit 0 (cached), dan diff whitespace lulus. CSS hasil build diperiksa untuk auto-fill grid, breakpoint 1280, `100dvh`, dan safe-area. Ini bukan pengukuran rendered layout atau pengujian focus browser. Tidak ada pengujian browser otomatis atau deployment.
+
+Acceptance manual masih terbuka: (1) 320/390px—header, tenant panjang, bahasa dan logout; (2) 768/1024—drawer dan katalog tidak terjepit; (3) 1280/1440—sidebar dan split tampil bersama; (4) buka drawer, Tab/Escape/tutup/backdrop, resize saat terbuka dan ganti AR; (5) cart 20 item dan keyboard layar tidak tertutup shortcut. Gunakan lingkungan/data uji, bukan uang nyata. FE-R2/R3 tetap mencakup kenyamanan kartu/stepper, focus pergantian katalog-cart, dialog pembayaran, receipt dan review perangkat. Jangan menandai seluruh responsive acceptance selesai.
+
+### Catatan FE-S1 sebelumnya
+
+### Pembaruan FE-R2: kontrol touch dan navigasi compact
+
+Patch lanjutan lokal di atas FE-R1, 2026-09-05; belum commit/publikasi. Kartu produk sekarang berupa article dengan satu native tombol Tambah: tidak ada tombol bersarang atau klik ganda dari event bubbling kartu. Nama panjang tidak di-clamp, SKU dapat wrap, harga boleh turun baris, dan ukuran teks informasi utama ditingkatkan. Tombol tambah, plus/minus/hapus serta search/kategori memakai target 48px. Minus pada jumlah satu tidak menghapus barang, baik pada handler UI maupun updater cart produksi; tombol Hapus tetap eksplisit.
+
+Navigasi katalog/cart mempunyai `aria-pressed`, region berlabel dan pemindahan fokus setelah panel tampil. Posisi scroll katalog disimpan; saat kembali, fokus diarahkan ke tombol yang terlihat di area katalog tanpa membuka keyboard input. Jika tidak ada kontrol yang terlihat, fallback ke heading yang digulir ke area terlihat. Resize yang menyembunyikan kontrol aktif diarahkan ke heading panel yang tetap ditampilkan; tidak mengubah cart/tender/key. Mekanisme ini belum diuji pada browser/perangkat.
+
+Shortcut fixed bawah FE-R1 diganti navigasi compact + total di atas workspace. Navigasi sticky hanya ketika tinggi layout viewport minimal 600px; pada viewport pendek mengikuti document flow. Ini mengurangi overlay bawah, tetapi variasi visual viewport/keyboard mobile tetap memerlukan review manual. Browser Back keluar route, restore setelah reload, dan pemulihan focus setelah menghapus baris cart belum dituntaskan oleh paket ini. Tidak mengubah controller pembayaran atau memberi janji transaksi durable.
+
+Teks baru dan nama aksesibel produk disediakan dalam ID/EN/AR dengan skema/paritas yang sama. Tiga tes baru menjalankan kode komponen/handler/updater produksi dengan adapter test React/i18n/transport UI seperlunya—bukan browser, tes visual, atau simulasi DOM. Tes memeriksa satu aksi tambah, guard disabled, minus satu, batas stok UI, dan penghapusan eksplisit. Seluruh tes lama dipertahankan.
+
+Acceptance manual berikutnya: nama/SKU panjang dan angka besar pada 320/390px; tekan tambah sekali; minus pada qty 1 lalu Hapus; masuk cart dari katalog panjang dan kembali; rotate pada panel aktif; gunakan Tab dan keyboard layar; ganti AR; periksa perubahan header/nav pada tinggi pendek. Gunakan tenant/data pengujian. FE-R3 (dialog pembayaran/receipt, focus lifecycle, kembalian utama) tetap menjadi paket berikutnya; tidak ada klaim seluruh R-01–R-10 sudah lulus.
+
 Pembaruan 2026-09-05 setelah review awal: patch keamanan checkout telah dibuat, belum di-commit. Temuan awal di bawah dipertahankan sebagai baseline; status perubahan terbaru pada bagian ini. **FE-S1 keseluruhan belum selesai dan belum menjadi izin transaksi uang nyata.**
 
 - F-01 diperbaiki untuk satu halaman POS yang masih aktif: API client mempertahankan code/status/trace ID; controller produksi mengklasifikasikan network/5xx, auth, rate limit dan konflik idempotency sebagai terkunci, bukan penolakan bisnis biasa. Hanya kode penolakan pre-commit yang dikenali mengizinkan kembali ke cart dan review baru. Tidak ada retry otomatis.

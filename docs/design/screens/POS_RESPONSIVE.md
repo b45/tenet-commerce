@@ -10,6 +10,8 @@ Target lintas perangkat juga berlaku untuk desain feature Phase 3 berikutnya; pa
 
 ## Layout berdasarkan ruang tersedia
 
+Penyempurnaan implementasi FE-R1 (2026-09-05): shell aktual memerlukan ruang tambahan untuk sidebar. Sidebar permanen dan POS split kini sama-sama mulai pada **1280 CSS px** (`xl`); di bawahnya memakai drawer dan pilihan katalog/cart existing. Grid mengikuti lebar konten minimum 14rem, tidak lagi jumlah kolom dari viewport saja. Katalog/cart memakai tinggi alami dan scroll halaman. Ini menggantikan breakpoint/susunan implementasi yang berbeda dari usulan v0.2 di tabel berikut, bukan klaim bahwa R-01–R-10 lulus. Lihat [catatan implementasi dan acceptance manual](../FE_IMPLEMENTATION_REVIEW.md).
+
 Lebar di bawah dalam CSS px; bukan resolusi fisik layar atau deteksi model perangkat. Breakpoint adalah usulan yang dapat berubah setelah uji konten. Jangan mengunci height aplikasi mengikuti tinggi SVG.
 
 | Lebar tersedia | POS-01 | POS-02 dan POS-03 | Bukti desain |

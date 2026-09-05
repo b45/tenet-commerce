@@ -51,6 +51,16 @@ export interface TranslationSchema {
     };
   };
   nav: {
+    brand: string;
+    openMenu: string;
+    closeMenu: string;
+    navigation: string;
+    unknownTenant: string;
+    language: string;
+    sessionLoading: string;
+    certificates: string;
+    procurement: string;
+    ledger: string;
     pos: string;
     orderHistory: string;
     inventory: string;
@@ -84,6 +94,9 @@ export interface TranslationSchema {
       history: string;
     };
     catalog: {
+      generalCategory: string;
+      addProduct: string;
+      title: string;
       searchPlaceholder: string;
       allCategories: string;
       emptyCatalog: string;
@@ -97,6 +110,9 @@ export interface TranslationSchema {
       addToCart: string;
     };
     cart: {
+      removeProduct: string;
+      decreaseProduct: string;
+      increaseProduct: string;
       title: string;
       emptyTitle: string;
       emptyDescription: string;

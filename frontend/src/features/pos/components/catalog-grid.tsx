@@ -61,26 +61,27 @@ export function CatalogGrid({
   };
 
   return (
-    <div className="flex flex-col h-full space-y-4">
+    <div className="flex min-w-0 flex-col space-y-4">
       {/* Top Controls: Search Bar & Barcode Scanner Indicator */}
       <div className="flex items-center gap-2.5">
         <div className="relative flex-1 flex items-center">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
+          <Search className="absolute start-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-label={t("pos.catalog.searchPlaceholder")}
             placeholder={t("pos.catalog.searchPlaceholder")}
             className={cn(
-              "w-full h-11 pl-10 pr-10 text-xs sm:text-sm bg-[var(--color-surface-base)] text-[var(--color-text-primary)]",
+              "w-full h-12 ps-10 pe-10 text-base bg-[var(--color-surface-base)] text-[var(--color-text-primary)]",
               "rounded-[14px] border border-[var(--color-border-subtle)] shadow-xs",
               "placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]",
               "transition-all leading-normal"
             )}
           />
-          <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none flex items-center" title="Barcode Scanner Aktif">
+          <div className="absolute end-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none flex items-center" title={t("pos.catalog.barcode")}>
             <Barcode className="w-4 h-4" />
           </div>
         </div>
@@ -88,8 +89,9 @@ export function CatalogGrid({
         <button
           type="button"
           onClick={onRetry}
+          aria-label={t("common.actions.refresh")}
           title={t("common.actions.refresh")}
-          className="h-11 px-3.5 flex items-center justify-center gap-1.5 rounded-[14px] bg-[var(--color-surface-base)] border border-[var(--color-border-subtle)] text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] shadow-xs active:scale-95 transition-all shrink-0"
+          className="h-12 min-w-12 px-3 flex items-center justify-center gap-1.5 rounded-[14px] bg-[var(--color-surface-base)] border border-[var(--color-border-subtle)] text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] shadow-xs active:scale-95 transition-all shrink-0"
         >
           <RotateCw className={cn("w-4 h-4", isLoading && "animate-spin text-[var(--color-action-primary)]")} />
         </button>
@@ -101,7 +103,7 @@ export function CatalogGrid({
           type="button"
           onClick={() => onSelectCategory("ALL")}
           className={cn(
-            "h-9 px-4 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-all duration-150 inline-flex items-center justify-center",
+            "h-12 px-4 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-all duration-150 inline-flex items-center justify-center",
             selectedCategory === "ALL"
               ? "bg-[var(--color-action-primary)] text-white shadow-xs"
               : "bg-[var(--color-surface-base)] text-[var(--color-text-secondary)] border border-[var(--color-border-hairline)] hover:bg-[var(--color-surface-muted)]"
@@ -116,7 +118,7 @@ export function CatalogGrid({
             type="button"
             onClick={() => onSelectCategory(cat.name)}
             className={cn(
-              "h-9 px-3.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-all duration-150 inline-flex items-center gap-2",
+              "h-12 px-3.5 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-all duration-150 inline-flex items-center gap-2",
               selectedCategory === cat.name
                 ? "bg-[var(--color-action-primary)] text-white shadow-xs"
                 : "bg-[var(--color-surface-base)] text-[var(--color-text-secondary)] border border-[var(--color-border-hairline)] hover:bg-[var(--color-surface-muted)]"
@@ -140,9 +142,9 @@ export function CatalogGrid({
       </div>
 
       {/* Product Grid Area */}
-      <div className="flex-1 overflow-y-auto pr-1">
+      <div className="min-w-0">
         {isLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] gap-3.5 sm:gap-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={i}
@@ -191,7 +193,7 @@ export function CatalogGrid({
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4 pb-6">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] gap-3.5 sm:gap-4 pb-6">
             {products.map((product) => (
               <ProductCard
                 key={product.id}
