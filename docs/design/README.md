@@ -4,6 +4,8 @@ Package revision `pos-responsive-0.2`, 2026-09-05. Status: **proposed, not imple
 
 ## Paket POS tunai online
 
+Tambahan prototype v0.3: [panduan menjalankan dan status pengujian](prototype/README.md), [halaman interaktif lokal](prototype/index.html). Memakai fixture sintetis dan tidak terhubung backend. Model/syntax/HTTP checks tersedia; browser interaktif belum teruji karena tidak ada browser terhubung. Prototype ini artefak desain, bukan implementasi production FE.
+
 | Artefak | Isi |
 |---|---|
 | [Peta kontrak](POS_CONTRACT_MAP.md) | API yang benar-benar tersedia, batas dan dependency |
