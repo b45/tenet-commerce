@@ -206,4 +206,103 @@ export interface TranslationSchema {
     copyReport: string;
     reportCopied: string;
   };
+  inventory: {
+    title: string;
+    subtitle: string;
+    searchPlaceholder: string;
+    filterAll: string;
+    filterLowStock: string;
+    filterOutOfStock: string;
+    filterCategory: string;
+    allCategories: string;
+    addProduct: string;
+    adjustStock: string;
+    lowStockBanner: {
+      alertTitle: string;
+      alertMessage: string;
+      viewItems: string;
+    };
+    table: {
+      sku: string;
+      productName: string;
+      category: string;
+      costPrice: string;
+      unitPrice: string;
+      stock: string;
+      status: string;
+      actions: string;
+      active: string;
+      inactive: string;
+      halalBadge: string;
+      emptyTitle: string;
+      emptyDescription: string;
+      editAction: string;
+      adjustAction: string;
+      deleteAction: string;
+    };
+    productModal: {
+      createTitle: string;
+      editTitle: string;
+      sku: string;
+      skuPlaceholder: string;
+      barcode: string;
+      barcodePlaceholder: string;
+      name: string;
+      namePlaceholder: string;
+      category: string;
+      selectCategory: string;
+      unitPrice: string;
+      costPrice: string;
+      initialStock: string;
+      reorderThreshold: string;
+      description: string;
+      descriptionPlaceholder: string;
+      halalCertified: string;
+      halalCertifiedNotice: string;
+      activeStatus: string;
+      save: string;
+      saving: string;
+      cancel: string;
+    };
+    adjustModal: {
+      title: string;
+      description: string;
+      currentStock: string;
+      adjustType: string;
+      types: {
+        add: string;
+        subtract: string;
+        set: string;
+      };
+      quantity: string;
+      reason: string;
+      reasons: {
+        damage: string;
+        expired: string;
+        auditCorrection: string;
+        restock: string;
+        other: string;
+      };
+      notes: string;
+      notesPlaceholder: string;
+      previewDelta: string;
+      newStockPreview: string;
+      submit: string;
+      submitting: string;
+      cancel: string;
+      successMessage: string;
+    };
+    deleteDialog: {
+      title: string;
+      message: string;
+      confirm: string;
+      cancel: string;
+      deleting: string;
+      successMessage: string;
+    };
+    permissions: {
+      readOnlyTooltip: string;
+      writeRequired: string;
+    };
+  };
 }

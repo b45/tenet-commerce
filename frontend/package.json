@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --test src/lib/money.test.mjs src/features/pos/pos.test.mjs src/features/pos/checkout.test.mjs src/features/pos/touch-controls.test.mjs src/lib/i18n/i18n.test.mjs"
+    "test": "node --test src/lib/money.test.mjs src/features/pos/pos.test.mjs src/features/pos/checkout.test.mjs src/features/pos/touch-controls.test.mjs src/lib/i18n/i18n.test.mjs src/features/inventory/inventory.test.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
