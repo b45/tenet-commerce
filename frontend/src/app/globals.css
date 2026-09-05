@@ -28,6 +28,16 @@ body {
   }
 }
 
+/* Keep compact task switching reachable without floating over bottom inputs.
+   Short viewports use normal flow; device keyboard behavior still needs manual QA. */
+@media (min-height: 600px) {
+  .pos-compact-navigation {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+}
+
 @media print {
   body {
     background: white !important;
@@ -56,4 +66,3 @@ body {
     margin: 0;
   }
 }
-

@@ -72,7 +72,7 @@ export function useCart() {
         );
       }
 
-      return prev.filter((item) => item.product.sku !== sku);
+      return prev;
     });
   }, []);
 
