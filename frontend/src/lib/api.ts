@@ -189,3 +189,108 @@ export const authApi = {
     });
   },
 };
+
+export interface ClientResponse<T> {
+  success: boolean;
+  data: T | null;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  } | null;
+}
+
+/**
+ * High-level REST API client that forwards requests through Next.js BFF proxy.
+ * Returns normalized ClientResponse envelope and catches ApiErrors gracefully.
+ */
+export const apiClient = {
+  async get<T>(endpoint: string, options?: RequestInit): Promise<ClientResponse<T>> {
+    const url = endpoint.startsWith("/api/")
+      ? endpoint
+      : `/api/backend${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    try {
+      const data = await apiFetch<T>(url, { method: "GET", ...options });
+      return { success: true, data };
+    } catch (err: unknown) {
+      const apiErr =
+        err instanceof ApiError
+          ? err
+          : new ApiError(err instanceof Error ? err.message : "Request failed");
+      return {
+        success: false,
+        data: null,
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+      };
+    }
+  },
+
+  async post<T>(endpoint: string, body?: unknown, options?: RequestInit): Promise<ClientResponse<T>> {
+    const url = endpoint.startsWith("/api/")
+      ? endpoint
+      : `/api/backend${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    try {
+      const data = await apiFetch<T>(url, {
+        method: "POST",
+        body: body ? JSON.stringify(body) : undefined,
+        ...options,
+      });
+      return { success: true, data };
+    } catch (err: unknown) {
+      const apiErr =
+        err instanceof ApiError
+          ? err
+          : new ApiError(err instanceof Error ? err.message : "Request failed");
+      return {
+        success: false,
+        data: null,
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+      };
+    }
+  },
+
+  async put<T>(endpoint: string, body?: unknown, options?: RequestInit): Promise<ClientResponse<T>> {
+    const url = endpoint.startsWith("/api/")
+      ? endpoint
+      : `/api/backend${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    try {
+      const data = await apiFetch<T>(url, {
+        method: "PUT",
+        body: body ? JSON.stringify(body) : undefined,
+        ...options,
+      });
+      return { success: true, data };
+    } catch (err: unknown) {
+      const apiErr =
+        err instanceof ApiError
+          ? err
+          : new ApiError(err instanceof Error ? err.message : "Request failed");
+      return {
+        success: false,
+        data: null,
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+      };
+    }
+  },
+
+  async delete<T>(endpoint: string, options?: RequestInit): Promise<ClientResponse<T>> {
+    const url = endpoint.startsWith("/api/")
+      ? endpoint
+      : `/api/backend${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    try {
+      const data = await apiFetch<T>(url, { method: "DELETE", ...options });
+      return { success: true, data };
+    } catch (err: unknown) {
+      const apiErr =
+        err instanceof ApiError
+          ? err
+          : new ApiError(err instanceof Error ? err.message : "Request failed");
+      return {
+        success: false,
+        data: null,
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+      };
+    }
+  },
+};
+
