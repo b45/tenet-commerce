@@ -3,6 +3,8 @@
 > **Status date:** 2026-09-03  
 > **Purpose:** distinguish code that is registered and exercised today from design work scheduled for later phases. The route manifest in `backend/cmd/api/router.go` is the runtime source of truth.
 
+> **Planning addendum (2026-09-05):** the [Phase 3 design proposal](FRONTEND_PHASE3_DESIGN.md) records current code observations and a readiness work package. The historical matrix below is not fully synchronized with newer durable-idempotency and supply-chain lifecycle code, and its gate status conflicts with ROADMAP.md. Reconciliation is pending; this addendum does not certify backend readiness. Frontend implementation remains a scaffold while design planning proceeds.
+
 ## Current scope
 
 The repository currently contains a Go backend for the Phase 1–2 domain slice. Phase 3 and Phase 4 are intentionally not started until the hardening gate described below is complete.
