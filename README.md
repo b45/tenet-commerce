@@ -110,6 +110,9 @@ The `backend/integration` suite starts PostgreSQL 16 and Redis 7 through Testcon
 - [API Specification](docs/API_SPECIFICATION.md) — REST contract for registered routes; planned endpoints are explicitly labeled.
 - [Architecture](docs/ARCHITECTURE.md) — architecture and planned evolution.
 - [Roadmap](docs/ROADMAP.md) — phase plan and hardening sequence.
+- [Phase 3 Frontend Design](docs/FRONTEND_PHASE3_DESIGN.md) — proposed UI/UX, free tooling, design portability, runtime boundaries and delivery gates.
+- [Frontend Guidelines](docs/FRONTEND_GUIDELINES.md) — practical design foundations, semantic colours, layouts, reusable patterns, accessibility and feature workflow (Indonesian).
+- [POS Design Package](docs/design/README.md) — proposed cash POS flow, API mapping, eleven portable laptop/tablet/phone SVG wireframes and screen acceptance criteria.
 - [Database Schema](docs/DATABASE_SCHEMA.md)
 - [Sharia Compliance](docs/SHARIA_COMPLIANCE.md)
 - [Contributing](docs/CONTRIBUTING.md)
