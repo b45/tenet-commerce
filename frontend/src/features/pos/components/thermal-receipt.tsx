@@ -3,6 +3,7 @@
 import * as React from "react";
 import { formatIDR } from "@/lib/money";
 import { formatDateTime } from "@/lib/date";
+import { useTranslation } from "@/lib/i18n";
 import type { CheckoutResponse } from "../types";
 
 export interface ThermalReceiptProps {
@@ -16,6 +17,8 @@ export function ThermalReceipt({
   merchantName = "AL-BARAKAH MART",
   merchantAddress = "Jl. Terusan Buah Batu No. 45, Bandung",
 }: ThermalReceiptProps) {
+  const { t } = useTranslation();
+
   return (
     <div
       id="thermal-receipt-print"
@@ -31,20 +34,20 @@ export function ThermalReceipt({
       {/* Transaction Meta */}
       <div className="py-2 border-b border-dashed border-black space-y-1 text-[10px]">
         <div className="flex justify-between">
-          <span>No. Bukti:</span>
+          <span>{t("receipt.trxNumber")}:</span>
           <span className="font-bold">{receipt.transaction_number}</span>
         </div>
         <div className="flex justify-between">
-          <span>Waktu:</span>
+          <span>{t("receipt.date")}:</span>
           <span>{formatDateTime(receipt.created_at)}</span>
         </div>
         <div className="flex justify-between">
-          <span>Kasir ID:</span>
+          <span>{t("receipt.cashier")}:</span>
           <span>{receipt.cashier_id.substring(0, 8)}...</span>
         </div>
         <div className="flex justify-between">
-          <span>Metode:</span>
-          <span>TUNAI (CASH)</span>
+          <span>{t("history.columns.method")}:</span>
+          <span>{t("receipt.cash").toUpperCase()}</span>
         </div>
       </div>
 
@@ -66,11 +69,11 @@ export function ThermalReceipt({
       {/* Financial Totals */}
       <div className="py-2 border-b border-dashed border-black space-y-1 text-[10px]">
         <div className="flex justify-between">
-          <span>Subtotal:</span>
+          <span>{t("receipt.subtotal")}:</span>
           <span>{formatIDR(receipt.subtotal_amount)}</span>
         </div>
         <div className="flex justify-between">
-          <span>Pajak (0%):</span>
+          <span>{t("receipt.tax")} (0%):</span>
           <span>{formatIDR(receipt.tax_amount)}</span>
         </div>
         <div className="flex justify-between">
@@ -78,23 +81,23 @@ export function ThermalReceipt({
           <span>{formatIDR(receipt.discount_amount)}</span>
         </div>
         <div className="flex justify-between text-xs font-bold pt-1 border-t border-black">
-          <span>TOTAL:</span>
+          <span>{t("receipt.total")}:</span>
           <span>{formatIDR(receipt.total_amount)}</span>
         </div>
         <div className="flex justify-between pt-0.5">
-          <span>Tunai Diterima:</span>
+          <span>{t("tender.cashReceived")}:</span>
           <span>{formatIDR(receipt.cash_tendered)}</span>
         </div>
         <div className="flex justify-between font-bold">
-          <span>Kembalian:</span>
+          <span>{t("receipt.change")}:</span>
           <span>{formatIDR(receipt.change_amount)}</span>
         </div>
       </div>
 
       {/* Sharia Compliance & Footer */}
       <div className="pt-3 text-center text-[9px] text-gray-600 space-y-1">
-        <p className="font-semibold text-black">Jazakumullahu Khairan Katsiran</p>
-        <p>Barang yang sudah dibeli dapat ditukar dalam 1x24 jam dengan struk asli.</p>
+        <p className="font-semibold text-black">{t("receipt.thankYou")}</p>
+        <p>{t("receipt.halalNotice")}</p>
         <p className="text-[8px] text-gray-400">Tenet Commerce · POS Engine</p>
       </div>
     </div>

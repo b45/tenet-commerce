@@ -10,9 +10,11 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 import type { Order, OrderDetailResponse } from "../types";
 
 export function OrderHistory() {
+  const { t } = useTranslation();
   const [orders, setOrders] = React.useState<Order[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -115,21 +117,21 @@ export function OrderHistory() {
       <div className="flex items-center justify-between gap-4 pb-1">
         <div>
           <h3 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)]">
-            Riwayat Transaksi Kasir
+            {t("history.title")}
           </h3>
           <p className="text-xs text-[var(--color-text-secondary)]">
-            Daftar transaksi penjualan hari ini dan status jurnal ledger
+            {t("history.subtitle")}
           </p>
         </div>
 
         <button
           type="button"
           onClick={fetchOrders}
-          title="Segarkan Riwayat"
+          title={t("common.actions.refresh")}
           className="h-9 px-4 rounded-full bg-[var(--color-surface-base)] border border-[var(--color-border-subtle)] text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] shadow-xs active:scale-95 transition-all inline-flex items-center gap-2 shrink-0"
         >
           <RotateCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin text-[var(--color-action-primary)]")} />
-          <span>Segarkan</span>
+          <span>{t("common.actions.refresh")}</span>
         </button>
       </div>
 
@@ -137,23 +139,20 @@ export function OrderHistory() {
       <div className="bg-[var(--color-surface-base)] rounded-[20px] border border-[var(--color-border-hairline)] shadow-sm overflow-hidden">
         {isLoading ? (
           <div className="p-10 text-center text-xs text-[var(--color-text-muted)] animate-pulse">
-            Memuat riwayat transaksi...
+            {t("common.actions.loading")}
           </div>
         ) : error ? (
           <div className="p-8 text-center space-y-3">
             <p className="text-xs text-[var(--color-status-danger-text)]">{error}</p>
             <Button size="sm" variant="secondary" onClick={fetchOrders}>
-              Coba Lagi
+              {t("common.actions.retry")}
             </Button>
           </div>
         ) : orders.length === 0 ? (
           <div className="p-12 text-center select-none">
             <History className="w-10 h-10 text-[var(--color-text-muted)] mx-auto mb-2" />
             <p className="text-sm font-medium text-[var(--color-text-secondary)]">
-              Belum ada transaksi tercatat
-            </p>
-            <p className="text-xs text-[var(--color-text-muted)] mt-1">
-              Transaksi yang diproses di kasir akan muncul di sini.
+              {t("history.emptyHistory")}
             </p>
           </div>
         ) : (
@@ -161,12 +160,12 @@ export function OrderHistory() {
             <table className="w-full text-xs">
               <thead className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-b border-[var(--color-border-hairline)] font-medium select-none">
                 <tr>
-                  <th className="py-3.5 px-5 text-left font-semibold">No. Bukti Transaksi</th>
-                  <th className="py-3.5 px-5 text-left font-semibold">Waktu</th>
-                  <th className="py-3.5 px-5 text-right font-semibold">Total Tagihan</th>
-                  <th className="py-3.5 px-5 text-center font-semibold">Metode</th>
-                  <th className="py-3.5 px-5 text-center font-semibold">Status</th>
-                  <th className="py-3.5 px-5 text-center font-semibold">Aksi</th>
+                  <th className="py-3.5 px-5 text-left font-semibold">{t("history.columns.trxNumber")}</th>
+                  <th className="py-3.5 px-5 text-left font-semibold">{t("history.columns.time")}</th>
+                  <th className="py-3.5 px-5 text-right font-semibold">{t("history.columns.totalBill")}</th>
+                  <th className="py-3.5 px-5 text-center font-semibold">{t("history.columns.method")}</th>
+                  <th className="py-3.5 px-5 text-center font-semibold">{t("history.columns.status")}</th>
+                  <th className="py-3.5 px-5 text-center font-semibold">{t("history.columns.action")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border-hairline)]">
@@ -244,23 +243,23 @@ export function OrderHistory() {
         <Modal
           isOpen={Boolean(selectedOrder)}
           onClose={() => setSelectedOrder(null)}
-          title={`Detail Transaksi ${selectedOrder.transaction_number}`}
-          description={`Waktu: ${formatDateTime(selectedOrder.created_at)}`}
+          title={`${t("history.detailModal.title")} ${selectedOrder.transaction_number}`}
+          description={`${t("history.detailModal.time")}: ${formatDateTime(selectedOrder.created_at)}`}
           maxWidth="md"
         >
           <div className="space-y-4">
             <div className="p-3.5 rounded-xl bg-[var(--color-surface-muted)] border border-[var(--color-border-hairline)] text-xs space-y-1.5">
               <div className="flex justify-between">
-                <span>Status Transaksi:</span>
+                <span>{t("history.detailModal.status")}:</span>
                 <span className="font-semibold">{selectedOrder.status}</span>
               </div>
               <div className="flex justify-between">
-                <span>Kasir ID:</span>
+                <span>{t("history.detailModal.cashierId")}:</span>
                 <span className="font-mono">{selectedOrder.cashier_id}</span>
               </div>
               {selectedOrder.void_reason && (
                 <div className="flex justify-between text-[var(--color-status-danger-text)]">
-                  <span>Alasan Void:</span>
+                  <span>{t("history.detailModal.voidReason")}:</span>
                   <span>{selectedOrder.void_reason}</span>
                 </div>
               )}
@@ -269,7 +268,7 @@ export function OrderHistory() {
             {/* Items */}
             <div className="space-y-2">
               <h5 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase">
-                Item Penjualan
+                {t("history.detailModal.saleItems")}
               </h5>
               <div className="divide-y divide-[var(--color-border-hairline)] border-y border-[var(--color-border-hairline)] max-h-48 overflow-y-auto">
                 {(selectedOrder.items || []).map((item, i) => (
@@ -291,7 +290,7 @@ export function OrderHistory() {
             </div>
 
             <div className="flex justify-between text-sm font-bold pt-2">
-              <span>Total Pembayaran:</span>
+              <span>{t("history.detailModal.totalPayment")}:</span>
               <span className="font-mono">{formatIDR(selectedOrder.total_amount)}</span>
             </div>
 
@@ -301,7 +300,7 @@ export function OrderHistory() {
                 onClick={() => setSelectedOrder(null)}
                 className="w-full rounded-xl"
               >
-                Tutup
+                {t("history.detailModal.close")}
               </Button>
             </div>
           </div>
@@ -313,8 +312,8 @@ export function OrderHistory() {
         <Modal
           isOpen={Boolean(orderToVoid)}
           onClose={isVoiding ? () => {} : () => setOrderToVoid(null)}
-          title="Konfirmasi Pembatalan (Void)"
-          description="Tindakan ini akan membalikkan saldo kas dan mengembalikan stok barang ke inventaris."
+          title={t("history.voidModal.title")}
+          description={t("history.voidModal.description")}
           maxWidth="sm"
         >
           <div className="space-y-4">
@@ -322,8 +321,10 @@ export function OrderHistory() {
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>
-                  Anda akan membatalkan transaksi <strong>{orderToVoid.transaction_number}</strong> senilai{" "}
-                  <strong>{formatIDR(orderToVoid.total_amount)}</strong>.
+                  {t("history.voidModal.warningText", {
+                    number: orderToVoid.transaction_number,
+                    amount: formatIDR(orderToVoid.total_amount),
+                  })}
                 </span>
               </div>
             </Alert>
@@ -334,14 +335,14 @@ export function OrderHistory() {
 
             <div>
               <label htmlFor="void_reason_input" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                Alasan Pembatalan (Wajib):
+                {t("history.voidModal.reasonLabel")}
               </label>
               <textarea
                 id="void_reason_input"
                 rows={2}
                 value={voidReason}
                 onChange={(e) => setVoidReason(e.target.value)}
-                placeholder="Misal: Salah input kuantitas / Pelanggan batal beli..."
+                placeholder={t("history.voidModal.reasonPlaceholder")}
                 className="w-full p-2.5 text-xs rounded-xl border border-[var(--color-border-subtle)] focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
               />
             </div>
@@ -353,7 +354,7 @@ export function OrderHistory() {
                 onClick={() => setOrderToVoid(null)}
                 className="flex-1 rounded-xl"
               >
-                Batal
+                {t("history.voidModal.cancel")}
               </Button>
               <Button
                 variant="destructive"
@@ -361,7 +362,7 @@ export function OrderHistory() {
                 onClick={handleConfirmVoid}
                 className="flex-1 rounded-xl font-semibold"
               >
-                {isVoiding ? "Memproses..." : "Ya, Batalkan (Void)"}
+                {isVoiding ? t("history.voidModal.processing") : t("history.voidModal.confirmVoid")}
               </Button>
             </div>
           </div>

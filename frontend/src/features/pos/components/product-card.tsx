@@ -5,6 +5,7 @@ import { Plus, CheckCircle2, AlertTriangle } from "lucide-react";
 import { formatIDR } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 import type { Product } from "../types";
 
 export interface ProductCardProps {
@@ -18,6 +19,7 @@ export function ProductCard({
   onAddToCart,
   disabled = false,
 }: ProductCardProps) {
+  const { t } = useTranslation();
   const isOutOfStock = product.stock_quantity <= 0;
   const isLowStock = product.stock_quantity > 0 && product.stock_quantity <= 5;
 
@@ -59,7 +61,7 @@ export function ProductCard({
               className="text-[10px] px-1.5 py-0.5 gap-1 font-semibold border border-[var(--color-status-success-border)]"
             >
               <CheckCircle2 className="w-2.5 h-2.5" />
-              HALAL
+              {t("pos.catalog.halalCertified")}
             </Badge>
           )}
         </div>
@@ -84,16 +86,16 @@ export function ProductCard({
           <div className="flex items-center gap-1.5 mt-0.5">
             {isOutOfStock ? (
               <span className="text-[11px] font-medium text-[var(--color-status-danger-text)]">
-                Stok Habis
+                {t("pos.catalog.stockEmpty")}
               </span>
             ) : isLowStock ? (
               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--color-status-warning-text)]">
                 <AlertTriangle className="w-3 h-3" />
-                Sisa {product.stock_quantity}
+                {t("pos.catalog.stockLow")} {product.stock_quantity}
               </span>
             ) : (
               <span className="text-[11px] text-[var(--color-text-muted)]">
-                Stok {product.stock_quantity}
+                {t("pos.catalog.stockAvailable")} {product.stock_quantity}
               </span>
             )}
           </div>
@@ -103,7 +105,7 @@ export function ProductCard({
         <button
           type="button"
           disabled={isOutOfStock || disabled}
-          aria-label={`Tambah ${product.name} ke keranjang`}
+          aria-label={`${t("pos.catalog.addToCart")} ${product.name}`}
           className={cn(
             "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150",
             "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border border-[var(--color-border-hairline)]",

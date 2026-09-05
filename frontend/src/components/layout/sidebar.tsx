@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { UserProfile } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import {
   ShoppingCart,
   Receipt,
@@ -23,6 +24,7 @@ interface SidebarProps {
 }
 
 interface NavItem {
+  labelKey?: string;
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -32,18 +34,21 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   {
+    labelKey: "nav.pos",
     label: "POS Kasir",
     href: "/pos",
     icon: ShoppingCart,
     permission: "pos:read",
   },
   {
+    labelKey: "nav.orderHistory",
     label: "Riwayat Transaksi",
     href: "/pos/orders",
     icon: Receipt,
     permission: "pos:read",
   },
   {
+    labelKey: "nav.inventory",
     label: "Inventori Produk",
     href: "/inventory",
     icon: Package,
@@ -68,6 +73,7 @@ const NAV_ITEMS: NavItem[] = [
     permission: "ledger:read",
   },
   {
+    labelKey: "nav.dashboard",
     label: "Manager Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
@@ -77,6 +83,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { t } = useTranslation();
 
   const filteredNav = NAV_ITEMS.filter((item) => {
     if (!user) return true;
@@ -150,7 +157,7 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
                     isActive ? "text-[#0066CC]" : "text-[#8B95A5]"
                   )}
                 />
-                <span>{item.label}</span>
+                <span>{item.labelKey ? t(item.labelKey) : item.label}</span>
               </Link>
             );
           })}

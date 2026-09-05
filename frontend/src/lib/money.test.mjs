@@ -28,6 +28,9 @@ test("parseIDR parses clean and formatted string inputs", () => {
 });
 
 test("parseIDR rejects invalid strings, fractions, and out of bounds", () => {
+  for (const input of ["1.5", "1.00", "50,00,12", "5e4", "-50.000", 100.5, -MAX_TENDER_AMOUNT - 1]) {
+    assert.equal(parseIDR(input), null);
+  }
   assert.equal(parseIDR("abc"), null);
   assert.equal(parseIDR("50.000,50"), null); // Non-zero cents rejected
   assert.equal(parseIDR("-50000"), null);     // Negative disallowed by default

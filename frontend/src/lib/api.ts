@@ -53,8 +53,8 @@ export class ApiError extends Error {
 }
 
 export class ValidationError extends ApiError {
-  constructor(message: string, traceId?: string, details?: unknown) {
-    super(message, "VALIDATION_FAILED", 400, traceId, details);
+  constructor(message: string, traceId?: string, details?: unknown, code = "VALIDATION_FAILED") {
+    super(message, code, 400, traceId, details);
     this.name = "ValidationError";
   }
 }
@@ -80,13 +80,17 @@ export class NetworkError extends ApiError {
   }
 }
 
+export interface ApiFetchOptions extends RequestInit {
+  silentRejection?: boolean;
+}
+
 /**
  * Universal fetch wrapper for frontend components.
  * Automatically injects X-Trace-ID and targets internal BFF routes (`/api/backend/*` or `/api/auth/*`).
  */
 export async function apiFetch<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: ApiFetchOptions = {}
 ): Promise<T> {
   const url = endpoint.startsWith("http") ? endpoint : endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
 
@@ -136,18 +140,29 @@ export async function apiFetch<T>(
     const details = body?.error?.details;
 
     let errorToThrow: ApiError;
-    if (res.status === 400) errorToThrow = new ValidationError(errMsg, serverTraceId, details);
+    if (res.status === 400) errorToThrow = new ValidationError(errMsg, serverTraceId, details, errCode);
     else if (res.status === 401 || res.status === 403) errorToThrow = new AuthError(errMsg, errCode, res.status, serverTraceId);
     else if (res.status === 409) errorToThrow = new ConflictError(errMsg, errCode, serverTraceId, details);
     else errorToThrow = new ApiError(errMsg, errCode, res.status, serverTraceId, details);
 
-    logger.error(`API rejection on ${url}`, errorToThrow, {
-      status: res.status,
-      durationMs,
-      code: errCode,
-      trace_id: serverTraceId,
-      details,
-    });
+    const isExpectedAuthProbe = (url.endsWith("/api/auth/me") && res.status === 401) || options.silentRejection;
+
+    if (!isExpectedAuthProbe) {
+      logger.error(`API rejection on ${url}`, errorToThrow, {
+        status: res.status,
+        durationMs,
+        code: errCode,
+        trace_id: serverTraceId,
+        details,
+      });
+    } else {
+      logger.debug(`Auth session probe returned 401 (unauthenticated visitor): ${url}`, {
+        status: res.status,
+        durationMs,
+        code: errCode,
+        trace_id: serverTraceId,
+      });
+    }
 
     throw errorToThrow;
   }
@@ -175,7 +190,7 @@ export const authApi = {
   },
 
   async me(): Promise<UserProfile> {
-    const data = await apiFetch<{ user: UserProfile }>("/api/auth/me");
+    const data = await apiFetch<{ user: UserProfile }>("/api/auth/me", { silentRejection: true });
     if (data?.user) {
       logger.setUserContext(data.user.tenant_slug, data.user.id);
     }
@@ -197,6 +212,8 @@ export interface ClientResponse<T> {
     code: string;
     message: string;
     details?: unknown;
+    status?: number;
+    traceId?: string;
   } | null;
 }
 
@@ -220,7 +237,7 @@ export const apiClient = {
       return {
         success: false,
         data: null,
-        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details, status: apiErr.status, traceId: apiErr.traceId },
       };
     }
   },
@@ -244,7 +261,7 @@ export const apiClient = {
       return {
         success: false,
         data: null,
-        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details, status: apiErr.status, traceId: apiErr.traceId },
       };
     }
   },
@@ -268,7 +285,7 @@ export const apiClient = {
       return {
         success: false,
         data: null,
-        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details, status: apiErr.status, traceId: apiErr.traceId },
       };
     }
   },
@@ -288,9 +305,8 @@ export const apiClient = {
       return {
         success: false,
         data: null,
-        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details },
+        error: { code: apiErr.code, message: apiErr.message, details: apiErr.details, status: apiErr.status, traceId: apiErr.traceId },
       };
     }
   },
 };
-

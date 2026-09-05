@@ -30,10 +30,10 @@ export function formatIDR(amount: number): string {
  */
 export function parseIDR(input: string | number, options?: { allowNegative?: boolean }): number | null {
   if (typeof input === "number") {
-    if (!Number.isFinite(input)) return null;
+    if (!Number.isSafeInteger(input)) return null;
     if (!options?.allowNegative && input < 0) return null;
-    if (input > MAX_TENDER_AMOUNT) return null;
-    return Math.round(input);
+    if (Math.abs(input) > MAX_TENDER_AMOUNT) return null;
+    return input;
   }
 
   if (typeof input !== "string") return null;
@@ -48,6 +48,8 @@ export function parseIDR(input: string | number, options?: { allowNegative?: boo
 
   // Strip currency prefixes and spaces
   clean = clean.replace(/^(rp|idr)\.?\s*/i, "");
+  // Accept only whole Rupiah with valid thousands grouping and optional zero decimals.
+  if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,0{1,2})?$/.test(clean)) return null;
   // Standard IDR formatting uses '.' as thousand separator and ',' as decimal separator
   // Remove thousand dots
   clean = clean.replace(/\./g, "");

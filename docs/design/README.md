@@ -1,5 +1,7 @@
 # Tenet design artifacts
 
+Status implementasi terbaru: [review FE dan backlog responsive](FE_IMPLEMENTATION_REVIEW.md). Kode Next.js sudah mencakup shell/auth/POS; paket SVG di bawah tetap artefak proposal historis, bukan bukti bahwa aplikasi sudah mobile-ready.
+
 Package revision `pos-responsive-0.2`, 2026-09-05. Status: **proposed, not implementation-ready**. Desktop source tetap `pos-lowfi-0.1`; delapan varian tablet/HP baru v0.2. Review struktur dan keselamatan transaksi dahulu, kemudian visual detail.
 
 ## Paket POS tunai online

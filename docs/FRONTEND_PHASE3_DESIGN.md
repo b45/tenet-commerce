@@ -1,6 +1,6 @@
 # Phase 3 Frontend Design and Delivery Plan
 
-> Status: proposed architecture and delivery plan; frontend features are not implemented.
+> Status: delivery plan with partial frontend implementation; mobile and transactional acceptance remain open. See the [implementation review and responsive backlog](design/FE_IMPLEMENTATION_REVIEW.md) for the current source-based assessment.
 > Updated: 2026-09-05. Audience: maintainers, designers and reviewers.
 > Scope: portable design assets, free tooling, browser POS and operational interfaces.
 

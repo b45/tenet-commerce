@@ -5,17 +5,12 @@ import { Trash2, Plus, Minus, ShoppingCart, ArrowRight } from "lucide-react";
 import { formatIDR } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { CartItem } from "../types";
+import { useTranslation } from "@/lib/i18n";
+import type { CartItem, CartTotals } from "../types";
 
 export interface CartPanelProps {
   items: CartItem[];
-  totals: {
-    subtotal: number;
-    tax: number;
-    discount: number;
-    total: number;
-    totalItems: number;
-  };
+  totals: CartTotals;
   onUpdateQuantity: (sku: string, quantity: number) => void;
   onDecrementItem: (sku: string) => void;
   onRemoveItem: (sku: string) => void;
@@ -32,10 +27,11 @@ export function CartPanel({
   onClearCart,
   onOpenTender,
 }: CartPanelProps) {
+  const { t } = useTranslation();
   const isCartEmpty = items.length === 0;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--color-surface-base)] rounded-[22px] border border-[var(--color-border-hairline)] shadow-[var(--shadow-card)] overflow-hidden">
+    <div className="flex flex-col h-full bg-[var(--color-surface-base)] rounded-[22px] border border-[var(--color-border-subtle)] shadow-xs overflow-hidden">
       {/* Panel Header */}
       <div className="p-4 sm:p-5 border-b border-[var(--color-border-hairline)] flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -44,10 +40,10 @@ export function CartPanel({
           </div>
           <div>
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-              Keranjang Kasir
+              {t("pos.cart.title")}
             </h3>
             <span className="text-[11px] text-[var(--color-text-muted)]">
-              {totals.totalItems} item dipilih
+              {totals.totalItems} {t("pos.cart.totalItems")}
             </span>
           </div>
         </div>
@@ -58,7 +54,7 @@ export function CartPanel({
             onClick={onClearCart}
             className="text-xs text-[var(--color-status-danger-text)] hover:underline font-medium"
           >
-            Kosongkan
+            {t("pos.cart.clear")}
           </button>
         )}
       </div>
@@ -71,10 +67,10 @@ export function CartPanel({
               <ShoppingCart className="w-5 h-5" />
             </div>
             <p className="text-sm font-medium text-[var(--color-text-secondary)]">
-              Belum ada produk di keranjang
+              {t("pos.cart.emptyTitle")}
             </p>
             <p className="text-xs text-[var(--color-text-muted)] mt-1 max-w-[200px]">
-              Klik kartu produk atau scan barcode untuk menambahkan.
+              {t("pos.cart.emptyDescription")}
             </p>
           </div>
         ) : (
@@ -153,23 +149,16 @@ export function CartPanel({
       <div className="p-4 sm:p-5 border-t border-[var(--color-border-hairline)] bg-[var(--color-surface-base)] space-y-3">
         <div className="space-y-1.5 text-xs text-[var(--color-text-secondary)]">
           <div className="flex justify-between">
-            <span>Subtotal</span>
+            <span>{t("pos.cart.subtotal")}</span>
             <span className="font-mono text-[var(--color-text-primary)]">
               {formatIDR(totals.subtotal)}
             </span>
           </div>
 
           <div className="flex justify-between">
-            <span>Pajak (0%)</span>
+            <span>{t("pos.cart.tax")}</span>
             <span className="font-mono text-[var(--color-text-primary)]">
               {formatIDR(totals.tax)}
-            </span>
-          </div>
-
-          <div className="flex justify-between">
-            <span>Diskon</span>
-            <span className="font-mono text-[var(--color-text-primary)]">
-              {formatIDR(totals.discount)}
             </span>
           </div>
         </div>
@@ -177,7 +166,7 @@ export function CartPanel({
         {/* Grand Total */}
         <div className="pt-2 border-t border-[var(--color-border-hairline)] flex items-baseline justify-between">
           <span className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-            Total Bayar
+            {t("pos.cart.total")}
           </span>
           <span className="text-xl font-bold font-mono text-[var(--color-text-primary)] tracking-tight">
             {formatIDR(totals.total)}
@@ -191,7 +180,7 @@ export function CartPanel({
           onClick={onOpenTender}
           className="w-full h-12 text-sm font-semibold rounded-[14px] shadow-sm flex items-center justify-center gap-2"
         >
-          <span>Lanjut Pembayaran</span>
+          <span>{t("pos.cart.checkout")}</span>
           <ArrowRight className="w-4 h-4" />
         </Button>
       </div>

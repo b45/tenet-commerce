@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Search, Barcode, RotateCw, PackageX } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 import { ProductCard } from "./product-card";
 import type { Product, Category } from "../types";
 
@@ -31,6 +32,7 @@ export function CatalogGrid({
   error,
   onRetry,
 }: CatalogGridProps) {
+  const { t } = useTranslation();
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   // Handle barcode scanner input: exact match auto-add on Enter
@@ -70,7 +72,7 @@ export function CatalogGrid({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Cari nama, SKU, atau scan barcode..."
+            placeholder={t("pos.catalog.searchPlaceholder")}
             className={cn(
               "w-full h-11 pl-10 pr-10 text-xs sm:text-sm bg-[var(--color-surface-base)] text-[var(--color-text-primary)]",
               "rounded-[14px] border border-[var(--color-border-subtle)] shadow-xs",
@@ -86,7 +88,7 @@ export function CatalogGrid({
         <button
           type="button"
           onClick={onRetry}
-          title="Segarkan Katalog"
+          title={t("common.actions.refresh")}
           className="h-11 px-3.5 flex items-center justify-center gap-1.5 rounded-[14px] bg-[var(--color-surface-base)] border border-[var(--color-border-subtle)] text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] shadow-xs active:scale-95 transition-all shrink-0"
         >
           <RotateCw className={cn("w-4 h-4", isLoading && "animate-spin text-[var(--color-action-primary)]")} />
@@ -105,7 +107,7 @@ export function CatalogGrid({
               : "bg-[var(--color-surface-base)] text-[var(--color-text-secondary)] border border-[var(--color-border-hairline)] hover:bg-[var(--color-surface-muted)]"
           )}
         >
-          Semua Kategori
+          {t("pos.catalog.allCategories")}
         </button>
 
         {categories.map((cat) => (
@@ -161,22 +163,22 @@ export function CatalogGrid({
         ) : error ? (
           <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-[var(--color-surface-base)] rounded-[20px] border border-[var(--color-border-hairline)]">
             <PackageX className="w-10 h-10 text-[var(--color-status-danger-text)] mb-2.5" />
-            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Gagal Memuat Produk</h4>
+            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("common.status.failed")}</h4>
             <p className="text-xs text-[var(--color-text-secondary)] mt-1 max-w-sm">{error}</p>
             <button
               type="button"
               onClick={onRetry}
               className="mt-4 px-4 py-2 rounded-xl text-xs font-medium bg-[var(--color-action-primary)] text-white hover:bg-[var(--color-action-primary-hover)] transition-colors"
             >
-              Coba Lagi
+              {t("common.actions.retry")}
             </button>
           </div>
         ) : products.length === 0 ? (
           <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-[var(--color-surface-base)] rounded-[20px] border border-[var(--color-border-hairline)]">
             <Search className="w-10 h-10 text-[var(--color-text-muted)] mb-2" />
-            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Produk Tidak Ditemukan</h4>
+            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("pos.catalog.noMatch")}</h4>
             <p className="text-xs text-[var(--color-text-secondary)] mt-1">
-              Tidak ada produk yang cocok dengan pencarian &ldquo;{searchQuery}&rdquo;.
+              {searchQuery ? `"${searchQuery}"` : t("pos.catalog.emptyCatalog")}
             </p>
             {searchQuery && (
               <button
@@ -184,7 +186,7 @@ export function CatalogGrid({
                 onClick={() => onSearchChange("")}
                 className="mt-3 text-xs text-[var(--color-action-primary)] font-medium hover:underline"
               >
-                Hapus filter pencarian
+                {t("common.actions.cancel")}
               </button>
             )}
           </div>
