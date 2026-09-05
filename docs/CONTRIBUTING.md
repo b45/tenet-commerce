@@ -71,15 +71,16 @@ All commit messages must adhere to the [Conventional Commits](https://www.conven
 
 ### 3.3 TypeScript & Next.js (Frontend Client)
 
+- Next.js 15.5+ App Router, React 19, strict TypeScript (`noImplicitAny: true`).
 - Follow the [Frontend Design and Engineering Guidelines](FRONTEND_GUIDELINES.md) for task-based UX, semantic tokens, reusable patterns, accessibility and review gates. Rules apply to frontend work regardless of editor or AI provider.
-- Use the [screen specification template](design/SCREEN_SPEC_TEMPLATE.md) for new flows and the [Phase 3 design plan](FRONTEND_PHASE3_DESIGN.md) for dependencies. Example palette/layout values require prototype validation before becoming the shared baseline.
-- Strict TypeScript (`noImplicitAny: true`).
+- Use the [screen specification template](design/SCREEN_SPEC_TEMPLATE.md) for new flows and the [Phase 3 design plan](FRONTEND_PHASE3_DESIGN.md) for dependencies. Architectural decisions follow [docs/adr/](adr/).
 - UI components built with **shadcn/ui** and **Tailwind CSS**.
-- Linting and type verification:
+- Linting, type verification, and production build checks:
   ```bash
   cd frontend
   npm run lint
   npx tsc --noEmit
+  npm run build
   ```
 
 ---

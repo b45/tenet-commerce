@@ -24,7 +24,7 @@ Repository paths below are evidence for current behavior; recommendations are se
 
 | Area | Observed implementation | Required Phase 3 decision/evidence |
 |---|---|---|
-| Frontend | [Package](../frontend/package.json) and [home page](../frontend/src/app/page.tsx) are a Next.js 14.2.35/React 18 scaffold | Evaluate supported Next.js/React/Node versions before adding features; record migration and lint-command changes |
+| Frontend | [Package](../frontend/package.json) and [home page](../frontend/src/app/page.tsx) upgraded to Next.js 15.5 / React 19 | Verified via `npm run lint && npm run build` (exit 0); session strategy recorded in ADR 001 |
 | Permissions | [Role definitions](../backend/pkg/auth/jwt.go), endpoint guards in domain handlers | Navigation follows actual permission strings and role restrictions; UI hiding is not authorization |
 | Authentication | [Auth handler](../backend/internal/auth/handler.go) provides login/refresh/me and JSON token pairs | Browser session ownership, CSRF protection, logout/revocation and expired-session recovery |
 | Catalog | [POS repository](../backend/internal/pos/repository.go) lists all active products | Search/pagination, barcode lookup and versioned catalog refresh; inactive-product management also needs an agreed read contract |
@@ -34,7 +34,7 @@ Repository paths below are evidence for current behavior; recommendations are se
 | Ledger | [Handler](../backend/internal/ledger/handler.go) exposes accounts, entry list/create/reverse and trial balance | Do not invent a journal-detail endpoint; use available list data or explicitly propose a backend change |
 | Payments | CASH, QRIS and SIMULATED_CARD exist in POS requests | Document QRIS confirmation semantics; no claim of gateway settlement or external refund automation |
 
-Next.js currently lists 14.x as unsupported. Select a supported release when P3-02 begins, then update repository stack documentation through a dedicated change. This planning task does not upgrade dependencies. [Next.js support policy](https://nextjs.org/support-policy)
+Next.js has been upgraded to supported release 15.5.x with React 19 (Issue #46, Step 0). Verification commands `npm run lint && npm run build` pass cleanly with exit code 0. Architectural session decisions are formalized in [ADR 001](adr/001-session-strategy.md). [Next.js support policy](https://nextjs.org/support-policy)
 
 The product's Halal tag is not evidence of a current, independently verified certificate: catalog code derives a flag from tags such as `HALAL_MUI`. UI copy must distinguish a catalog tag from supplier certificate validity and avoid implying regulatory certification of the application.
 
