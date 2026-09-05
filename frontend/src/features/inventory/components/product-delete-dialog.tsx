@@ -68,17 +68,17 @@ export function ProductDeleteDialog({
           onClose();
         }
       }}
-      className="m-auto w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-0 shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900"
+      className="m-auto w-full max-w-sm rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-base)] p-0 shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm"
     >
       <div className="p-6">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 border border-rose-200/60">
             <AlertTriangle className="h-5 w-5" aria-hidden="true" />
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800"
+            className="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]"
             aria-label="Tutup"
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -86,16 +86,16 @@ export function ProductDeleteDialog({
         </div>
 
         <div className="mt-4">
-          <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          <h3 className="text-base font-semibold text-[var(--color-text-primary)]">
             {t("inventory.deleteDialog.title")}
           </h3>
-          <p className="mt-2 text-xs text-neutral-500 leading-relaxed dark:text-neutral-400">
+          <p className="mt-2 text-xs text-[var(--color-text-secondary)] leading-relaxed">
             {t("inventory.deleteDialog.message", { name: product.name })}
           </p>
         </div>
 
         {errorMessage && (
-          <div className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 p-2.5 text-xs text-rose-600 dark:text-rose-400">
+          <div className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 p-2.5 text-xs text-rose-600">
             {errorMessage}
           </div>
         )}
@@ -104,7 +104,7 @@ export function ProductDeleteDialog({
           <button
             type="button"
             onClick={onClose}
-            className="h-9 rounded-xl px-4 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            className="h-9 rounded-xl px-4 text-xs font-medium text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-muted)]"
           >
             {t("inventory.deleteDialog.cancel")}
           </button>
@@ -112,7 +112,7 @@ export function ProductDeleteDialog({
             type="button"
             onClick={handleDelete}
             disabled={submitting}
-            className="h-9 rounded-xl bg-rose-600 px-4 text-xs font-medium text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-50 dark:bg-rose-600 dark:hover:bg-rose-500"
+            className="h-9 rounded-xl bg-rose-600 px-4 text-xs font-medium text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-50"
           >
             {submitting
               ? t("inventory.deleteDialog.deleting")

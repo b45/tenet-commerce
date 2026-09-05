@@ -80,12 +80,12 @@ export default function InventoryPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       {/* Temporary Notification Banner */}
       {feedbackMessage && (
-        <div className="flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-xs font-medium text-emerald-800 backdrop-blur-sm dark:text-emerald-200 animate-in fade-in duration-200">
+        <div className="flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800 shadow-sm animate-in fade-in duration-200">
           <span>{feedbackMessage}</span>
           <button
             type="button"
             onClick={() => setFeedbackMessage(null)}
-            className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400"
+            className="text-emerald-600 hover:text-emerald-800"
           >
             ✕
           </button>
@@ -94,7 +94,7 @@ export default function InventoryPage() {
 
       {/* Global Error Banner */}
       {error && (
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-4 text-xs font-medium text-rose-700 dark:text-rose-300">
+        <div className="rounded-xl border border-rose-500/20 bg-rose-50 p-4 text-xs font-medium text-rose-700 shadow-sm">
           {error}
         </div>
       )}

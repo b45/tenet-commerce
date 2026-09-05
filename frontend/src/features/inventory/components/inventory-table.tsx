@@ -27,10 +27,10 @@ export function InventoryTable({
 
   if (isLoading && products.length === 0) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-2xl border border-neutral-200 bg-white/50 dark:border-neutral-800 dark:bg-neutral-900/50">
+      <div className="flex h-64 items-center justify-center rounded-2xl border border-[var(--color-border-hairline)] bg-[var(--color-surface-base)] shadow-[var(--shadow-card)]">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
-          <span className="text-xs text-neutral-500">Memuat inventori...</span>
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-action-primary)] border-t-transparent" />
+          <span className="text-xs text-[var(--color-text-muted)]">Memuat inventori...</span>
         </div>
       </div>
     );
@@ -38,14 +38,14 @@ export function InventoryTable({
 
   if (products.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-white/40 px-6 py-16 text-center dark:border-neutral-800 dark:bg-neutral-900/40">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500">
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border-hairline)] bg-[var(--color-surface-base)] px-6 py-16 text-center shadow-[var(--shadow-card)]">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]">
           <Package className="h-6 w-6" aria-hidden="true" />
         </div>
-        <h3 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h3 className="mt-4 text-base font-semibold text-[var(--color-text-primary)]">
           {t("inventory.table.emptyTitle")}
         </h3>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
           {t("inventory.table.emptyDescription")}
         </p>
       </div>
@@ -53,11 +53,11 @@ export function InventoryTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="overflow-hidden rounded-2xl border border-[var(--color-border-hairline)] bg-[var(--color-surface-base)] shadow-[var(--shadow-card)]">
       {/* Desktop Table View */}
       <div className="hidden lg:block overflow-x-auto">
         <table className="w-full text-left text-sm rtl:text-right">
-          <thead className="border-b border-neutral-200 bg-neutral-50/75 text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/80 dark:text-neutral-400">
+          <thead className="border-b border-[var(--color-border-hairline)] bg-[var(--color-surface-muted)] text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] select-none">
             <tr>
               <th scope="col" className="px-6 py-3.5">
                 {t("inventory.table.productName")}
@@ -85,7 +85,7 @@ export function InventoryTable({
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+          <tbody className="divide-y divide-[var(--color-border-hairline)]">
             {products.map((item) => {
               const threshold = item.reorder_threshold ?? 5;
               const isOutOfStock = item.stock_quantity <= 0;
@@ -94,18 +94,18 @@ export function InventoryTable({
               return (
                 <tr
                   key={item.id}
-                  className="transition hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50"
+                  className="transition-colors hover:bg-[var(--color-surface-muted)]/60"
                 >
                   {/* Name & Halal Badge */}
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-neutral-900 dark:text-neutral-100">
+                        <span className="font-medium text-[var(--color-text-primary)]">
                           {item.name}
                         </span>
                         {item.is_halal_certified && (
                           <span
-                            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                            className="inline-flex items-center gap-1 rounded-full bg-[var(--color-status-success-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-status-success-text)] border border-[var(--color-status-success-border)]"
                             title="Tersertifikasi Halal Resmi"
                           >
                             <ShieldCheck className="h-3 w-3" aria-hidden="true" />
@@ -114,7 +114,7 @@ export function InventoryTable({
                         )}
                       </div>
                       {item.description && (
-                        <p className="line-clamp-1 text-xs text-neutral-400">
+                        <p className="line-clamp-1 text-xs text-[var(--color-text-muted)]">
                           {item.description}
                         </p>
                       )}
@@ -124,27 +124,27 @@ export function InventoryTable({
                   {/* SKU / Barcode */}
                   <td className="px-6 py-4">
                     <div className="flex flex-col font-mono text-xs">
-                      <span className="font-semibold text-neutral-800 dark:text-neutral-200">
+                      <span className="font-semibold text-[var(--color-text-primary)]">
                         {item.sku}
                       </span>
                       {item.barcode && (
-                        <span className="text-neutral-400">{item.barcode}</span>
+                        <span className="text-[var(--color-text-muted)]">{item.barcode}</span>
                       )}
                     </div>
                   </td>
 
                   {/* Category */}
-                  <td className="px-6 py-4 text-xs text-neutral-600 dark:text-neutral-300">
+                  <td className="px-6 py-4 text-xs text-[var(--color-text-secondary)]">
                     {item.category_name || "—"}
                   </td>
 
                   {/* Cost Price */}
-                  <td className="px-6 py-4 text-xs font-mono text-neutral-500 dark:text-neutral-400">
+                  <td className="px-6 py-4 text-xs font-mono text-[var(--color-text-secondary)]">
                     {formatIDR(item.cost_price || 0)}
                   </td>
 
                   {/* Sale / Unit Price */}
-                  <td className="px-6 py-4 text-xs font-mono font-semibold text-neutral-900 dark:text-neutral-100">
+                  <td className="px-6 py-4 text-xs font-mono font-semibold text-[var(--color-text-primary)]">
                     {formatIDR(item.unit_price)}
                   </td>
 
@@ -152,12 +152,12 @@ export function InventoryTable({
                   <td className="px-6 py-4">
                     <div className="inline-flex items-center gap-1.5">
                       <span
-                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-mono font-medium ${
+                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-mono font-medium border ${
                           isOutOfStock
-                            ? "bg-rose-500/10 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400"
+                            ? "bg-[var(--color-status-danger-bg)] text-[var(--color-status-danger-text)] border-[var(--color-status-danger-border)]"
                             : isLowStock
-                            ? "bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
-                            : "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400"
+                            ? "bg-[var(--color-status-warning-bg)] text-[var(--color-status-warning-text)] border-[var(--color-status-warning-border)]"
+                            : "bg-[var(--color-status-success-bg)] text-[var(--color-status-success-text)] border-[var(--color-status-success-border)]"
                         }`}
                       >
                         {isLowStock && <AlertCircle className="h-3 w-3" aria-hidden="true" />}
@@ -170,7 +170,7 @@ export function InventoryTable({
                   <td className="px-6 py-4">
                     <span
                       className={`inline-block h-2 w-2 rounded-full ${
-                        item.is_active ? "bg-emerald-500" : "bg-neutral-400"
+                        item.is_active ? "bg-emerald-500" : "bg-neutral-300"
                       }`}
                       title={
                         item.is_active
@@ -193,7 +193,7 @@ export function InventoryTable({
                             ? t("inventory.table.adjustAction")
                             : t("inventory.permissions.readOnlyTooltip")
                         }
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition hover:border-emerald-500 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-hairline)] bg-white text-[var(--color-text-secondary)] shadow-sm transition hover:border-[var(--color-action-primary)]/40 hover:text-[var(--color-action-primary)] hover:bg-[var(--color-surface-muted)] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Sliders className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -208,7 +208,7 @@ export function InventoryTable({
                             ? t("inventory.table.editAction")
                             : t("inventory.permissions.readOnlyTooltip")
                         }
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition hover:border-blue-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:border-blue-500 dark:hover:text-blue-400"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-hairline)] bg-white text-[var(--color-text-secondary)] shadow-sm transition hover:border-[var(--color-action-primary)]/40 hover:text-[var(--color-action-primary)] hover:bg-[var(--color-surface-muted)] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Edit2 className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -223,7 +223,7 @@ export function InventoryTable({
                             ? t("inventory.table.deleteAction")
                             : t("inventory.permissions.readOnlyTooltip")
                         }
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition hover:border-rose-500 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:border-rose-500 dark:hover:text-rose-400"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-hairline)] bg-white text-[var(--color-text-secondary)] shadow-sm transition hover:border-[var(--color-status-danger-border)] hover:text-[var(--color-status-danger-text)] hover:bg-[var(--color-surface-muted)] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -237,39 +237,39 @@ export function InventoryTable({
       </div>
 
       {/* Mobile Card Grid View */}
-      <div className="divide-y divide-neutral-200 lg:hidden dark:divide-neutral-800">
+      <div className="divide-y divide-[var(--color-border-hairline)] lg:hidden">
         {products.map((item) => {
           const threshold = item.reorder_threshold ?? 5;
           const isOutOfStock = item.stock_quantity <= 0;
           const isLowStock = !isOutOfStock && item.stock_quantity <= threshold;
 
           return (
-            <article key={item.id} className="p-4 space-y-3">
+            <article key={item.id} className="p-4 space-y-3 bg-white">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-neutral-900 dark:text-neutral-100">
+                    <h4 className="font-medium text-[var(--color-text-primary)]">
                       {item.name}
                     </h4>
                     {item.is_halal_certified && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-status-success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-status-success-text)] border border-[var(--color-status-success-border)]">
                         <ShieldCheck className="h-3 w-3" aria-hidden="true" />
                         <span>{t("inventory.table.halalBadge")}</span>
                       </span>
                     )}
                   </div>
-                  <span className="font-mono text-xs text-neutral-500">
+                  <span className="font-mono text-xs text-[var(--color-text-muted)]">
                     SKU: {item.sku} {item.barcode ? `• Barcode: ${item.barcode}` : ""}
                   </span>
                 </div>
 
                 <span
-                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-mono font-medium ${
+                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-mono font-medium border ${
                     isOutOfStock
-                      ? "bg-rose-500/10 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400"
+                      ? "bg-[var(--color-status-danger-bg)] text-[var(--color-status-danger-text)] border-[var(--color-status-danger-border)]"
                       : isLowStock
-                      ? "bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
-                      : "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400"
+                      ? "bg-[var(--color-status-warning-bg)] text-[var(--color-status-warning-text)] border-[var(--color-status-warning-border)]"
+                      : "bg-[var(--color-status-success-bg)] text-[var(--color-status-success-text)] border-[var(--color-status-success-border)]"
                   }`}
                 >
                   {isLowStock && <AlertCircle className="h-3 w-3" aria-hidden="true" />}
@@ -278,21 +278,21 @@ export function InventoryTable({
               </div>
 
               <div className="flex items-center justify-between text-xs">
-                <span className="text-neutral-500">
+                <span className="text-[var(--color-text-secondary)]">
                   {item.category_name || "Umum"}
                 </span>
-                <span className="font-mono font-semibold text-neutral-900 dark:text-neutral-100">
+                <span className="font-mono font-semibold text-[var(--color-text-primary)]">
                   {formatIDR(item.unit_price)}
                 </span>
               </div>
 
               {/* Mobile Actions */}
-              <div className="flex items-center justify-end gap-2 border-t border-neutral-100 pt-2.5 dark:border-neutral-800">
+              <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border-hairline)] pt-2.5">
                 <button
                   type="button"
                   onClick={() => onAdjustStock(item)}
                   disabled={!canWrite}
-                  className="flex items-center gap-1 rounded-lg border border-neutral-200 px-2.5 py-1.5 text-xs text-neutral-700 disabled:opacity-40 dark:border-neutral-800 dark:text-neutral-300"
+                  className="flex items-center gap-1 rounded-lg border border-[var(--color-border-hairline)] bg-white px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] shadow-sm transition hover:bg-[var(--color-surface-muted)] disabled:opacity-40"
                 >
                   <Sliders className="h-3.5 w-3.5" aria-hidden="true" />
                   <span>{t("inventory.table.adjustAction")}</span>
@@ -301,7 +301,7 @@ export function InventoryTable({
                   type="button"
                   onClick={() => onEditProduct(item)}
                   disabled={!canWrite}
-                  className="flex items-center gap-1 rounded-lg border border-neutral-200 px-2.5 py-1.5 text-xs text-neutral-700 disabled:opacity-40 dark:border-neutral-800 dark:text-neutral-300"
+                  className="flex items-center gap-1 rounded-lg border border-[var(--color-border-hairline)] bg-white px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] shadow-sm transition hover:bg-[var(--color-surface-muted)] disabled:opacity-40"
                 >
                   <Edit2 className="h-3.5 w-3.5" aria-hidden="true" />
                   <span>{t("inventory.table.editAction")}</span>
@@ -310,7 +310,7 @@ export function InventoryTable({
                   type="button"
                   onClick={() => onDeleteProduct(item)}
                   disabled={!canWrite}
-                  className="flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs text-rose-600 disabled:opacity-40 dark:border-rose-900/30 dark:text-rose-400"
+                  className="flex items-center gap-1 rounded-lg border border-[var(--color-status-danger-border)] bg-white px-2.5 py-1.5 text-xs text-[var(--color-status-danger-text)] shadow-sm transition hover:bg-[var(--color-status-danger-bg)] disabled:opacity-40"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
