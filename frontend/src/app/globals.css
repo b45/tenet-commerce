@@ -27,3 +27,33 @@ body {
     text-wrap: balance;
   }
 }
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #thermal-receipt-print,
+  #thermal-receipt-print * {
+    visibility: visible;
+  }
+  #thermal-receipt-print {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0;
+    padding: 8px;
+    background: white !important;
+    color: black !important;
+  }
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+}
+
