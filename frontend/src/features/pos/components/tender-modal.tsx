@@ -2,11 +2,13 @@
 
 import * as React from "react";
 import { Banknote, AlertCircle, Loader2 } from "lucide-react";
-import { formatIDR } from "@/lib/money";
+import { formatIDR, parseIDR } from "@/lib/money";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
+import type { CheckoutStep } from "../types";
 
 export interface TenderModalProps {
   isOpen: boolean;
@@ -17,7 +19,8 @@ export interface TenderModalProps {
   onSubmit: () => void;
   isSubmitting: boolean;
   errorMessage: string | null;
-  step: string;
+  step: CheckoutStep;
+  commandReference: string;
 }
 
 export function TenderModal({
@@ -30,22 +33,27 @@ export function TenderModal({
   isSubmitting,
   errorMessage,
   step,
+  commandReference,
 }: TenderModalProps) {
+  const { t } = useTranslation();
+  const isLocked = isSubmitting || step === "unknown_error";
+  const canEdit = step === "review";
   const [inputValue, setInputValue] = React.useState<string>(
     cashTendered ? String(cashTendered) : ""
   );
+  const wasOpen = React.useRef(false);
 
   React.useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpen.current) {
       setInputValue(cashTendered ? String(cashTendered) : "");
     }
+    wasOpen.current = isOpen;
   }, [isOpen, cashTendered]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/\D/g, "");
+    const raw = e.target.value;
     setInputValue(raw);
-    const num = raw ? parseInt(raw, 10) : 0;
-    onCashTenderedChange(num);
+    onCashTenderedChange(parseIDR(raw) ?? Number.NaN);
   };
 
   const setPreset = (amount: number) => {
@@ -53,9 +61,10 @@ export function TenderModal({
     onCashTenderedChange(amount);
   };
 
-  const changeAmount = Math.max(0, cashTendered - totalAmount);
-  const shortageAmount = Math.max(0, totalAmount - cashTendered);
-  const isSufficient = cashTendered >= totalAmount;
+  const isValidTender = parseIDR(cashTendered) !== null;
+  const changeAmount = isValidTender ? Math.max(0, cashTendered - totalAmount) : 0;
+  const shortageAmount = isValidTender ? Math.max(0, totalAmount - cashTendered) : totalAmount;
+  const isSufficient = isValidTender && cashTendered >= totalAmount;
 
   // Preset cash options based on total
   const quickPresets = React.useMemo(() => {
@@ -70,9 +79,10 @@ export function TenderModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={isSubmitting ? () => {} : onClose}
-      title="Pembayaran Tunai (Cash)"
-      description="Verifikasi nominal uang yang diterima dari pelanggan"
+      onClose={isLocked ? () => {} : onClose}
+      hideCloseButton={isLocked}
+      title={t("tender.modalTitle")}
+      description={t("tender.modalDescription")}
       maxWidth="md"
     >
       <div className="space-y-5">
@@ -92,16 +102,26 @@ export function TenderModal({
             </div>
             {step === "unknown_error" && (
               <p className="mt-2 text-xs font-semibold text-amber-800">
-                PENTING: Jangan menagih uang kembali ke pelanggan sebelum memeriksa mutasi bank atau laporan audit sistem.
+                Jangan tutup atau muat ulang halaman ini untuk mencoba pembayaran baru. Minta penanggung jawab memeriksa transaksi tunai dan catatan server. Pemulihan setelah keluar halaman belum tersedia.
               </p>
             )}
           </Alert>
         )}
 
+        {step === "unknown_error" && (
+          <details className="text-sm">
+            <summary className="cursor-pointer">Referensi untuk penanggung jawab</summary>
+            <p className="mt-2 break-all font-mono">{commandReference}</p>
+            <p className="mt-2">Referensi ini bukan bukti transaksi berhasil. Jangan membuat pembayaran pengganti sebelum hasilnya dipastikan.</p>
+          </details>
+        )}
+
+        <div hidden={step === "unknown_error"} className="space-y-5">
+
         {/* Bill Total Display */}
         <div className="p-4 rounded-[16px] bg-[var(--color-surface-muted)] border border-[var(--color-border-hairline)] text-center">
           <span className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-            Total Tagihan
+            {t("tender.billTotal")}
           </span>
           <div className="text-3xl font-bold font-mono text-[var(--color-text-primary)] mt-1 tracking-tight">
             {formatIDR(totalAmount)}
@@ -114,7 +134,7 @@ export function TenderModal({
             htmlFor="cash_tendered"
             className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
           >
-            Uang Tunai Diterima (Rp)
+            {t("tender.cashReceived")}
           </label>
 
           <div className="relative">
@@ -126,10 +146,12 @@ export function TenderModal({
               type="text"
               inputMode="numeric"
               autoFocus
-              disabled={isSubmitting}
-              value={inputValue ? parseInt(inputValue, 10).toLocaleString("id-ID") : ""}
+              disabled={!canEdit}
+              value={inputValue}
+              aria-invalid={!isValidTender}
+              aria-describedby={!isValidTender ? "cash-tendered-error" : undefined}
               onChange={handleInputChange}
-              placeholder="0"
+              placeholder={t("tender.cashPlaceholder")}
               className={cn(
                 "w-full h-13 pl-12 pr-4 text-xl font-bold font-mono text-[var(--color-text-primary)]",
                 "bg-[var(--color-surface-base)] rounded-[16px] border border-[var(--color-border-subtle)]",
@@ -138,17 +160,22 @@ export function TenderModal({
               )}
             />
           </div>
+          {!isValidTender && (
+            <p id="cash-tendered-error" className="mt-2 text-sm text-[var(--color-status-danger-text)]">
+              Masukkan Rupiah utuh dalam batas nominal, misalnya 50000 atau 50.000. Nilai negatif dan pecahan tidak diterima.
+            </p>
+          )}
         </div>
 
         {/* Quick Cash Presets */}
         <div className="space-y-1.5">
           <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
-            Tombol Cepat:
+            {t("common.actions.filter")}:
           </span>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={isSubmitting}
+              disabled={!canEdit}
               onClick={() => setPreset(totalAmount)}
               className={cn(
                 "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all select-none",
@@ -157,14 +184,14 @@ export function TenderModal({
                   : "bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] border border-[var(--color-border-hairline)] hover:bg-gray-200"
               )}
             >
-              Uang Pas ({formatIDR(totalAmount)})
+              {t("tender.presets.exact")} ({formatIDR(totalAmount)})
             </button>
 
             {quickPresets.map((amount) => (
               <button
                 key={amount}
                 type="button"
-                disabled={isSubmitting}
+                disabled={!canEdit}
                 onClick={() => setPreset(amount)}
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-semibold font-mono transition-all select-none",
@@ -182,7 +209,7 @@ export function TenderModal({
         {/* Real-time Change / Shortage Preview */}
         <div className="p-4 rounded-[16px] border border-[var(--color-border-hairline)] bg-[var(--color-surface-base)] flex items-center justify-between">
           <span className="text-xs font-medium text-[var(--color-text-secondary)]">
-            {isSufficient ? "Kembalian Pelanggan:" : "Kurang Bayar:"}
+            {isSufficient ? t("tender.change") : t("tender.shortage")}
           </span>
           <span
             className={cn(
@@ -201,31 +228,32 @@ export function TenderModal({
           <Button
             type="button"
             variant="secondary"
-            disabled={isSubmitting}
+            disabled={isLocked}
             onClick={onClose}
             className="flex-1 rounded-[14px] h-12"
           >
-            Batal
+            {t("common.actions.cancel")}
           </Button>
 
           <Button
             type="button"
-            disabled={!isSufficient || isSubmitting}
+            disabled={!isSufficient || !canEdit}
             onClick={onSubmit}
             className="flex-[2] rounded-[14px] h-12 font-semibold shadow-sm flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Memproses...</span>
+                <span>{t("tender.processing")}</span>
               </>
             ) : (
               <>
                 <Banknote className="w-4 h-4" />
-                <span>Proses Pembayaran</span>
+                <span>{t("tender.confirmCashSale")}</span>
               </>
             )}
           </Button>
+        </div>
         </div>
       </div>
     </Modal>

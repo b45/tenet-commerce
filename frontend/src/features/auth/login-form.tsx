@@ -8,8 +8,10 @@ import { Alert } from "@/components/ui/alert";
 import { ShieldCheck, Lock, Mail, Building2, Server } from "lucide-react";
 
 import { HelpdeskDiagnostic } from "@/components/ui/helpdesk-diagnostic";
+import { useTranslation } from "@/lib/i18n";
 
 export function LoginForm() {
+  const { t } = useTranslation();
   const { login, isLoading, error, traceId } = useAuth();
   const [tenantSlug, setTenantSlug] = React.useState("");
   const [email, setEmail] = React.useState("");
@@ -34,7 +36,7 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       {error && (
-        <Alert variant="destructive" title="Autentikasi Gagal">
+        <Alert variant="destructive" title={t("auth.errorTitle")}>
           <div>{error}</div>
           <HelpdeskDiagnostic traceId={traceId} errorMessage={error} errorCode="AUTH_FAILED" />
         </Alert>
@@ -47,7 +49,7 @@ export function LoginForm() {
         >
           <span className="flex items-center gap-1.5">
             <Building2 className="w-3.5 h-3.5 text-[#8B95A5]" />
-            Tenant Slug Toko
+            {t("auth.tenantSlug")}
           </span>
           <span className="text-[10px] text-[#8B95A5] normal-case font-normal">Identitas Schema</span>
         </label>
@@ -55,7 +57,7 @@ export function LoginForm() {
           id="tenant_slug"
           name="tenant_slug"
           type="text"
-          placeholder="contoh: b45-bakery"
+          placeholder={t("auth.tenantSlugPlaceholder")}
           value={tenantSlug}
           onChange={(e) => setTenantSlug(e.target.value)}
           disabled={isLoading}
@@ -71,13 +73,13 @@ export function LoginForm() {
           className="text-[11px] font-semibold uppercase tracking-wider text-[#555D6E] flex items-center gap-1.5"
         >
           <Mail className="w-3.5 h-3.5 text-[#8B95A5]" />
-          Alamat Email
+          {t("auth.email")}
         </label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="kasir@toko.com"
+          placeholder={t("auth.emailPlaceholder")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           disabled={isLoading}
@@ -93,13 +95,13 @@ export function LoginForm() {
           className="text-[11px] font-semibold uppercase tracking-wider text-[#555D6E] flex items-center gap-1.5"
         >
           <Lock className="w-3.5 h-3.5 text-[#8B95A5]" />
-          Kata Sandi
+          {t("auth.password")}
         </label>
         <Input
           id="password"
           name="password"
           type="password"
-          placeholder="••••••••"
+          placeholder={t("auth.passwordPlaceholder")}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           disabled={isLoading}
@@ -117,7 +119,7 @@ export function LoginForm() {
           className="w-full text-[14px]"
           isLoading={isLoading}
         >
-          Masuk ke Sistem
+          {isLoading ? t("auth.submitting") : t("auth.submit")}
         </Button>
       </div>
 

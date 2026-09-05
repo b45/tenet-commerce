@@ -34,6 +34,14 @@ export interface CartItem {
   subtotal: number;
 }
 
+export interface CartTotals {
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  totalItems: number;
+}
+
 export interface CheckoutItemInput {
   sku: string;
   quantity: number;

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { authApi, type UserProfile } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { LanguageSelector } from "@/components/ui/language-selector";
+import { useTranslation } from "@/lib/i18n";
 import { LogOut, User, Menu, Wifi } from "lucide-react";
 
 interface HeaderProps {
@@ -14,6 +16,7 @@ interface HeaderProps {
 
 export function Header({ user, onToggleSidebar }: HeaderProps) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
   const handleLogout = async () => {
@@ -42,21 +45,24 @@ export function Header({ user, onToggleSidebar }: HeaderProps) {
         </button>
 
         {/* Tenant Identity Pill matching Cupertino sample */}
-        <div className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-[#0B0F19]">
-          <div className="w-6 h-6 rounded-[7px] bg-[#0B0F19] text-white flex items-center justify-center font-bold text-xs tracking-tighter shadow-xs">
+        <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-[13px] font-semibold tracking-tight text-[#0B0F19] min-w-0">
+          <div className="w-6 h-6 rounded-[7px] bg-[#0B0F19] text-white flex items-center justify-center font-bold text-xs tracking-tighter shrink-0 shadow-xs">
             TC
           </div>
-          <span>Tenet Commerce</span>
-          <span className="text-black/30 font-normal">·</span>
-          <span className="text-[#555D6E] font-medium">{user?.tenant_slug || "Toko B45"}</span>
+          <span className="hidden sm:inline">Tenet Commerce</span>
+          <span className="text-black/30 font-normal hidden sm:inline">·</span>
+          <span className="text-[#555D6E] font-medium truncate max-w-[110px] sm:max-w-none">{user?.tenant_slug || "al-barakah-mart"}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2 sm:gap-3">
+        {/* Language Switcher */}
+        <LanguageSelector variant="segmented" />
+
         {/* Network Online Status Pill (Apple Style) */}
         <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/[0.04] text-[11px] font-medium text-[#555D6E] border border-black/[0.04]">
           <Wifi className="w-3 h-3 text-emerald-600" />
-          <span>Network</span>
+          <span>{t("common.network.connected")}</span>
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
         </div>
 
@@ -77,7 +83,7 @@ export function Header({ user, onToggleSidebar }: HeaderProps) {
           className="text-xs h-8 text-[#555D6E] hover:text-[#0B0F19] gap-1.5"
         >
           <LogOut className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline font-medium">Keluar</span>
+          <span className="hidden sm:inline font-medium">{t("nav.logout")}</span>
         </Button>
       </div>
     </header>

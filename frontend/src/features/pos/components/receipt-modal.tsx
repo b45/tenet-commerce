@@ -6,6 +6,7 @@ import { formatIDR } from "@/lib/money";
 import { formatDateTime } from "@/lib/date";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/lib/i18n";
 import type { CheckoutResponse } from "../types";
 
 export interface ReceiptModalProps {
@@ -21,6 +22,7 @@ export function ReceiptModal({
   receipt,
   onNewTransaction,
 }: ReceiptModalProps) {
+  const { t } = useTranslation();
   if (!receipt) return null;
 
   const handlePrint = () => {
@@ -41,7 +43,7 @@ export function ReceiptModal({
           <CheckCircle2 className="w-7 h-7" />
         </div>
         <h3 className="text-lg font-bold text-[var(--color-status-success-text)]">
-          Pembayaran Berhasil
+          {t("receipt.modalTitle")}
         </h3>
         <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 font-mono">
           {receipt.transaction_number}
@@ -53,7 +55,7 @@ export function ReceiptModal({
         {/* Transaction Summary Card */}
         <div className="p-4 rounded-[16px] bg-[var(--color-surface-muted)] border border-[var(--color-border-hairline)] space-y-2 text-xs">
           <div className="flex justify-between">
-            <span className="text-[var(--color-text-secondary)]">Waktu Transaksi</span>
+            <span className="text-[var(--color-text-secondary)]">{t("receipt.date")}</span>
             <span className="font-mono text-[var(--color-text-primary)]">
               {formatDateTime(receipt.created_at)}
             </span>
@@ -61,19 +63,19 @@ export function ReceiptModal({
           <div className="flex justify-between">
             <span className="text-[var(--color-text-secondary)]">Status</span>
             <span className="font-semibold text-[var(--color-status-success-text)]">
-              SELESAI (COMPLETED)
+              {t("common.status.completed")}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--color-text-secondary)]">Metode</span>
-            <span className="font-medium text-[var(--color-text-primary)]">TUNAI</span>
+            <span className="text-[var(--color-text-secondary)]">{t("history.columns.method")}</span>
+            <span className="font-medium text-[var(--color-text-primary)]">{t("receipt.cash")}</span>
           </div>
         </div>
 
         {/* Itemized Breakdown */}
         <div className="space-y-2">
           <h5 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-            Rincian Produk
+            {t("receipt.itemHeader")}
           </h5>
           <div className="divide-y divide-[var(--color-border-hairline)] border-y border-[var(--color-border-hairline)] py-1">
             {receipt.items.map((item, idx) => (
@@ -97,25 +99,25 @@ export function ReceiptModal({
         {/* Financial Numbers */}
         <div className="space-y-1.5 text-xs text-[var(--color-text-secondary)]">
           <div className="flex justify-between">
-            <span>Subtotal</span>
+            <span>{t("receipt.subtotal")}</span>
             <span className="font-mono">{formatIDR(receipt.subtotal_amount)}</span>
           </div>
           <div className="flex justify-between">
-            <span>Pajak (0%)</span>
+            <span>{t("receipt.tax")}</span>
             <span className="font-mono">{formatIDR(receipt.tax_amount)}</span>
           </div>
           <div className="flex justify-between text-sm font-bold text-[var(--color-text-primary)] pt-2 border-t border-[var(--color-border-hairline)]">
-            <span>Total Transaksi</span>
+            <span>{t("receipt.total")}</span>
             <span className="font-mono text-base">{formatIDR(receipt.total_amount)}</span>
           </div>
           <div className="flex justify-between pt-1">
-            <span>Tunai Diterima</span>
+            <span>{t("receipt.cash")}</span>
             <span className="font-mono font-semibold text-[var(--color-text-primary)]">
               {formatIDR(receipt.cash_tendered)}
             </span>
           </div>
           <div className="flex justify-between font-semibold text-[var(--color-status-success-text)]">
-            <span>Kembalian</span>
+            <span>{t("receipt.change")}</span>
             <span className="font-mono text-sm">{formatIDR(receipt.change_amount)}</span>
           </div>
         </div>
@@ -130,7 +132,7 @@ export function ReceiptModal({
           className="flex-1 rounded-[14px] h-12 text-xs font-semibold flex items-center justify-center gap-2"
         >
           <Printer className="w-4 h-4" />
-          <span>Cetak Struk</span>
+          <span>{t("receipt.printAction")}</span>
         </Button>
 
         <Button
@@ -139,7 +141,7 @@ export function ReceiptModal({
           className="flex-1 rounded-[14px] h-12 text-xs font-semibold flex items-center justify-center gap-2"
         >
           <PlusCircle className="w-4 h-4" />
-          <span>Transaksi Baru</span>
+          <span>{t("receipt.newSaleAction")}</span>
         </Button>
       </div>
     </Modal>
