@@ -268,3 +268,120 @@ Gunakan [template spesifikasi layar](design/SCREEN_SPEC_TEMPLATE.md) untuk flow 
 - [ ] Bukti test, file sumber dan keterbatasan tercatat.
 
 Pedoman dapat berkembang melalui perubahan kecil yang beralasan. Aturan baru harus menyelesaikan masalah berulang atau risiko nyata, bukan sekadar menambah proses.
+
+---
+
+## 15. Aturan Disiplin Multi-Bahasa (i18n) dan Lokalisasi
+
+Tanggal: 2026-09-05. Wajib dipatuhi untuk seluruh implementasi halaman baru (inventory, procurement, ledger, manager dashboard) dan modifikasi komponen FE.
+
+Tenet Commerce dirancang sebagai platform ritel multi-tenant berstandar enterprise internasional yang melayani operasional ritel syariah. Oleh karena itu, antarmuka mendukung tiga bahasa secara simultan: **Bahasa Indonesia (`id`)**, **English (`en`)**, dan **العربية / Arabic (`ar`)**.
+
+### 15.1 Prinsip Nol Hardcoded String (Zero Hardcoded String)
+
+1. **Larangan Teks Statis:**
+   - Dilarang keras menulis string bahasa manusia yang terlihat di antarmuka (*UI text*) langsung di dalam file `.tsx` atau `.jsx`.
+   - Meliputi: judul halaman, label input, placeholder form, teks tombol CTA, pesan validasi, toast notification, header dan sel tabel, modal konfirmasi, teks badge status, hingga deskripsi *empty-state*.
+   - Semua teks wajib dipanggil menggunakan hook `useTranslation()`:
+     ```tsx
+     // ❌ SALAH (Hardcoded string):
+     <button>Tambah Produk</button>
+     <input placeholder="Cari nama barang..." />
+
+     // ✅ BENAR (Menggunakan i18n key):
+     const { t } = useTranslation();
+     <button>{t("inventory.actions.addProduct")}</button>
+     <input placeholder={t("inventory.searchPlaceholder")} />
+     ```
+
+2. **Paritas Kunci 1:1 (Key Parity Invariant):**
+   - Setiap kali sebuah string baru ditambahkan atau diubah, kunci tersebut **wajib** dideklarasikan secara serentak pada 3 file kamus:
+     - `frontend/src/lib/i18n/locales/id.ts` (Bahasa Indonesia)
+     - `frontend/src/lib/i18n/locales/en.ts` (English)
+     - `frontend/src/lib/i18n/locales/ar.ts` (Arabic)
+   - Dan tipe skemanya wajib terdaftar di `frontend/src/lib/i18n/types.ts` (`TranslationSchema`).
+   - Tidak boleh ada kunci yang ada di `id` tetapi terlewat di `en` atau `ar`.
+
+### 15.2 Konvensi Penamaan dan Struktur Hirarki Kunci
+
+Gunakan notasi camelCase bertingkat yang mencerminkan domain dan komponen:
+
+```text
+<domain>.<subdomain-atau-komponen>.<namaElemen>
+```
+
+Contoh domain yang terdaftar:
+- `common`: Tindakan global (`actions.save`, `actions.cancel`, `actions.delete`), status umum (`status.active`, `status.inactive`), konfirmasi, indikator jaringan.
+- `nav`: Label navigasi pada sidebar dan menu header.
+- `auth`: Layar otentikasi login, input tenant/email/password, error kredensial.
+- `pos`: Register kasir, katalog, pencarian, pill kategori, badge sertifikasi halal.
+- `tender`: Modal pembayaran tunai, kembalian, preset nominal pas.
+- `receipt`: Struk transaksi pembayaran, preview modal, struk thermal print.
+- `history`: Riwayat transaksi penjualan, filter tanggal, modal pembatalan (void).
+- `inventory`: Daftar produk, kategori, form tambah/edit produk, penyesuaian stok opname, peringatan stok menipis.
+- `supplyChain`: Sertifikasi halal pemasok, pesanan pembelian (PO), penerimaan barang (GR).
+- `ledger`: Jurnal debit/kredit, bagan akun (COA), neraca saldo.
+
+### 15.3 Kosakata Syariah dan Tata Bahasa Arab Baku
+
+Penerjemahan ke Bahasa Arab (`ar`) bukan sekadar alih bahasa mesin, melainkan menggunakan terminologi perbankan, akuntansi, dan ritel syariah yang baku:
+- Produk Bersertifikat Halal: **منتج معتمد حلال**
+- Double-Entry Ledger: **دفتر الأستاذ ذو القيد المزدوج**
+- Subtotal: **المجموع الفرعي**
+- Pajak / PPN: **الضريبة (0%)**
+- Total Tagihan: **الإجمالي الكلي**
+- Tunai Diterima: **المبلغ النقدي المستلم**
+- Uang Kembalian: **المبلغ المتبقي / الباقي**
+- Pembatalan Transaksi (Void): **فسخ الفاتورة / إلغاء المعاملة**
+- Stok Opname / Penyesuaian: **جرد المخزون / تسوية البضائع**
+
+### 15.4 Dukungan Arah Teks (RTL - Right-to-Left)
+
+1. **Arah Dokumen Otomatis:**
+   - Konteks `I18nProvider` secara otomatis mengatur atribut HTML `document.documentElement.dir = "rtl"` saat bahasa `ar` dipilih, dan `dir = "ltr"` untuk `id` dan `en`.
+2. **Kaidah Styling Bidirectional:**
+   - Hindari penggunaan hardcoded margin/padding absolute seperti `left-0` atau `right-0` jika elemen tersebut merupakan ikon yang posisinya harus berpindah saat RTL.
+   - Gunakan logical properties Tailwind atau varian `rtl:` jika diperlukan:
+     - Gunakan `start` dan `end` alih-alih `left` dan `right` untuk perataan teks (`text-start`, `text-end`).
+     - Ikon panah navigasi maju/mundur (`ArrowRight` / `ArrowLeft`) disesuaikan orientasinya secara kontekstual saat RTL.
+
+### 15.5 Interpolasi Variabel Dinamis
+
+Dilarang melakukan konkatenasi string manual (misal: `"Sisa stok: " + qty + " item"`).
+Gunakan parameter kurung kurawal `{param}` yang didukung oleh interpolator `translate()`:
+
+```ts
+// types.ts
+remainingStock: string; // e.g. "Sisa {count} item"
+
+// id.ts: remainingStock: "Sisa {count} item"
+// en.ts: remainingStock: "{count} items remaining"
+// ar.ts: remainingStock: "متبقي {count} عناصر"
+
+// Penggunaan di komponen:
+t("inventory.remainingStock", { count: product.stock_quantity })
+```
+
+### 15.6 Format Angka, Uang, dan Tanggal
+
+1. **Nominal Rupiah (IDR):**
+   - Gunakan pustaka pembantu terpusat di `frontend/src/lib/money.ts` (`formatIDR`, `parseIDR`).
+   - Jangan menulis simbol `Rp` atau `.000` secara manual di dalam kamus bahasa. Simbol dan pemisah ribuan ditangani secara konsisten oleh helper moneter.
+2. **Waktu dan Tanggal:**
+   - Gunakan pustaka pembantu di `frontend/src/lib/date.ts` (`formatDateTime`) yang menghasilkan representasi waktu yang rapi dan konsisten.
+
+### 15.7 Alur Kerja Wajib (Developer Workflow) Saat Menambah Halaman/Komponen Baru
+
+Setiap developer atau AI agent yang mengimplementasikan fitur UI baru wajib mengikuti 6 langkah disiplin berikut:
+
+1. **Step 1 — Perencanaan Kunci:** Catat seluruh teks yang akan ditampilkan pada layar (heading, button, column header, error message).
+2. **Step 2 — Daftarkan Skema:** Tambahkan struktur kunci baru ke `frontend/src/lib/i18n/types.ts` di bawah domain terkait.
+3. **Step 3 — Isi Kamus Bahasa:** Masukkan teks terjemahan ke `locales/id.ts`, `locales/en.ts`, dan `locales/ar.ts` secara lengkap.
+4. **Step 4 — Pasang di Komponen:** Panggil teks menggunakan hook `const { t } = useTranslation();`.
+5. **Step 5 — Uji Paritas Kunci Otomatis:**
+   ```bash
+   npm test
+   ```
+   Pastikan pengujian `i18n: dictionary key parity across id, en, and ar` lulus 100% tanpa ada kunci yang hilang (*missing key*).
+6. **Step 6 — Verifikasi Tampilan Visual:**
+   Periksa di browser bahwa teks berganti secara instan saat beralih antara 🇮🇩 ID, 🇬🇧 EN, dan 🇸🇦 AR, serta tata letak RTL tidak mengalami kerusakan visual.
