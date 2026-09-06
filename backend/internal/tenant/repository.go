@@ -42,3 +42,39 @@ func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (*Tenant,
 	
 	return &t, nil
 }
+
+// GetAllActiveTenants queries all active tenants from public.tenants registry
+func (r *Repository) GetAllActiveTenants(ctx context.Context) ([]Tenant, error) {
+	query := `
+		SELECT id, slug, company_name, schema_name, status, created_at, updated_at
+		FROM public.tenants
+		WHERE status = 'ACTIVE'
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed querying active tenants: %w", err)
+	}
+	defer rows.Close()
+
+	var tenants []Tenant
+	for rows.Next() {
+		var t Tenant
+		if err := rows.Scan(
+			&t.ID,
+			&t.Slug,
+			&t.Name,
+			&t.SchemaName,
+			&t.Status,
+			&t.CreatedAt,
+			&t.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed scanning tenant: %w", err)
+		}
+		tenants = append(tenants, t)
+	}
+
+	return tenants, nil
+}
+
