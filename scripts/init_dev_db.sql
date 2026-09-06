@@ -425,6 +425,9 @@ CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_al_barakah_mart ON te
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_al_barakah_mart ON tenant_al_barakah_mart.ledger_entries(entry_date);
 CREATE INDEX IF NOT EXISTS idx_abm_ledger_entries_status ON tenant_al_barakah_mart.ledger_entries(status);
 CREATE INDEX IF NOT EXISTS idx_abm_ledger_entries_reversed_by ON tenant_al_barakah_mart.ledger_entries(reversed_by_entry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_abm_ledger_entries_reversal_source 
+    ON tenant_al_barakah_mart.ledger_entries(source_document_id) 
+    WHERE source_document_type = 'REVERSAL';
 
 -- Ledger Balance Invariant Trigger (Enforces >=2 lines, >0 amount, and sum(debit) == sum(credit))
 CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.verify_ledger_entry_balance()
@@ -835,6 +838,9 @@ CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_darussalam_store ON t
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_darussalam_store ON tenant_darussalam_store.ledger_entries(entry_date);
 CREATE INDEX IF NOT EXISTS idx_ds_ledger_entries_status ON tenant_darussalam_store.ledger_entries(status);
 CREATE INDEX IF NOT EXISTS idx_ds_ledger_entries_reversed_by ON tenant_darussalam_store.ledger_entries(reversed_by_entry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ds_ledger_entries_reversal_source 
+    ON tenant_darussalam_store.ledger_entries(source_document_id) 
+    WHERE source_document_type = 'REVERSAL';
 
 -- Ledger Balance Invariant Trigger (Enforces >=2 lines, >0 amount, and sum(debit) == sum(credit))
 CREATE OR REPLACE FUNCTION tenant_darussalam_store.verify_ledger_entry_balance()

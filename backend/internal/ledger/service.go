@@ -65,10 +65,22 @@ func (s *Service) GetTrialBalance(ctx context.Context, conn *pgxpool.Conn, asOfD
 		totalDebit += row.TotalDebit
 		totalCredit += row.TotalCredit
 
-		dMoney, _ := money.FromFloat(row.TotalDebit, "IDR")
-		cMoney, _ := money.FromFloat(row.TotalCredit, "IDR")
-		totalDebitMoney, _ = totalDebitMoney.Add(dMoney)
-		totalCreditMoney, _ = totalCreditMoney.Add(cMoney)
+		dMoney, err := money.FromExactFloat(row.TotalDebit, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: trial balance debit for account %s: %v", ErrInvalidMonetaryAmount, row.AccountCode, err)
+		}
+		cMoney, err := money.FromExactFloat(row.TotalCredit, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: trial balance credit for account %s: %v", ErrInvalidMonetaryAmount, row.AccountCode, err)
+		}
+		totalDebitMoney, err = totalDebitMoney.Add(dMoney)
+		if err != nil {
+			return nil, err
+		}
+		totalCreditMoney, err = totalCreditMoney.Add(cMoney)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &TrialBalanceSummary{

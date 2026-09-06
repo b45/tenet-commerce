@@ -89,6 +89,11 @@ func TestValidateBalance(t *testing.T) {
 			wantErr: ErrUnbalancedEntry,
 		},
 		{
+			name:    "Empty Lines Entry Rejected",
+			lines:   []EntryLine{},
+			wantErr: ErrInsufficientLines,
+		},
+		{
 			name: "Large Billions Exact Balanced Entry Succeeds",
 			lines: []EntryLine{
 				{ID: uuid.New(), DebitAmount: 5000000000, CreditAmount: 0},
