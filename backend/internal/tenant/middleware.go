@@ -117,7 +117,9 @@ func ContextMiddleware(db *database.PostgresDB, repo *Repository) gin.HandlerFun
 		// 6. Set the schema search path dynamically.
 		// SECURITY: schemaName is retrieved from our trusted public.tenants registry,
 		// never directly from user input, and sanitized by pgx.Identifier to prevent SQL injection.
-		searchPathQuery := fmt.Sprintf("SET search_path TO %s, public;",
+		// NOTE: public schema is strictly excluded from the search path so that domain queries fail-closed
+		// if a tenant table is missing rather than erroneously falling back to public schema.
+		searchPathQuery := fmt.Sprintf("SET search_path TO %s;",
 			pgx.Identifier{tenantData.SchemaName}.Sanitize())
 
 		if _, err := conn.Exec(c.Request.Context(), searchPathQuery); err != nil {

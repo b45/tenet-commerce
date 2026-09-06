@@ -12,6 +12,7 @@ import (
 // TxRunner defines the interface for running transactions in a tenant-scoped context.
 type TxRunner interface {
 	RunInTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+	ReadTx(ctx context.Context, fn func(tx pgx.Tx) error) error
 }
 
 // ScopedDB wraps a pooled database connection and enforces transaction-local
@@ -50,7 +51,7 @@ func (s *ScopedDB) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	}
 
 	sanitized := pgx.Identifier{s.schemaName}.Sanitize()
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public;", sanitized)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s;", sanitized)
 	if _, err := tx.Exec(ctx, query); err != nil {
 		_ = tx.Rollback(ctx)
 		return nil, fmt.Errorf("set local search_path to %s: %w", s.schemaName, err)
@@ -85,6 +86,26 @@ func (s *ScopedDB) RunInTx(ctx context.Context, fn func(tx pgx.Tx) error) (err e
 	}
 
 	return nil
+}
+
+// ReadTx runs a read-only query function inside a transaction with SET LOCAL search_path.
+// The transaction is always rolled back after the function completes to ensure zero state changes.
+func (s *ScopedDB) ReadTx(ctx context.Context, fn func(tx pgx.Tx) error) (err error) {
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(ctx)
+			panic(p)
+		} else {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	return fn(tx)
 }
 
 // Conn returns the underlying connection.
@@ -134,7 +155,7 @@ func ExecuteTx(ctx context.Context, conn *pgxpool.Conn, schemaName string, fn fu
 	}()
 
 	sanitized := pgx.Identifier{schemaName}.Sanitize()
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public;", sanitized)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s;", sanitized)
 	if _, err := tx.Exec(ctx, query); err != nil {
 		return fmt.Errorf("set local search_path to %s: %w", schemaName, err)
 	}
