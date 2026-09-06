@@ -31,13 +31,16 @@ type apiResponseEnvelope struct {
 	} `json:"error"`
 }
 
-func setupSupplyChainTestRouter(t *testing.T, db *database.PostgresDB) *gin.Engine {
+func setupSupplyChainTestRouter(t *testing.T, db *database.PostgresDB, services ...*supplychain.Service) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	tenantRepo := tenant.NewRepository(db)
 	ledgerService := ledger.NewService(ledger.NewRepository())
 	scService := supplychain.NewService(supplychain.NewRepository(), ledgerService)
+	if len(services) > 0 {
+		scService = services[0]
+	}
 	scHandler := supplychain.NewHandler(scService)
 
 	router := gin.New()

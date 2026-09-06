@@ -15,92 +15,37 @@ import (
 )
 
 var (
-	ErrComplianceCertRequired   = errors.New("compliance certificate is required under strict mode")
-	ErrComplianceCertExpired    = errors.New("compliance certificate is expired")
-	ErrComplianceCertInvalid    = errors.New("compliance certificate is not valid for this transaction")
-	ErrInvalidPOStatus          = errors.New("invalid purchase order status for this operation")
-	ErrEmptyReceipt             = errors.New("goods receipt must contain at least one item")
-	ErrZeroValueReceipt         = errors.New("goods receipt inbound valuation must be greater than zero")
-	ErrReceiptItemNotOnPO       = errors.New("goods receipt item does not exist on purchase order")
-	ErrDuplicateReceiptItem     = errors.New("goods receipt contains a duplicate product")
-	ErrReceiptQuantityExceeds   = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
-	ErrIdempotencyKeyConflict   = errors.New("idempotency key is already associated with another purchase order")
-	ErrInvalidMonetaryAmount    = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
+	ErrComplianceCertRequired = errors.New("compliance certificate is required under strict mode")
+	ErrComplianceCertExpired  = errors.New("compliance certificate is expired")
+	ErrComplianceCertInvalid  = errors.New("compliance certificate is not valid for this transaction")
+	ErrSupplierInactive       = errors.New("supplier is inactive")
+	ErrInvalidPOStatus        = errors.New("invalid purchase order status for this operation")
+	ErrEmptyReceipt           = errors.New("goods receipt must contain at least one item")
+	ErrZeroValueReceipt       = errors.New("goods receipt inbound valuation must be greater than zero")
+	ErrReceiptItemNotOnPO     = errors.New("goods receipt item does not exist on purchase order")
+	ErrDuplicateReceiptItem   = errors.New("goods receipt contains a duplicate product")
+	ErrReceiptQuantityExceeds = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
+	ErrIdempotencyKeyConflict = errors.New("idempotency key is already associated with another purchase order")
+	ErrInvalidMonetaryAmount  = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
 )
 
 type Service struct {
 	repo          *Repository
 	ledgerService *ledger.Service
+	now           func() time.Time
 }
 
 func NewService(repo *Repository, ledgerService *ledger.Service) *Service {
-	return &Service{repo: repo, ledgerService: ledgerService}
+	return NewServiceWithClock(repo, ledgerService, time.Now)
 }
 
-// checkCompliance is an internal helper that implements the Configurable Compliance Engine logic.
-// It verifies if the tenant is in strict mode and, if so, whether the provided certificate is valid.
-func (s *Service) checkCompliance(ctx context.Context, db queryRower, supplierID uuid.UUID, certID *uuid.UUID) error {
-	start := time.Now()
-	defer func() {
-		slog.InfoContext(ctx, "compliance_check_completed",
-			slog.Duration("duration_cert_validation_ms", time.Since(start)),
-		)
-	}()
-
-	// 1. Fetch Tenant Config
-	config, err := s.repo.GetTenantConfig(ctx, db, "compliance")
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil // No config found means no strict mode
-		}
-		return err
+// NewServiceWithClock allows deterministic boundary tests without changing global time.
+// The clock must be safe for concurrent use and must not be derived from HTTP input.
+func NewServiceWithClock(repo *Repository, ledgerService *ledger.Service, now func() time.Time) *Service {
+	if now == nil {
+		panic("supplychain: nil clock")
 	}
-
-	strictMode, ok := config["strict_compliance_mode"].(bool)
-	if !ok || !strictMode {
-		return nil // Strict mode is disabled. Bypass check.
-	}
-
-	// 2. Strict mode is ON. We must have a certificate.
-	if certID == nil {
-		return ErrComplianceCertRequired
-	}
-
-	// 3. Validate Certificate Status
-	cert, err := s.repo.GetComplianceCertificateByID(ctx, db, *certID)
-	if err != nil {
-		return err
-	}
-	if cert.SupplierID != supplierID {
-		return ErrComplianceCertInvalid
-	}
-
-	switch cert.ComputedStatus {
-	case "EXPIRED", "NOT_YET_VALID":
-		slog.ErrorContext(ctx, "compliance_hard_block",
-			slog.String("cert_id", cert.ID.String()),
-			slog.String("cert_type", cert.CertType),
-		)
-		return ErrComplianceCertExpired
-	case "EXPIRING_SOON":
-		slog.WarnContext(ctx, "compliance_expiring_soon",
-			slog.String("cert_id", cert.ID.String()),
-			slog.String("expiry_date", cert.ExpiryDate.String()),
-		)
-		return nil
-	}
-
-	requiredTypes, ok := config["required_compliance"].([]interface{})
-	if !ok {
-		return nil
-	}
-	for _, value := range requiredTypes {
-		requiredType, ok := value.(string)
-		if ok && requiredType == cert.CertType {
-			return nil
-		}
-	}
-	return ErrComplianceCertInvalid
+	return &Service{repo: repo, ledgerService: ledgerService, now: now}
 }
 
 // CreateSupplier registers a supplier and optionally its compliance certificate
@@ -222,12 +167,16 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, conn *pgxpool.Conn, r
 	defer tx.Rollback(ctx)
 
 	// COMPLIANCE INTERCEPTOR (HARD-BLOCK), evaluated inside the PO transaction.
-	if err := s.checkCompliance(ctx, tx, supplierID, certID); err != nil {
+	po.ComplianceEvaluation, err = s.checkCompliance(ctx, tx, supplierID, certID)
+	if err != nil {
 		return nil, err
 	}
 
 	startInsert := time.Now()
 	if err := s.repo.CreatePurchaseOrder(ctx, tx, po); err != nil {
+		return nil, err
+	}
+	if err := s.repo.recordComplianceDecision(ctx, tx, "PO", po.ID, po.ComplianceEvaluation); err != nil {
 		return nil, err
 	}
 	slog.InfoContext(ctx, "po_insert_completed", slog.Duration("duration_insert_po_ms", time.Since(startInsert)))
@@ -269,7 +218,8 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 		if existing.PurchaseOrderID != po.ID {
 			return nil, ErrIdempotencyKeyConflict
 		}
-		return existing, nil
+		existing.ComplianceEvaluation, err = s.repo.getComplianceDecision(ctx, tx, "GR", existing.ID)
+		return existing, err
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -281,7 +231,8 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 
 	// The certificate may have changed since the PO was issued, so enforce the
 	// tenant's strict-compliance configuration within this receipt transaction.
-	if err := s.checkCompliance(ctx, tx, po.SupplierID, po.ComplianceCertID); err != nil {
+	decision, err := s.checkCompliance(ctx, tx, po.SupplierID, po.ComplianceCertID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -295,13 +246,14 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	}
 
 	gr := &GoodsReceipt{
-		ID:              uuid.New(),
-		GRNumber:        "GR-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:8],
-		IdempotencyKey:  idempotencyKey,
-		PurchaseOrderID: po.ID,
-		ReceivedBy:      userID,
-		ReceivedDate:    time.Now(),
-		Notes:           req.Notes,
+		ComplianceEvaluation: decision,
+		ID:                   uuid.New(),
+		GRNumber:             "GR-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:8],
+		IdempotencyKey:       idempotencyKey,
+		PurchaseOrderID:      po.ID,
+		ReceivedBy:           userID,
+		ReceivedDate:         time.Now(),
+		Notes:                req.Notes,
 	}
 	inboundValue, fullyReceived, err := reconcileReceiptItems(gr, req.Items, poItems, receivedQuantities)
 	if err != nil {
@@ -310,6 +262,9 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 
 	startInsert := time.Now()
 	if err := s.repo.CreateGoodsReceipt(ctx, tx, gr); err != nil {
+		return nil, err
+	}
+	if err := s.repo.recordComplianceDecision(ctx, tx, "GR", gr.ID, decision); err != nil {
 		return nil, err
 	}
 	slog.InfoContext(ctx, "gr_and_stock_update_completed", slog.Duration("duration_stock_increment_ms", time.Since(startInsert)))
@@ -473,23 +428,12 @@ func (s *Service) RegisterCertificate(ctx context.Context, conn *pgxpool.Conn, s
 		return nil, err
 	}
 
-	// Calculate dynamic status
-	now := time.Now()
-	switch {
-	case validFrom.After(now):
-		cert.ComputedStatus = "NOT_YET_VALID"
-	case expiryDate.Before(now):
-		cert.ComputedStatus = "EXPIRED"
-	case expiryDate.Before(now.AddDate(0, 0, 30)):
-		cert.ComputedStatus = "EXPIRING_SOON"
-	default:
-		cert.ComputedStatus = "VALID"
-	}
+	cert.ComputedStatus = certificateStatus(cert, s.now())
 
 	return cert, nil
 }
 
-// RevokeCertificate marks an existing certificate expired
+// RevokeCertificate revokes a certificate without rewriting its validity dates.
 func (s *Service) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, certID uuid.UUID) error {
 	return s.repo.RevokeCertificate(ctx, conn, certID)
 }

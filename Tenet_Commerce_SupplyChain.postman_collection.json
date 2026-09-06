@@ -493,7 +493,16 @@
                                     "var jsonData = pm.response.json();",
                                     "if(jsonData.data && jsonData.data.id) {",
                                     "    pm.collectionVariables.set(\"ds_po_id\", jsonData.data.id);",
-                                    "}"
+                                    "}",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
+                                    "});"
                                 ],
                                 "type": "text/javascript"
                             }
@@ -533,7 +542,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
                     "response": []
                 },
@@ -573,9 +583,29 @@
                                 "supply-chain",
                                 "goods-receipts"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
-                    "response": []
+                    "response": [],
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
                 }
             ]
         },
@@ -640,6 +670,15 @@
                                 "exec": [
                                     "pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
                                     "    pm.response.to.have.status(422);",
+                                    "});",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
                                     "});"
                                 ],
                                 "type": "text/javascript"
@@ -680,7 +719,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
                     "response": []
                 },
@@ -745,6 +785,15 @@
                                 "exec": [
                                     "pm.test(\"Status code is 201 Created\", function () {",
                                     "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
                                     "});"
                                 ],
                                 "type": "text/javascript"
@@ -785,7 +834,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
                     "response": []
                 },
@@ -850,6 +900,15 @@
                                 "exec": [
                                     "pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
                                     "    pm.response.to.have.status(422);",
+                                    "});",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
                                     "});"
                                 ],
                                 "type": "text/javascript"
@@ -890,7 +949,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     }
                 }
             ]
@@ -1116,7 +1176,8 @@
                                     "value": "{{ab_cert_id}}"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Records revoked_at once under a certificate row lock; preserves valid_from and expiry_date. No body required. Subsequent certificate reads report REVOKED. A concurrent strict receipt either commits first with its historical compliance_evaluation, or fails 422 COMPLIANCE_ERROR after revocation."
                     },
                     "response": []
                 },
@@ -1185,7 +1246,8 @@
                                     "value": "{{ab_po_id}}"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Includes the original immutable compliance_evaluation for documents created after the certificate-validity upgrade. Older documents omit it; it is not recalculated from current certificate status."
                     },
                     "response": []
                 },
@@ -1284,7 +1346,8 @@
                                     "value": "{{ab_gr_id}}"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Includes the original immutable compliance_evaluation for documents created after the certificate-validity upgrade. Older documents omit it; it is not recalculated from current certificate status."
                     },
                     "response": []
                 },

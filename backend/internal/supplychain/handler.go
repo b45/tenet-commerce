@@ -129,7 +129,7 @@ func (h *Handler) CreatePurchaseOrder(c *gin.Context) {
 			response.AbortBadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
 			return
 		}
-		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) {
+		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) || errors.Is(err, ErrSupplierInactive) {
 			log.Warn("Purchase order creation hard-blocked by Halal compliance engine", "supplier_id", req.SupplierID, "error", err)
 			response.UnprocessableEntity(c, "COMPLIANCE_ERROR", err.Error())
 			c.Abort()
@@ -194,7 +194,7 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 			c.Abort()
 			return
 		}
-		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) {
+		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) || errors.Is(err, ErrSupplierInactive) {
 			log.Warn("Goods receipt creation hard-blocked by Halal compliance engine", "po_id", req.PurchaseOrderID, "error", err)
 			response.UnprocessableEntity(c, "COMPLIANCE_ERROR", err.Error())
 			c.Abort()

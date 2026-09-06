@@ -607,6 +607,49 @@ Password for all seeded dev accounts: `Password123!`
 
 ## 4. Compliance-Aware Supply Chain Management
 
+PO and GR compliance uses policy `UTC_DATE_INCLUSIVE_V1`: `valid_from` and
+`expiry_date` include the entire specified UTC calendar day. The server samples
+time after acquiring the relevant locks; request/browser dates cannot override it.
+Strict mode requires an active supplier, its own unrevoked certificate, a
+nonempty scope, an allowed `cert_type` from `required_compliance`, and current
+validity. `EXPIRING_SOON` does not bypass type validation. Scope is descriptive
+free text; this API does not infer product-level coverage from that text.
+
+Missing configuration preserves non-strict behavior. Non-strict invalid/missing
+certificates produce a recorded `WARNING`; inactive suppliers and explicit
+missing/wrong-supplier certificate references are rejected in either mode.
+Strict failures return HTTP 422 `COMPLIANCE_ERROR` and commit no PO/GR, inventory,
+journal, or compliance decision. Required types must be configured in strict mode.
+
+Successful PO/GR creation and their detail endpoints include
+`compliance_evaluation`: `policy`, `evaluated_at` (UTC timestamp), `strict`,
+`supplier_id`, `required_types`, `outcome` (`ACCEPTED` or `WARNING`), optional
+`reason`, and optional `certificate` snapshot. The immutable decision is committed
+with the document. Historical documents omit this field; they are not backfilled.
+Replay retains the original decision, while each new receipt evaluates again.
+Manager dashboard compliance alerts also include revoked certificates, with
+`status: "REVOKED"`; the existing `expired_certificates_count` includes these
+invalid certificates. `days_remaining` still describes the original expiry date.
+
+Lock order is PO (receipts only), tenant configuration table (`SHARE`), supplier,
+certificate, then inventory. The configuration table lock also protects an absent
+configuration row from concurrent insertion. Configuration writers must acquire
+their table/write lock before supplier/certificate locks. Revocation locks only
+the certificate: if it wins, strict receipt fails; if receipt wins, its recorded
+decision remains valid historical evidence after revocation commits. Configuration
+writes contend with active procurement decisions; this favors correctness over
+configuration-update throughput.
+
+**Deployment:** apply `scripts/06_certificate_validity.sql` with `psql -v
+ON_ERROR_STOP=1 -f scripts/06_certificate_validity.sql` before deploying this
+backend. The re-runnable transaction upgrades active schemas from the trusted
+tenant registry; upgrade inactive schemas before reactivation. It adds nullable
+`revoked_at` and immutable `compliance_decisions`, without altering historical
+validity dates. Legacy revocations that rewrote expiry remain expired; no original
+date is reconstructed. The canonical development initialization includes the
+same upgrade. An old backend must not be restored after new revocations because
+it does not check `revoked_at`; retain the schema and roll forward instead.
+
 ### 4.1 Register Supplier (with Optional Compliance Certificate)
 - **Endpoint:** `POST /api/v1/supply-chain/suppliers`
 - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
@@ -654,8 +697,8 @@ Password for all seeded dev accounts: `Password123!`
 {
   "success": false,
   "error": {
-    "code": "COMPLIANCE_CERT_EXPIRED",
-    "message": "Compliance certificate has expired"
+    "code": "COMPLIANCE_ERROR",
+    "message": "compliance certificate is expired"
   }
 }
 ```
@@ -664,8 +707,8 @@ Password for all seeded dev accounts: `Password123!`
 {
   "success": false,
   "error": {
-    "code": "COMPLIANCE_CERT_REQUIRED",
-    "message": "Compliance certificate is required for this tenant"
+    "code": "COMPLIANCE_ERROR",
+    "message": "compliance certificate is required under strict mode"
   }
 }
 ```
@@ -783,7 +826,7 @@ Password for all seeded dev accounts: `Password123!`
 - **Endpoint:** `PUT /api/v1/supply-chain/certificates/:id/revoke`
 - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
-- **Response (200 OK):** Immediately marks certificate expired (`{"success": true, "data": {"revoked": true}}`).
+- **Response (200 OK):** Records `revoked_at` once, preserving original validity dates (`{"success": true, "data": {"revoked": true}}`). Certificate reads report `computed_status: "REVOKED"` and `revoked_at`; other statuses are `NOT_YET_VALID`, `VALID`, `EXPIRING_SOON`, and `EXPIRED`. No request body is required.
 
 ### 4.10 List Purchase Orders
 - **Endpoint:** `GET /api/v1/supply-chain/purchase-orders`
