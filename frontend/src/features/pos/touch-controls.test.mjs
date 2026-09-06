@@ -8,7 +8,7 @@ import * as money from "../../lib/money.ts";
 
 const require = createRequire(import.meta.url);
 // Execute production component/event-handler code; no DOM, browser or visual claims.
-function load(path, react = require("react"), globals = {}) {
+function load(path, react = require("react"), globals = {}, i18n) {
   const output = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
   }).outputText;
@@ -21,7 +21,7 @@ function load(path, react = require("react"), globals = {}) {
       if (name === "react/jsx-runtime" || name === "lucide-react") return require(name);
       if (name === "@/lib/money") return money;
       if (name === "@/lib/utils") return { cn: (...args) => args.filter(Boolean).join(" ") };
-      if (name === "@/lib/i18n") return { useTranslation: () => ({ t: (key, values) => `${key} ${values?.name ?? ""}`.trim() }) };
+      if (name === "@/lib/i18n") return i18n ?? { useTranslation: () => ({ t: (key, values) => `${key} ${values?.name ?? ""}`.trim() }) };
       if (name === "@/components/ui/button") return { Button: "button" };
       if (name === "@/components/ui/badge") return { Badge: "span" };
       if (name === "@/components/ui/modal") return { Modal: "dialog" };
@@ -38,6 +38,51 @@ function nodes(tree) {
   return [tree, ...nodes(tree.props?.children)];
 }
 const product = { sku: "SKU-12345678901234567890", name: "Long product name ".repeat(10), unit_price: 123456789, stock_quantity: 2 };
+
+test("language selector uses a single named native touch control for every locale", () => {
+  const locales = {
+    id: { nativeName: "Bahasa Indonesia", direction: "ltr" },
+    en: { nativeName: "English", direction: "ltr" },
+    ar: { nativeName: "العربية", direction: "rtl" },
+  };
+  for (const locale of Object.keys(locales)) {
+    const changes = [];
+    const { LanguageSelector } = load("../../components/ui/language-selector.tsx", require("react"), {}, {
+      LOCALES: locales,
+      useTranslation: () => ({ locale, setLocale: value => changes.push(value), t: key => key }),
+    });
+    const tree = LanguageSelector({});
+    assert.equal(tree.type, "select");
+    assert.equal(tree.props["aria-label"], "nav.language");
+    assert.equal(tree.props.value, locale);
+    assert.match(tree.props.className, /h-11/);
+    assert.match(tree.props.className, /w-20/);
+    assert.match(tree.props.className, /min-w-0/);
+    const options = nodes(tree).filter(node => node.type === "option");
+    assert.equal(options.length, 3);
+    for (const option of options) {
+      assert.equal(option.props.lang, option.props.value);
+      assert.equal(option.props.dir, "ltr");
+      assert.equal(option.props.children, option.props.value.toUpperCase());
+      assert.equal(option.props["aria-label"], locales[option.props.value].nativeName);
+      tree.props.onChange({ target: { value: option.props.value } });
+    }
+    tree.props.onChange({ target: { value: "unsupported" } });
+    assert.deepEqual(changes, ["id", "en", "ar"]);
+  }
+});
+
+test("language placement keeps login in document flow and header height content-driven", () => {
+  // Source layout contract only, not rendered viewport or native-menu verification.
+  const login = readFileSync(new URL("../../app/(auth)/login/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(login, /absolute top-4 right-4/);
+  assert.match(login, /flex justify-end px-4 pt-4/);
+  const header = readFileSync(new URL("../../components/layout/header.tsx", import.meta.url), "utf8");
+  assert.match(header, /grid-cols-\[minmax\(0,1fr\)_auto\]/);
+  assert.doesNotMatch(header, /min-\[480px\]:w-64/);
+  assert.doesNotMatch(header, /flex h-14/);
+  assert.doesNotMatch(header, /variant="segmented"/);
+});
 
 test("product has one native add control, no nested button, full name and disabled guard", () => {
   const { ProductCard } = load("./components/product-card.tsx");

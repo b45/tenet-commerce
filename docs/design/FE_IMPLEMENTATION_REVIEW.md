@@ -8,6 +8,21 @@ Rujukan: [pedoman FE](../FRONTEND_GUIDELINES.md), [Phase 3](../FRONTEND_PHASE3_D
 
 ## Tindak lanjut implementasi: FE-S1, bagian pertama
 
+### Pembaruan 2026-09-06 — pemilih bahasa login dan header
+
+Revisi preferensi pengguna: selector berikut diperkecil menjadi native dropdown kode `ID / EN / AR`, lebar 80px dan area sentuh 44px, tanpa border/background dominan. Nama bahasa asli tetap menjadi accessible label pada opsi; kode Latin berarah LTR. Header kembali satu baris dengan kolom identitas fleksibel dan kontrol ringkas, bukan baris khusus bahasa. Nama tenant panjang memakai ellipsis dengan teks lengkap tetap di DOM/title (identitas ini bukan data transaksi); login tetap document flow agar tidak overlap logo. Revisi ini menggantikan ukuran 48px, nama opsi panjang, dan header dua baris yang dijelaskan sebagai iterasi sebelumnya di bawah. Tidak mengubah locale provider atau fitur bisnis.
+
+Menindaklanjuti laporan pengguna bahwa menu bahasa bertumpuk, source baseline `b48a8e8` menunjukkan selector login absolut di sudut kartu serta header satu baris dengan tinggi tetap dan segmented selector. Ini menggantikan deskripsi historis header di bawah apabila berbeda dari source baseline tersebut.
+
+- Login: selector berada dalam document flow pada baris tersendiri sebelum logo, bukan overlay absolut. Header kartu mendapat jarak terpisah.
+- Shared selector: satu native select dengan accessible name terjemahan, nama bahasa asli, arah opsi AR, font 16px dan target 48px. Varian compact/segmented yang tidak lagi digunakan dihapus; locale di luar registry tidak diteruskan ke setter. Provider/persistence locale tidak berubah.
+- Header: tinggi mengikuti konten; di bawah 480px identitas dan baris bahasa/logout terpisah, mulai 480px memakai dua kolom dengan identitas yang dapat membungkus. Menu/logout mempunyai target 48px. Role tetap tersedia di sidebar. Badge koneksi statis dan fallback nama tenant fiktif dihapus; tidak menambah pemeriksaan koneksi atau mengubah auth.
+- Dua tes tambahan memeriksa handler selector ID/EN/AR serta kontrak struktur layout login/header. Tes ini bukan pengukuran layout browser. Acceptance manual: 320/390/480/768px, tenant panjang, ID/EN/AR, keyboard dan zoom 200%; pastikan selector tidak menutup logo/identitas dan fokus tetap terlihat.
+
+Verifikasi: 46 tes, FE lint/build pada salinan sementara, serta backend build/vet/race-short lulus (exit 0). Kesalahan path relatif pada tes baru di run awal diperbaiki sebelum run final; tidak ada tes dihapus atau dilewati. Tidak menjalankan browser otomatis atau mengganggu dev server.
+
+Implementasi SaaS tetap ditunda. Perubahan ini merupakan patch lanjutan lokal, bukan bagian dari commit FE-R3 `b48a8e8`.
+
 ### Status terbaru 2026-09-06 — FE-R3 dialog dan receipt
 
 Baseline kini `dfaefe1` (develop), termasuk merge shell/touch serta inventory. Catatan R1/R2 sebelumnya adalah riwayat, bukan pernyataan bahwa perubahan tersebut masih uncommitted. Patch dialog ini berada pada branch lokal `fix/52-pos-dialog-responsive`; belum commit/remote write.
