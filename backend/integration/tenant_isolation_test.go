@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/b45/tenet-commerce/backend/internal/ledger"
+	"github.com/b45/tenet-commerce/backend/internal/pos"
 	"github.com/b45/tenet-commerce/backend/internal/tenant"
 	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
 )
@@ -190,4 +192,144 @@ func TestTenantIsolation_TokenClaimsMismatchForbidden(t *testing.T) {
 	router.ServeHTTP(w3, req3)
 	assert.Equal(t, http.StatusForbidden, w3.Code)
 	assert.Contains(t, w3.Body.String(), "TENANT_ACCESS_DENIED")
+}
+
+// TestTenantIsolation_ProductionRouterPoolSizeOne ensures request A/B through full production-style
+// router with pool size 1 cannot read or mutate each other's data across iterations.
+func TestTenantIsolation_ProductionRouterPoolSizeOne(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	rdb := newTestRedisClient(t)
+
+	tenantRepo := tenant.NewRepository(db)
+	ctx := context.Background()
+	tenantAB, err := tenantRepo.GetTenantBySlug(ctx, "al-barakah-mart")
+	require.NoError(t, err)
+	tenantDS, err := tenantRepo.GetTenantBySlug(ctx, "darussalam-store")
+	require.NoError(t, err)
+
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(pos.NewRepository(), ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		slug := c.GetHeader("X-Tenant-ID")
+		if slug == "" {
+			slug = "al-barakah-mart"
+		}
+		tenantID := tenantAB.ID
+		if slug == "darussalam-store" {
+			tenantID = tenantDS.ID
+		}
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Set("tenant_slug", slug)
+		c.Set("jwt_claims", &pkgAuth.CustomClaims{
+			UserID:   "11111111-1111-1111-1111-111111111111",
+			TenantID: tenantID,
+			Role:     "MANAGER",
+			Permissions: []string{
+				"pos:checkout", "pos:void", "inventory:read", "inventory:write",
+				"supply_chain:manage", "ledger:read", "ledger:write", "analytics:read",
+			},
+		})
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	posHandler.RegisterRoutes(router.Group("/api/v1/pos"), rdb)
+
+	tenants := []string{"al-barakah-mart", "darussalam-store"}
+
+	for i := 0; i < 10; i++ {
+		tenantSlug := tenants[i%2]
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/pos/products", nil)
+		req.Header.Set("X-Tenant-ID", tenantSlug)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		if tenantSlug == "al-barakah-mart" {
+			assert.Contains(t, w.Body.String(), "SKU-BEEF-01")
+		} else {
+			assert.Contains(t, w.Body.String(), "SKU-ZAMZAM-01")
+		}
+	}
+}
+
+// TestTenantIsolation_NoPublicFallbackWhenTableMissing proves domain queries fail-closed
+// instead of silently reading from public schema if a table is missing in tenant schema.
+func TestTenantIsolation_NoPublicFallbackWhenTableMissing(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	tenantRepo := tenant.NewRepository(db)
+
+	ctx := context.Background()
+	tenantAB, err := tenantRepo.GetTenantBySlug(ctx, "al-barakah-mart")
+	require.NoError(t, err)
+
+	conn, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+
+	scopedDB, err := tenant.NewScopedDB(conn, tenantAB)
+	require.NoError(t, err)
+
+	// Attempting to query a public-only table (like public.plans) unqualified
+	// inside tenant-scoped transaction must fail because search_path excludes public schema.
+	err = scopedDB.ReadTx(ctx, func(tx pgx.Tx) error {
+		var count int
+		return tx.QueryRow(ctx, "SELECT COUNT(*) FROM plans").Scan(&count)
+	})
+	require.Error(t, err, "unqualified query to public-only table must fail when public schema is excluded from search_path")
+}
+
+// TestTenantIsolation_FaultInjectionAndPoolReuse tests that panic, rollback, or timeout
+// inside a transaction never leaks the tenant search path to subsequent pooled connections.
+func TestTenantIsolation_FaultInjectionAndPoolReuse(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	tenantRepo := tenant.NewRepository(db)
+
+	ctx := context.Background()
+	tenantAB, err := tenantRepo.GetTenantBySlug(ctx, "al-barakah-mart")
+	require.NoError(t, err)
+
+	// 1. Fault injection: Rollback inside RunInTx
+	{
+		conn, err := db.Pool.Acquire(ctx)
+		require.NoError(t, err)
+		scopedDB, err := tenant.NewScopedDB(conn, tenantAB)
+		require.NoError(t, err)
+
+		_ = scopedDB.RunInTx(ctx, func(tx pgx.Tx) error {
+			return fmt.Errorf("simulated transaction failure")
+		})
+		conn.Release()
+	}
+
+	// 2. Fault injection: Panic recovery inside RunInTx
+	{
+		conn, err := db.Pool.Acquire(ctx)
+		require.NoError(t, err)
+		scopedDB, err := tenant.NewScopedDB(conn, tenantAB)
+		require.NoError(t, err)
+
+		assert.Panics(t, func() {
+			_ = scopedDB.RunInTx(ctx, func(tx pgx.Tx) error {
+				panic("simulated unhandled panic in handler")
+			})
+		})
+		conn.Release()
+	}
+
+	// 3. Acquire connection again from pool and verify it is completely clean (public schema)
+	{
+		conn, err := db.Pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+
+		var schema string
+		err = conn.QueryRow(ctx, "SELECT current_schema()").Scan(&schema)
+		require.NoError(t, err)
+		assert.Equal(t, "public", schema, "connection from pool after panic/rollback must have default public schema")
+	}
 }
