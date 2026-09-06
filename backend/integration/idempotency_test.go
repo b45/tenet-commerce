@@ -35,7 +35,7 @@ func setupPOSTestRouterWithIdempotency(t *testing.T, db *database.PostgresDB) (*
 		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
 		c.Set("tenant_slug", "al-barakah-mart")
 		c.Set("jwt_claims", &pkgAuth.CustomClaims{
-			Permissions: []string{"pos:checkout", "pos:read", "pos:void"},
+			Permissions: []string{"pos:checkout", "pos:read", "pos:void", "inventory:read", "inventory:write"},
 		})
 		c.Next()
 	})
@@ -425,4 +425,105 @@ func TestIdempotency_PostCommitCrashRecoveryAndSingleStockJournalEffect(t *testi
 	assert.Equal(t, 1, journalCount, "must still have exactly 1 journal entry (no duplicate accounting effects)")
 
 	_ = rdb // clean up references
+}
+
+func TestIdempotency_MasterDataMutationsProtectedFromRetry(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router, _ := setupPOSTestRouterWithIdempotency(t, db)
+
+	// 1. Missing Idempotency-Key rejected on product creation
+	productReq := pos.CreateProductRequest{
+		Name:         "Kopi Arabika Aceh Gayo 250g",
+		SKU:          fmt.Sprintf("SKU-COF-%d", time.Now().UnixNano()),
+		UnitPrice:    85000,
+		CostPrice:    50000,
+		InitialStock: 25,
+	}
+	bodyNoKey, _ := json.Marshal(productReq)
+	reqNoKey := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyNoKey))
+	reqNoKey.Header.Set("Content-Type", "application/json")
+	wNoKey := httptest.NewRecorder()
+	router.ServeHTTP(wNoKey, reqNoKey)
+	assert.Equal(t, http.StatusBadRequest, wNoKey.Code)
+	assert.Contains(t, wNoKey.Body.String(), "MISSING_IDEMPOTENCY_KEY")
+
+	// 2. Product creation with Idempotency-Key succeeds
+	idempotencyKey := fmt.Sprintf("idem-prod-%d", time.Now().UnixNano())
+	reqValid := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyNoKey))
+	reqValid.Header.Set("Content-Type", "application/json")
+	reqValid.Header.Set("Idempotency-Key", idempotencyKey)
+	wValid := httptest.NewRecorder()
+	router.ServeHTTP(wValid, reqValid)
+	require.Equal(t, http.StatusCreated, wValid.Code)
+
+	var createdResp struct {
+		Success bool        `json:"success"`
+		Data    pos.Product `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(wValid.Body.Bytes(), &createdResp))
+	assert.Equal(t, productReq.Name, createdResp.Data.Name)
+	assert.Equal(t, productReq.SKU, createdResp.Data.SKU)
+	productID := createdResp.Data.ID
+
+	// 3. Replay with identical key returns cached response without duplicate insertion
+	reqReplay := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyNoKey))
+	reqReplay.Header.Set("Content-Type", "application/json")
+	reqReplay.Header.Set("Idempotency-Key", idempotencyKey)
+	wReplay := httptest.NewRecorder()
+	router.ServeHTTP(wReplay, reqReplay)
+	assert.Equal(t, http.StatusCreated, wReplay.Code)
+	assert.Equal(t, "true", wReplay.Header().Get("Idempotent-Replayed"))
+	assert.Equal(t, wValid.Body.String(), wReplay.Body.String())
+
+	// 4. Replay with different payload returns 409 Conflict
+	conflictReq := productReq
+	conflictReq.Name = "Different Product Name"
+	bodyConflict, _ := json.Marshal(conflictReq)
+	reqConflict := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyConflict))
+	reqConflict.Header.Set("Content-Type", "application/json")
+	reqConflict.Header.Set("Idempotency-Key", idempotencyKey)
+	wConflict := httptest.NewRecorder()
+	router.ServeHTTP(wConflict, reqConflict)
+	assert.Equal(t, http.StatusConflict, wConflict.Code)
+
+	// 5. Update product with Idempotency-Key
+	updKey := fmt.Sprintf("idem-prod-upd-%d", time.Now().UnixNano())
+	newPrice := 90000.0
+	updReqData := pos.UpdateProductRequest{
+		Name:      "Kopi Arabika Aceh Gayo Premium 250g",
+		UnitPrice: newPrice,
+		CostPrice: 50000,
+	}
+	bodyUpd, _ := json.Marshal(updReqData)
+	reqUpd := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/pos/products/%s", productID), bytes.NewReader(bodyUpd))
+	reqUpd.Header.Set("Content-Type", "application/json")
+	reqUpd.Header.Set("Idempotency-Key", updKey)
+	wUpd := httptest.NewRecorder()
+	router.ServeHTTP(wUpd, reqUpd)
+	require.Equal(t, http.StatusOK, wUpd.Code)
+
+	// Replay update returns identical response
+	reqUpdReplay := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/pos/products/%s", productID), bytes.NewReader(bodyUpd))
+	reqUpdReplay.Header.Set("Content-Type", "application/json")
+	reqUpdReplay.Header.Set("Idempotency-Key", updKey)
+	wUpdReplay := httptest.NewRecorder()
+	router.ServeHTTP(wUpdReplay, reqUpdReplay)
+	assert.Equal(t, http.StatusOK, wUpdReplay.Code)
+	assert.Equal(t, "true", wUpdReplay.Header().Get("Idempotent-Replayed"))
+
+	// 6. Delete product with Idempotency-Key
+	delKey := fmt.Sprintf("idem-prod-del-%d", time.Now().UnixNano())
+	reqDel := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/pos/products/%s", productID), nil)
+	reqDel.Header.Set("Idempotency-Key", delKey)
+	wDel := httptest.NewRecorder()
+	router.ServeHTTP(wDel, reqDel)
+	require.Equal(t, http.StatusOK, wDel.Code)
+
+	// Replay delete returns identical response
+	reqDelReplay := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/pos/products/%s", productID), nil)
+	reqDelReplay.Header.Set("Idempotency-Key", delKey)
+	wDelReplay := httptest.NewRecorder()
+	router.ServeHTTP(wDelReplay, reqDelReplay)
+	assert.Equal(t, http.StatusOK, wDelReplay.Code)
+	assert.Equal(t, "true", wDelReplay.Header().Get("Idempotent-Replayed"))
 }

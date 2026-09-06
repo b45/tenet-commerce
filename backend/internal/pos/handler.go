@@ -45,14 +45,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.POST("/products",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.CreateProduct,
 	)
 	rg.PUT("/products/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.UpdateProduct,
 	)
 	rg.DELETE("/products/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.DeleteProduct,
 	)
 
@@ -67,14 +70,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.POST("/categories",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.CreateCategory,
 	)
 	rg.PUT("/categories/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.UpdateCategory,
 	)
 	rg.DELETE("/categories/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.DeleteCategory,
 	)
 
@@ -124,6 +130,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.PUT("/qris",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.UpdateQRISConfig,
 	)
 }

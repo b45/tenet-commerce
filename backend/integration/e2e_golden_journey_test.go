@@ -124,6 +124,7 @@ func TestE2E_FullCommerceLifecycle_GoldenJourney(t *testing.T) {
 	suppBody, _ := json.Marshal(supplierPayload)
 	suppReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(suppBody))
 	suppReq.Header.Set("Content-Type", "application/json")
+	suppReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-supp-gj-%d", now.UnixNano()))
 	suppW := httptest.NewRecorder()
 	router.ServeHTTP(suppW, suppReq)
 	require.Equal(t, http.StatusCreated, suppW.Code)

@@ -32,13 +32,25 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 		// Suppliers
 		rg.GET("/suppliers", h.ListSuppliers)
 		rg.GET("/suppliers/:id", h.GetSupplier)
-		rg.POST("/suppliers", h.CreateSupplier)
-		rg.PUT("/suppliers/:id", h.UpdateSupplier)
+		rg.POST("/suppliers",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.CreateSupplier,
+		)
+		rg.PUT("/suppliers/:id",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.UpdateSupplier,
+		)
 
 		// Certificates
 		rg.GET("/suppliers/:id/certificates", h.GetSupplierCertificates)
-		rg.POST("/suppliers/:id/certificates", h.RegisterCertificate)
-		rg.PUT("/certificates/:id/revoke", h.RevokeCertificate)
+		rg.POST("/suppliers/:id/certificates",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.RegisterCertificate,
+		)
+		rg.PUT("/certificates/:id/revoke",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.RevokeCertificate,
+		)
 
 		// Purchase Orders
 		rg.GET("/purchase-orders", h.ListPurchaseOrders)
@@ -47,7 +59,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 			h.CreatePurchaseOrder,
 		)
-		rg.PUT("/purchase-orders/:id/cancel", h.CancelPurchaseOrder)
+		rg.PUT("/purchase-orders/:id/cancel",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.CancelPurchaseOrder,
+		)
 
 		// Goods Receipts
 		rg.GET("/goods-receipts", h.ListGoodsReceipts)

@@ -46,8 +46,8 @@ func DurableIdempotencyMiddleware(redisClient *pkgRedis.Client, defaultTTL time.
 	}
 
 	return func(c *gin.Context) {
-		// Only check on state-mutating methods
-		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPut && c.Request.Method != http.MethodPatch {
+		// Only check on state-mutating methods (POST, PUT, PATCH, DELETE)
+		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPut && c.Request.Method != http.MethodPatch && c.Request.Method != http.MethodDelete {
 			c.Next()
 			return
 		}
