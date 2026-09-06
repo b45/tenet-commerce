@@ -13,7 +13,11 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import type { Order, OrderDetailResponse } from "../types";
 
-export function OrderHistory() {
+export interface OrderHistoryProps {
+  hideTitle?: boolean;
+}
+
+export function OrderHistory({ hideTitle = false }: OrderHistoryProps = {}) {
   const { t } = useTranslation();
   const [orders, setOrders] = React.useState<Order[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
@@ -113,16 +117,17 @@ export function OrderHistory() {
   return (
     <div className="space-y-4">
       {/* Header controls */}
-      {/* Header controls */}
-      <div className="flex items-center justify-between gap-4 pb-1">
-        <div>
-          <h3 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)]">
-            {t("history.title")}
-          </h3>
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            {t("history.subtitle")}
-          </p>
-        </div>
+      <div className={cn("flex items-center gap-4 pb-1", hideTitle ? "justify-end" : "justify-between")}>
+        {!hideTitle && (
+          <div>
+            <h3 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)]">
+              {t("history.title")}
+            </h3>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              {t("history.subtitle")}
+            </p>
+          </div>
+        )}
 
         <button
           type="button"
