@@ -59,6 +59,8 @@ Contoh tetap 2 susu + 1 roti, total Rp40.000, tender Rp50.000, kembali Rp10.000 
 
 ## Unknown, cetak dan bantuan
 
+Pembaruan implementasi 2026-09-06: pembayaran/receipt kini memakai native dialog dengan tinggi dinamis dan satu area scroll. Receipt menampilkan kembalian serta tindakan utama sebelum detail item yang dapat dibuka. Dialog pending/unknown tidak dismissible, dan tender tidak autofocus. Print CSS menyembunyikan overlay dialog; dukungan focus, keyboard/perangkat, dan printer masih menunggu acceptance manual, bukan dianggap lulus oleh build. Rincian: [review implementasi FE-R3](../FE_IMPLEMENTATION_REVIEW.md).
+
 Layar unknown HP tidak mempunyai tombol “Bayar ulang”, “Transaksi berhasil”, nomor transaksi palsu, kembalian final atau “Periksa status” berbasis endpoint rekaan. Tombol **Detail bantuan** membuka disclosure lokal berisi waktu attempt, pemilik/tenant, reference command dan status terakhir; bukan mengirim pesan eksternal atau mengakses endpoint baru. Jangan menampilkan token, SQL atau stack trace. Reference teknis hanya dibuka oleh sesi pemilik sesuai kebijakan recovery; detail UI bukan pengganti G-02/G-05.
 
 Kesetaraan perilaku berlaku pada laptop/tablet: ubah susunan informasi, bukan makna status. “Data pemulihan dipertahankan” hanya ditampilkan runtime bila penyimpanan benar-benar berhasil.

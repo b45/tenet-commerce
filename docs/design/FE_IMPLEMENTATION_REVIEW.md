@@ -8,6 +8,23 @@ Rujukan: [pedoman FE](../FRONTEND_GUIDELINES.md), [Phase 3](../FRONTEND_PHASE3_D
 
 ## Tindak lanjut implementasi: FE-S1, bagian pertama
 
+### Status terbaru 2026-09-06 — FE-R3 dialog dan receipt
+
+Baseline kini `dfaefe1` (develop), termasuk merge shell/touch serta inventory. Catatan R1/R2 sebelumnya adalah riwayat, bukan pernyataan bahwa perubahan tersebut masih uncommitted. Patch dialog ini berada pada branch lokal `fix/52-pos-dialog-responsive`; belum commit/remote write.
+
+- Primitive Modal memakai native `<dialog>`: nama/deskripsi terhubung, modal background inert dan focus containment/restoration mengikuti browser. Saat dibuka, scroll dialog kembali ke awal dan fokus menuju heading, bukan input. Tinggi dibatasi ruang `100dvh` dan isi memakai satu scroll dialog, bukan panel receipt 55vh yang bersarang. Consumer history turut memakai primitive ini dan perlu regression review manual.
+- Dismissal dikontrol prop `dismissible`; pending/unknown tidak dapat ditutup dengan Escape, backdrop, atau tombol X. Klik di dalam area dialog/scrollbar tidak dianggap klik backdrop. Guard controller pembayaran sebelumnya tetap dipertahankan; tidak menambahkan retry atau key baru.
+- Tender tidak autofocus dan menggunakan tinggi input yang benar-benar tersedia, logical spacing RTL, preset/aksi setidaknya 48px, serta aksi bertumpuk pada layar sempit. Label peringatan/bantuan baru lengkap ID/EN/AR. Pesan error yang berasal dari controller masih mengikuti implementasi FE-S1; patch ini bukan audit seluruh lokalisasi error domain.
+- Receipt menempatkan status server, nomor transaksi, total dan kembalian sebelum tombol cetak/transaksi baru. Detail 20+ item menjadi disclosure yang dapat dibuka; nama/SKU/angka wrap. Semua jalur penutupan receipt tetap memakai lifecycle confirmed yang mengosongkan cart berbayar. Print CSS menyembunyikan dialog/backdrop agar tidak menutupi struktur thermal; hasil printer belum diverifikasi.
+
+Finalisasi source FE-R3: label preset nominal khusus ID/EN/AR menggantikan label Filter; petunjuk shortcut `(Enter)` dihapus karena tidak ada global Enter handler untuk pembayaran. Deskripsi/error panjang dapat membungkus, bantuan unknown memakai warna semantic warning, dan disclosure referensi memakai target 48px. Tidak menambahkan shortcut pembayaran atau mengubah controller/domain transaksi.
+
+Verifikasi terbaru: 44 tes lulus (termasuk inventory existing, dismissal modal/urutan receipt, effect setup/cleanup, guard tender pending/unknown, validasi nominal dan print callback tanpa sale baru). Frontend lint/build dan backend build/vet/race-short exit 0; build frontend memakai salinan sementara seperti dijelaskan di bawah. Tes menjalankan source/event handler/effect dengan adapter terbatas tanpa browser/DOM; tidak membuktikan interaksi native dialog, keyboard virtual, hasil print atau layout perangkat.
+
+Build sebelumnya pada workspace gagal membaca chunk `.next` ketika dev server aktif. Verifikasi final dilakukan pada salinan frontend sementara dengan dependency existing, tanpa `.env*`, tanpa mengubah konfigurasi repo atau menghentikan dev server. Build salinan berhasil; ini mendukung dugaan benturan output/cache, bukan bukti forensik penyebab tunggal. Environment produksi dan E2E tetap belum diuji.
+
+Acceptance manual FE-R3: buka/tutup dialog history dan pembayaran dengan keyboard; pastikan fokus kembali ke pemicu/logical destination; lihat dialog pada 320/390px, landscape dan zoom; isi nominal dengan keyboard layar tanpa autofocus/auto-pay; periksa unknown tidak membuka pembayaran pengganti; buka 20-item receipt, cetak/batalkan cetak dan pastikan tidak ada sale baru. Recovery setelah keluar route/reload/crash dan kontrak harga tetap release blocker. Tabel history compact dan audit focus menyeluruh masih pekerjaan terpisah.
+
 ### Pembaruan berikutnya: FE-R1 shell/header responsive
 
 Baseline berikutnya adalah `b31225b` di develop: i18n dan sebagian navigasi mobile telah digabung sebelum patch ini. FE-R1 dikembangkan terpisah di branch lokal `fix/52-responsive-shell-header`; tidak mengubah logika/controller pembayaran.

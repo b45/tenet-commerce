@@ -8,12 +8,13 @@ import * as money from "../../lib/money.ts";
 
 const require = createRequire(import.meta.url);
 // Execute production component/event-handler code; no DOM, browser or visual claims.
-function load(path, react = require("react")) {
+function load(path, react = require("react"), globals = {}) {
   const output = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const target = { exports: {} };
   vm.runInNewContext(output, {
+    ...globals,
     exports: target.exports, module: target,
     require: name => {
       if (name === "react") return react;
@@ -23,6 +24,9 @@ function load(path, react = require("react")) {
       if (name === "@/lib/i18n") return { useTranslation: () => ({ t: (key, values) => `${key} ${values?.name ?? ""}`.trim() }) };
       if (name === "@/components/ui/button") return { Button: "button" };
       if (name === "@/components/ui/badge") return { Badge: "span" };
+      if (name === "@/components/ui/modal") return { Modal: "dialog" };
+      if (name === "@/components/ui/alert") return { Alert: "aside" };
+      if (name === "@/lib/date") return { formatDateTime: value => value };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
@@ -99,4 +103,140 @@ test("production cart updater keeps quantity one; explicit remove still deletes"
   assert.equal(state[0].subtotal, product.unit_price);
   cart.removeItem(product.sku);
   assert.equal(state.length, 0);
+});
+
+test("modal names its content and guards Escape/backdrop when dismissal is locked", () => {
+  const hooks = { useId: () => "test-dialog", useRef: () => ({ current: null }), useEffect() {} };
+  const { Modal } = load("../../components/ui/modal.tsx", hooks);
+  let closed = 0;
+  let prevented = 0;
+  const render = dismissible => Modal({ isOpen: true, onClose: () => closed++, title: "Cash", description: "Review", dismissible, children: "Body" });
+  const locked = render(false);
+  assert.equal(locked.type, "dialog");
+  assert.equal(locked.props["aria-labelledby"], "test-dialog-title");
+  assert.equal(locked.props["aria-describedby"], "test-dialog-description");
+  locked.props.onCancel({ preventDefault: () => prevented++ });
+  assert.equal(prevented, 1);
+  const target = { getBoundingClientRect: () => ({ left: 10, top: 10, right: 100, bottom: 100 }) };
+  locked.props.onClick({ target, currentTarget: target, clientX: 0, clientY: 0 });
+  assert.equal(closed, 0);
+  assert.equal(nodes(locked).filter(node => node.type === "button").length, 0);
+  const open = render(true);
+  open.props.onClick({ target, currentTarget: target, clientX: 50, clientY: 50 });
+  assert.equal(closed, 0, "clicks inside dialog/scrollbar area do not dismiss");
+  open.props.onClick({ target, currentTarget: target, clientX: 0, clientY: 0 });
+  assert.equal(closed, 1);
+  open.props.onCancel({ preventDefault() {} });
+  assert.equal(closed, 2);
+});
+
+test("receipt shows confirmed change and actions before long details, without altering receipt", () => {
+  let prints = 0;
+  const { ReceiptModal } = load("./components/receipt-modal.tsx", require("react"), { window: { print: () => prints++ } });
+  const receipt = {
+    transaction_number: "TXN-TEST", total_amount: 10000, change_amount: 5000,
+    subtotal_amount: 10000, tax_amount: 0, cash_tendered: 15000, created_at: "2026-09-06T00:00:00Z",
+    items: Array.from({ length: 20 }, (_, index) => ({ sku: `SKU-${index}`, name: product.name, quantity: 1, unit_price: 500, subtotal: 500 })),
+  };
+  const before = JSON.stringify(receipt);
+  let nextSale = 0;
+  const tree = ReceiptModal({ isOpen: true, onClose() {}, receipt, onNewTransaction: () => nextSale++ });
+  const all = nodes(tree);
+  const changeIndex = all.findIndex(node => node.type === "dt" && node.props.children === "receipt.change");
+  const detailsIndex = all.findIndex(node => node.type === "details");
+  assert.ok(changeIndex >= 0 && changeIndex < detailsIndex);
+  const buttons = all.filter(node => node.type === "button");
+  assert.equal(buttons.length, 2);
+  assert.ok(all.indexOf(buttons[1]) < detailsIndex);
+  buttons[0].props.onClick();
+  assert.equal(prints, 1);
+  assert.equal(nextSale, 0, "printing does not start a new sale");
+  buttons[1].props.onClick();
+  assert.equal(nextSale, 1);
+  assert.equal(JSON.stringify(receipt), before);
+  assert.equal(all.filter(node => node.type === "li").length, 20);
+});
+
+test("modal effect opens, resets scroll, focuses heading and restores body overflow on cleanup", () => {
+  const body = { style: { overflow: "auto" } };
+  const calls = [];
+  const dialog = { scrollTop: 99, showModal: () => calls.push("open"), close: () => calls.push("close") };
+  const heading = { focus: options => { assert.equal(options.preventScroll, true); calls.push("focus"); } };
+  let effect;
+  let refIndex = 0;
+  const hooks = {
+    useId: () => "lifecycle-dialog",
+    useRef: () => ({ current: refIndex++ % 2 === 0 ? dialog : heading }),
+    useEffect: fn => { effect = fn; },
+  };
+  const { Modal } = load("../../components/ui/modal.tsx", hooks, { document: { body } });
+  const render = isOpen => Modal({ isOpen, onClose() {}, title: "Review", children: "Body" });
+  render(false);
+  assert.equal(effect(), undefined);
+  assert.deepEqual(calls, []);
+  render(true);
+  const cleanup = effect();
+  assert.deepEqual(calls, ["open", "focus"]);
+  assert.equal(dialog.scrollTop, 0);
+  assert.equal(body.style.overflow, "hidden");
+  cleanup();
+  assert.equal(body.style.overflow, "auto");
+  // Exercise setup/cleanup again as React development effect replay would do.
+  dialog.scrollTop = 77;
+  const cleanupAgain = effect();
+  assert.equal(dialog.scrollTop, 0);
+  cleanupAgain();
+  assert.deepEqual(calls, ["open", "focus", "close", "open", "focus", "close"]);
+  assert.equal(body.style.overflow, "auto");
+});
+
+function tender(extra = {}) {
+  const hooks = {
+    useState: initial => [initial, () => {}], useRef: () => ({ current: false }),
+    useEffect() {}, useMemo: fn => fn(),
+  };
+  const { TenderModal } = load("./components/tender-modal.tsx", hooks);
+  return TenderModal({
+    isOpen: true, onClose() {}, totalAmount: 10000, cashTendered: 15000,
+    onCashTenderedChange() {}, onSubmit() {}, isSubmitting: false,
+    errorMessage: null, step: "review", commandReference: "COMMAND-TEST", ...extra,
+  });
+}
+
+test("tender keeps pending and unknown locked with payment controls unavailable", () => {
+  for (const extra of [
+    { step: "submitting", isSubmitting: true },
+    { step: "unknown_error", errorMessage: "Uncertain result" },
+  ]) {
+    const tree = tender(extra);
+    assert.equal(tree.props.dismissible, false);
+    assert.equal(tree.props.hideCloseButton, true);
+    const all = nodes(tree);
+    assert.equal(all.find(node => node.type === "input").props.disabled, true);
+    assert.ok(all.filter(node => node.type === "button").every(node => node.props.disabled));
+    if (extra.step === "unknown_error") {
+      assert.ok(all.some(node => node.props?.hidden === true));
+      assert.ok(all.some(node => node.props?.children === "COMMAND-TEST"));
+      assert.match(all.find(node => node.type === "summary").props.className, /min-h-12/);
+    }
+  }
+});
+
+test("tender disables invalid or insufficient cash and submits only through its explicit control", () => {
+  for (const amount of [Number.NaN, -1, 1.5, 9999]) {
+    const all = nodes(tender({ cashTendered: amount }));
+    const buttons = all.filter(node => node.type === "button");
+    assert.equal(buttons.at(-1).props.disabled, true);
+    assert.equal(all.find(node => node.type === "input").props.autoFocus, undefined);
+  }
+  let submits = 0;
+  const tree = tender({ onSubmit: () => submits++ });
+  const all = nodes(tree);
+  assert.equal(tree.props.dismissible, true);
+  assert.ok(all.some(node => node.props?.children === "tender.presets.label"));
+  const submit = all.filter(node => node.type === "button").at(-1);
+  assert.equal(submit.props.disabled, false);
+  assert.equal(submits, 0);
+  submit.props.onClick();
+  assert.equal(submits, 1);
 });

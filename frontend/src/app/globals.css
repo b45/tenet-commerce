@@ -32,6 +32,10 @@ body {
 }
 
 @media print {
+  dialog,
+  dialog::backdrop {
+    display: none !important;
+  }
   body {
     background: white !important;
     color: black !important;
