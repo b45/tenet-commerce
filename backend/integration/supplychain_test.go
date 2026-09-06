@@ -360,10 +360,14 @@ func TestSupplyChain_ExactMoney_ThreeUnitsAt10001Produces30003(t *testing.T) {
 
 	productID := "10000000-0000-0000-0000-000000000001"
 
+	require.NotNil(t, supplier.ComplianceCertificate)
+	certID := supplier.ComplianceCertificate.ID.String()
+
 	// Step 2: Create Purchase Order with 3 units @ 10,001 IDR.
 	// Invariant: 3 * 10001 = exactly 30003 IDR without floating point penny drift.
 	poReq := supplychain.CreatePurchaseOrderRequest{
-		SupplierID: supplier.ID.String(),
+		SupplierID:       supplier.ID.String(),
+		ComplianceCertID: &certID,
 		Items: []supplychain.CreatePOItemRequest{
 			{
 				ProductID: productID,
