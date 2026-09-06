@@ -349,6 +349,8 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE tenant_al_barakah_mart.goods_receipts ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255) UNIQUE;
+
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipt_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     goods_receipt_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.goods_receipts(id) ON DELETE CASCADE,
@@ -739,6 +741,8 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipts (
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE tenant_darussalam_store.goods_receipts ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255) UNIQUE;
 
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipt_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
