@@ -17,8 +17,10 @@ The repository currently contains a Go backend for the Phase 1–2 domain slice.
 | Idempotency | Partial | Redis middleware is mounted on checkout, void, and stock adjustment only. Durable database-backed idempotency is a hardening-gate requirement. |
 | Supply chain | Implemented creation slice, hardening in progress | Supplier, purchase-order, and goods-receipt creation with configurable certificate checks. Read/lifecycle APIs, partial receiving, and stronger reconciliation are not yet complete. |
 | Ledger | Implemented service layer | Chart of accounts, entries, manual entries, and trial balance. Database-level append-only and exact-money hardening remain planned. |
-| Manager dashboard | Implemented | Aggregated dashboard endpoint. |
-| Frontend/offline POS | Planned — Phase 3 | The Next.js project is a starter scaffold; no POS client, IndexedDB queue, or service worker is implemented. |
+| POS Web Client | Implemented — Phase 3 (P3-03, P3-04) | Next.js 14 POS interface with product catalog, category filters, barcode search, cart management, cash tender modal, 80mm thermal receipt printing, daily sales summary modal, and order history. Offline catalog caching and cart drafts auto-save/recovery in native IndexedDB (`tenet_pos_offline_db`) with online/offline network indicator. |
+| Supply Chain Hub | Implemented — Phase 3 (P3-06) | Supplier directory, multi-standard certificate tracking (Halal, BPOM, Regalkes, Michelin Star, ISO/HACCP, and Custom Standards), certificate registration, validity countdown, and status badges. |
+| Internationalization (i18n) | Implemented — Phase 3 | Zero hardcoded strings; 1:1 key parity across Indonesian (`id`), English (`en`), and Arabic (`ar`) with full RTL/LTR bidirectional support. |
+| Offline Cash Settlement & Replay | Planned — Phase 3 (P3-05) | Gated offline cash outbox queue with monotonic replay and background sync reconciliation. |
 | AI auditor and Zakat | Planned — Phase 4 | The Python worker is a scheduler scaffold; no extraction, anomaly analysis, report persistence, or Zakat API is implemented. |
 | Production delivery | Planned — Phase 4 | Compose currently starts PostgreSQL and Redis for development only; it does not ship API, frontend, or production orchestration. |
 
