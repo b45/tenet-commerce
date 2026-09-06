@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/entitlement"
 	pkgIdempotency "github.com/b45/tenet-commerce/backend/pkg/idempotency"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
@@ -18,12 +19,17 @@ import (
 
 // Handler handles HTTP requests for the POS domain
 type Handler struct {
-	service *Service
+	service        *Service
+	entitlementSvc *entitlement.Service
 }
 
-// NewHandler initializes a new POS HTTP handler
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+// NewHandler initializes a new POS HTTP handler with optional entitlement evaluation
+func NewHandler(service *Service, entitlementSvc ...*entitlement.Service) *Handler {
+	h := &Handler{service: service}
+	if len(entitlementSvc) > 0 {
+		h.entitlementSvc = entitlementSvc[0]
+	}
+	return h
 }
 
 // RegisterRoutes mounts all POS endpoints with RBAC and idempotency middleware
@@ -102,10 +108,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.VoidOrder,
 	)
-	rg.GET("/daily-summary",
+	dailySummaryHandlers := []gin.HandlerFunc{
 		internalAuth.RequirePermission("pos:read"),
-		h.GetDailySummary,
-	)
+	}
+	if h.entitlementSvc != nil {
+		dailySummaryHandlers = append(dailySummaryHandlers, entitlement.RequireFeature(h.entitlementSvc, "pos.daily_summary"))
+	}
+	dailySummaryHandlers = append(dailySummaryHandlers, h.GetDailySummary)
+	rg.GET("/daily-summary", dailySummaryHandlers...)
 
 	// QRIS Configuration
 	rg.GET("/qris",
