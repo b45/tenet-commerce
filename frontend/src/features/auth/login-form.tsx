@@ -18,13 +18,37 @@ export function LoginForm() {
   const [password, setPassword] = React.useState("");
   const [fieldErrors, setFieldErrors] = React.useState<{ [key: string]: string }>({});
 
+  // Prefill tenant_slug from cookie / localStorage or fallback
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      // 1. Check cookies for tenet_tenant_slug
+      const cookieMatch = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("tenet_tenant_slug="));
+      const savedCookieTenant = cookieMatch ? decodeURIComponent(cookieMatch.split("=")[1]) : null;
+
+      // 2. Check localStorage
+      const localTenant = localStorage.getItem("tenet_last_tenant_slug");
+
+      const tenantToUse = savedCookieTenant || localTenant || "";
+      if (tenantToUse) {
+        setTenantSlug(tenantToUse);
+      }
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErrors({});
 
+    const trimmedTenant = tenantSlug.trim();
+    if (typeof window !== "undefined" && trimmedTenant) {
+      localStorage.setItem("tenet_last_tenant_slug", trimmedTenant);
+    }
+
     try {
       await login({
-        tenant_slug: tenantSlug.trim(),
+        tenant_slug: trimmedTenant,
         email: email.trim(),
         password,
       });
@@ -34,7 +58,7 @@ export function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+    <form onSubmit={handleSubmit} className="space-y-4" noValidate method="POST">
       {error && (
         <Alert variant="destructive" title={t("auth.errorTitle")}>
           <div>{error}</div>
@@ -61,7 +85,12 @@ export function LoginForm() {
           value={tenantSlug}
           onChange={(e) => setTenantSlug(e.target.value)}
           disabled={isLoading}
-          autoComplete="organization"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          data-1p-ignore="true"
+          data-lpignore="true"
           required
           error={!!fieldErrors.tenant_slug}
         />
@@ -77,13 +106,16 @@ export function LoginForm() {
         </label>
         <Input
           id="email"
-          name="email"
+          name="username"
           type="email"
           placeholder={t("auth.emailPlaceholder")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           disabled={isLoading}
-          autoComplete="email"
+          autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
           error={!!fieldErrors.email}
         />

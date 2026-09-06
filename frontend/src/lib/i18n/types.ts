@@ -408,4 +408,92 @@ export interface TranslationSchema {
     printTime: string;
     endOfReport: string;
   };
+  supplyChain: {
+    title: string;
+    subtitle: string;
+    badge: string;
+    addSupplier: string;
+    filterAll: string;
+    filterValid: string;
+    filterExpiringSoon: string;
+    filterExpired: string;
+    filterNoCert: string;
+    searchPlaceholder: string;
+    loading: string;
+    emptyState: string;
+    stats: {
+      totalSuppliers: string;
+      validCertificates: string;
+      expiringSoon: string;
+      expiredBlocked: string;
+    };
+    alertBanner: {
+      title: string;
+      description: string;
+      viewExpiring: string;
+    };
+    table: {
+      supplier: string;
+      contact: string;
+      certificate: string;
+      authority: string;
+      validUntil: string;
+      status: string;
+      actions: string;
+      noCertificate: string;
+      viewHistory: string;
+      renewCert: string;
+    };
+    status: {
+      valid: string;
+      expiringSoon: string;
+      expired: string;
+      revoked: string;
+      none: string;
+    };
+    certTypes: {
+      allTypes: string;
+      halal: string;
+      bpom: string;
+      regalkes: string;
+      michelin: string;
+      isoHaccp: string;
+      other: string;
+    };
+    modal: {
+      createSupplierTitle: string;
+      createSupplierDesc: string;
+      renewCertTitle: string;
+      renewCertDesc: string;
+      historyTitle: string;
+      historyDesc: string;
+      codeLabel: string;
+      nameLabel: string;
+      contactPersonLabel: string;
+      emailLabel: string;
+      phoneLabel: string;
+      hasInitialCert: string;
+      certTypeLabel: string;
+      customCertTypePlaceholder: string;
+      certNumberLabel: string;
+      authorityLabel: string;
+      scopeLabel: string;
+      validFromLabel: string;
+      expiryDateLabel: string;
+      docUrlLabel: string;
+      submitSave: string;
+      submitRenew: string;
+      cancel: string;
+      saving: string;
+      revokeAction: string;
+      revokeConfirm: string;
+      revoking: string;
+      noHistory: string;
+      successCreated: string;
+      successRenewed: string;
+      successRevoked: string;
+    };
+    unauthorizedTitle: string;
+    unauthorizedDesc: string;
+  };
 }
