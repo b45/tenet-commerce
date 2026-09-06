@@ -40,7 +40,7 @@ func TestSupplyChain_SupplierOperations_ListDetailUpdate(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 
 	var createResp struct {
-		Success bool                  `json:"success"`
+		Success bool                 `json:"success"`
 		Data    supplychain.Supplier `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &createResp))
@@ -54,7 +54,7 @@ func TestSupplyChain_SupplierOperations_ListDetailUpdate(t *testing.T) {
 	require.Equal(t, http.StatusOK, listW.Code)
 
 	var listResp struct {
-		Success bool                    `json:"success"`
+		Success bool                   `json:"success"`
 		Data    []supplychain.Supplier `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(listW.Body.Bytes(), &listResp))
@@ -74,7 +74,7 @@ func TestSupplyChain_SupplierOperations_ListDetailUpdate(t *testing.T) {
 	require.Equal(t, http.StatusOK, getW.Code)
 
 	var getResp struct {
-		Success bool                        `json:"success"`
+		Success bool                       `json:"success"`
 		Data    supplychain.SupplierDetail `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(getW.Body.Bytes(), &getResp))
@@ -97,7 +97,7 @@ func TestSupplyChain_SupplierOperations_ListDetailUpdate(t *testing.T) {
 	require.Equal(t, http.StatusOK, updW.Code)
 
 	var updResp struct {
-		Success bool                  `json:"success"`
+		Success bool                 `json:"success"`
 		Data    supplychain.Supplier `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(updW.Body.Bytes(), &updResp))
@@ -179,7 +179,7 @@ func TestSupplyChain_CertificateRenewalAndRevoke(t *testing.T) {
 	router.ServeHTTP(revokeW, revokeReq)
 	require.Equal(t, http.StatusOK, revokeW.Code)
 
-	// 5. Verify certificate computed status is now EXPIRED
+	// 5. Revocation is distinct from expiry and preserves the original date.
 	listReq2 := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/suppliers/%s/certificates", supplierID), nil)
 	listW2 := httptest.NewRecorder()
 	router.ServeHTTP(listW2, listReq2)
@@ -190,7 +190,9 @@ func TestSupplyChain_CertificateRenewalAndRevoke(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(listW2.Body.Bytes(), &listResp2))
 	require.Len(t, listResp2.Data, 1)
-	assert.Equal(t, "EXPIRED", listResp2.Data[0].ComputedStatus)
+	assert.Equal(t, "REVOKED", listResp2.Data[0].ComputedStatus)
+	require.NotNil(t, listResp2.Data[0].RevokedAt)
+	assert.Equal(t, expiryDate, listResp2.Data[0].ExpiryDate.Format(time.DateOnly))
 }
 
 func TestSupplyChain_PurchaseOrder_ListDetailAndCancel(t *testing.T) {

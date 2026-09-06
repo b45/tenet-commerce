@@ -4,11 +4,11 @@ import "time"
 
 // DashboardSummary represents the aggregated analytics returned by GET /api/v1/manager/dashboard
 type DashboardSummary struct {
-	GeneratedAt      time.Time         `json:"generated_at"`
-	SalesSummary     SalesSummary      `json:"sales_summary"`
-	InventoryAlerts  InventoryAlerts   `json:"inventory_alerts"`
-	ComplianceAlerts ComplianceAlerts  `json:"compliance_alerts"`
-	FinancialSummary FinancialSummary  `json:"financial_summary"`
+	GeneratedAt      time.Time        `json:"generated_at"`
+	SalesSummary     SalesSummary     `json:"sales_summary"`
+	InventoryAlerts  InventoryAlerts  `json:"inventory_alerts"`
+	ComplianceAlerts ComplianceAlerts `json:"compliance_alerts"`
+	FinancialSummary FinancialSummary `json:"financial_summary"`
 }
 
 // SalesSummary contains aggregated order and revenue figures
@@ -53,7 +53,7 @@ type CertificateAlertItem struct {
 	IssuingAuthority  string    `json:"issuing_authority"`
 	ExpiryDate        time.Time `json:"expiry_date"`
 	DaysRemaining     int       `json:"days_remaining"`
-	Status            string    `json:"status"` // "EXPIRING_SOON" or "EXPIRED"
+	Status            string    `json:"status"` // "EXPIRING_SOON", "EXPIRED", or "REVOKED"
 }
 
 // FinancialSummary provides high-level double-entry ledger status

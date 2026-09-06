@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/google/uuid"
 )
 
 var (
@@ -74,22 +74,24 @@ func (r *Repository) CreateComplianceCertificate(ctx context.Context, tx pgx.Tx,
 // GetComplianceCertificateByID fetches a certificate and computes its status dynamically
 func (r *Repository) GetComplianceCertificateByID(ctx context.Context, db queryRower, certID uuid.UUID) (*ComplianceCertificate, error) {
 	query := `
-		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at,
+		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at, revoked_at,
 		CASE
-			WHEN valid_from > CURRENT_DATE THEN 'NOT_YET_VALID'
-			WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-			WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
+			WHEN revoked_at IS NOT NULL THEN 'REVOKED'
+			WHEN valid_from > (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'NOT_YET_VALID'
+			WHEN expiry_date < (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'EXPIRED'
+			WHEN expiry_date <= (clock_timestamp() AT TIME ZONE 'UTC')::date + INTERVAL '30 days' THEN 'EXPIRING_SOON'
 			ELSE 'VALID'
 		END AS computed_status
 		FROM compliance_certificates
 		WHERE id = $1
+		FOR UPDATE
 	`
-	
+
 	cert := &ComplianceCertificate{}
 	err := db.QueryRow(ctx, query, certID).Scan(
 		&cert.ID, &cert.SupplierID, &cert.CertType, &cert.CertificateNumber,
 		&cert.IssuingAuthority, &cert.Scope, &cert.ValidFrom, &cert.ExpiryDate,
-		&cert.DocumentURL, &cert.CreatedAt, &cert.ComputedStatus,
+		&cert.DocumentURL, &cert.CreatedAt, &cert.RevokedAt, &cert.ComputedStatus,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -359,11 +361,12 @@ func (r *Repository) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isAc
 	// Attach active certificate if available
 	for i := range suppliers {
 		certQuery := `
-			SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at,
+			SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at, revoked_at,
 			CASE
-				WHEN valid_from > CURRENT_DATE THEN 'NOT_YET_VALID'
-				WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-				WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
+				WHEN revoked_at IS NOT NULL THEN 'REVOKED'
+				WHEN valid_from > (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'NOT_YET_VALID'
+				WHEN expiry_date < (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'EXPIRED'
+				WHEN expiry_date <= (clock_timestamp() AT TIME ZONE 'UTC')::date + INTERVAL '30 days' THEN 'EXPIRING_SOON'
 				ELSE 'VALID'
 			END AS computed_status
 			FROM compliance_certificates
@@ -375,7 +378,7 @@ func (r *Repository) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isAc
 		err := conn.QueryRow(ctx, certQuery, suppliers[i].ID).Scan(
 			&cert.ID, &cert.SupplierID, &cert.CertType, &cert.CertificateNumber,
 			&cert.IssuingAuthority, &cert.Scope, &cert.ValidFrom, &cert.ExpiryDate,
-			&cert.DocumentURL, &cert.CreatedAt, &cert.ComputedStatus,
+			&cert.DocumentURL, &cert.CreatedAt, &cert.RevokedAt, &cert.ComputedStatus,
 		)
 		if err == nil {
 			suppliers[i].ComplianceCertificate = &cert
@@ -500,11 +503,12 @@ func (r *Repository) GetSupplierByID(ctx context.Context, db queryRower, id uuid
 // GetCertificatesBySupplierID returns all certificates for a supplier ordered by expiry descending
 func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxpool.Conn, supplierID uuid.UUID) ([]ComplianceCertificate, error) {
 	query := `
-		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at,
+		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at, revoked_at,
 		CASE
-			WHEN valid_from > CURRENT_DATE THEN 'NOT_YET_VALID'
-			WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-			WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
+			WHEN revoked_at IS NOT NULL THEN 'REVOKED'
+			WHEN valid_from > (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'NOT_YET_VALID'
+			WHEN expiry_date < (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'EXPIRED'
+			WHEN expiry_date <= (clock_timestamp() AT TIME ZONE 'UTC')::date + INTERVAL '30 days' THEN 'EXPIRING_SOON'
 			ELSE 'VALID'
 		END AS computed_status
 		FROM compliance_certificates
@@ -523,7 +527,7 @@ func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxp
 		if err := rows.Scan(
 			&c.ID, &c.SupplierID, &c.CertType, &c.CertificateNumber,
 			&c.IssuingAuthority, &c.Scope, &c.ValidFrom, &c.ExpiryDate,
-			&c.DocumentURL, &c.CreatedAt, &c.ComputedStatus,
+			&c.DocumentURL, &c.CreatedAt, &c.RevokedAt, &c.ComputedStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -532,7 +536,7 @@ func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxp
 	return certs, nil
 }
 
-// RevokeCertificate marks a certificate as expired immediately with row-level locking
+// RevokeCertificate preserves the original validity dates and records revocation under a row lock.
 func (r *Repository) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, certID uuid.UUID) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
@@ -550,7 +554,7 @@ func (r *Repository) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, 
 
 	cmd, err := tx.Exec(ctx, `
 		UPDATE compliance_certificates
-		SET expiry_date = CURRENT_DATE - INTERVAL '1 day'
+		SET revoked_at = COALESCE(revoked_at, clock_timestamp())
 		WHERE id = $1
 	`, certID)
 	if err != nil {
@@ -691,7 +695,9 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 		pod.GoodsReceipts = append(pod.GoodsReceipts, gr)
 	}
 
-	return &pod, nil
+	grRows.Close()
+	pod.ComplianceEvaluation, err = r.getComplianceDecision(ctx, conn, "PO", poID)
+	return &pod, err
 }
 
 // CancelPurchaseOrder atomically cancels an unfulfilled PO (status DRAFT or ISSUED with 0 items received)
@@ -839,7 +845,8 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 		grd.LedgerEntryNumber = &ledgerEntryNumber
 	}
 
-	return &grd, nil
+	grd.ComplianceEvaluation, err = r.getComplianceDecision(ctx, conn, "GR", grID)
+	return &grd, err
 }
 
 // GetProductTraceability reconstructs the document provenance of a product from Halal cert -> PO -> GR -> stock

@@ -104,10 +104,11 @@ func (r *Repository) GetComplianceAlerts(ctx context.Context, conn *pgxpool.Conn
 			cc.certificate_number,
 			cc.issuing_authority,
 			cc.expiry_date,
-			(cc.expiry_date - CURRENT_DATE) AS days_remaining
+			(cc.expiry_date - (clock_timestamp() AT TIME ZONE 'UTC')::date) AS days_remaining,
+			cc.revoked_at IS NOT NULL AS revoked
 		FROM compliance_certificates cc
 		JOIN suppliers s ON cc.supplier_id = s.id
-		WHERE cc.expiry_date <= (CURRENT_DATE + $1::integer)
+		WHERE cc.revoked_at IS NOT NULL OR cc.expiry_date <= ((clock_timestamp() AT TIME ZONE 'UTC')::date + $1::integer)
 		ORDER BY cc.expiry_date ASC
 		LIMIT 50
 	`
@@ -124,6 +125,7 @@ func (r *Repository) GetComplianceAlerts(ctx context.Context, conn *pgxpool.Conn
 
 	for rows.Next() {
 		var item CertificateAlertItem
+		var revoked bool
 		if err := rows.Scan(
 			&item.CertificateID,
 			&item.SupplierID,
@@ -132,11 +134,15 @@ func (r *Repository) GetComplianceAlerts(ctx context.Context, conn *pgxpool.Conn
 			&item.IssuingAuthority,
 			&item.ExpiryDate,
 			&item.DaysRemaining,
+			&revoked,
 		); err != nil {
 			return ComplianceAlerts{}, fmt.Errorf("failed to scan certificate alert item: %w", err)
 		}
 
-		if item.DaysRemaining < 0 {
+		if revoked {
+			item.Status = "REVOKED"
+			expiredCount++ // Existing invalid-certificate count includes revocations.
+		} else if item.DaysRemaining < 0 {
 			item.Status = "EXPIRED"
 			expiredCount++
 		} else {
