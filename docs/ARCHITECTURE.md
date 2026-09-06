@@ -16,7 +16,7 @@ The modular monolith paradigm was selected over distributed microservices for th
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                                    CLIENT PLATFORM                                      │
-│                  Next.js 14 App Router · React 18 · TypeScript · shadcn/ui              │
+│                  Next.js 15 App Router · React 19 · TypeScript · shadcn/ui              │
 │                     Service Worker (Background Sync) · IndexedDB Queue                  │
 └────────────────────────────────────────────┬────────────────────────────────────────────┘
                                              │ HTTPS / REST (Idempotency-Key)
@@ -190,7 +190,7 @@ Tenet Commerce supports Indonesian Standard QR Code (**QRIS**) payment flows:
 
 ## 4. Target Design — Phase 3 Offline-First Synchronization
 
-The Next.js 14 POS client is built with an offline-first foundation to operate without disruption during network outages.
+The Next.js 15 POS client is built with an offline-first foundation to operate without disruption during network outages.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐

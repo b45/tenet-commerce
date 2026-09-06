@@ -112,6 +112,14 @@ export const en: TranslationSchema = {
       viewCart: "View Cart",
       backToCatalog: "Back to Catalog",
     },
+    offline: {
+      onlineStatus: "Online (Synced)",
+      offlineStatus: "Offline (Local Catalog)",
+      cachedNotice: "Displaying locally cached catalog. Price and stock updates will automatically synchronize when connection restores.",
+      lastSync: "Synced: {time}",
+      syncing: "Synchronizing...",
+      restoredCart: "Previous cart draft successfully restored.",
+    },
   },
   tender: {
     unknownTitle: "Outcome unknown",

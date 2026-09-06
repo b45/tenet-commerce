@@ -45,7 +45,7 @@ The backend is a modular monolith written with Gin, pgx/v5, and go-redis. Postgr
 | Backend | Go 1.26.5, Gin, pgx/v5, go-redis |
 | Database | PostgreSQL 16, schema-per-tenant logical isolation |
 | Cache | Redis 7 for the current POS idempotency middleware |
-| Frontend scaffold | Next.js 14, React 18, TypeScript, Tailwind |
+| Frontend UI | Next.js 15, React 19, TypeScript, Tailwind |
 | AI-worker scaffold | Python, APScheduler, Polars, SciPy, Pydantic |
 | CI | GitHub Actions: Go build/vet/test and frontend lint/build |
 

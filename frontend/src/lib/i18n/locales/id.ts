@@ -112,6 +112,14 @@ export const id: TranslationSchema = {
       viewCart: "Lihat Keranjang",
       backToCatalog: "Kembali ke Katalog",
     },
+    offline: {
+      onlineStatus: "Online (Tersinkron)",
+      offlineStatus: "Offline (Katalog Lokal)",
+      cachedNotice: "Menampilkan katalog tersimpan lokal. Perubahan harga/stok terbaru akan otomatis disinkronkan saat online.",
+      lastSync: "Sinkronisasi: {time}",
+      syncing: "Menyinkronkan...",
+      restoredCart: "Draft keranjang sebelumnya berhasil dipulihkan.",
+    },
   },
   tender: {
     unknownTitle: "Status belum diketahui",

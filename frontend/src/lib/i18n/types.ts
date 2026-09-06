@@ -126,6 +126,14 @@ export interface TranslationSchema {
       viewCart: string;
       backToCatalog: string;
     };
+    offline: {
+      onlineStatus: string;
+      offlineStatus: string;
+      cachedNotice: string;
+      lastSync: string;
+      syncing: string;
+      restoredCart: string;
+    };
   };
   tender: {
     unknownTitle: string;

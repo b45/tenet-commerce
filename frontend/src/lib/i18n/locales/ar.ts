@@ -112,6 +112,14 @@ export const ar: TranslationSchema = {
       viewCart: "عرض السلة",
       backToCatalog: "العودة إلى الأصناف",
     },
+    offline: {
+      onlineStatus: "متصل (متزامن)",
+      offlineStatus: "غير متصل (الكتالوج المحلي)",
+      cachedNotice: "يتم عرض الكتالوج المخزن محلياً. ستتم مزامنة أحدث الأسعار والمخزون تلقائياً فور استعادة الاتصال.",
+      lastSync: "آخر مزامنة: {time}",
+      syncing: "جارٍ المزامنة...",
+      restoredCart: "تمت استعادة مسودة سلة المشتريات السابقة بنجاح.",
+    },
   },
   tender: {
     unknownTitle: "نتيجة المعاملة غير معروفة",

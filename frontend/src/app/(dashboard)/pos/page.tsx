@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, Wifi, Database } from "lucide-react";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Button } from "@/components/ui/button";
+import { useNetworkStatus } from "@/lib/offline/use-network-status";
 import { useCatalog } from "@/features/pos/hooks/use-catalog";
 import { useCart } from "@/features/pos/hooks/use-cart";
 import { useCheckout } from "@/features/pos/hooks/use-checkout";
@@ -25,7 +26,8 @@ export default function POSPage() {
   const [mobileTab, setMobileTab] = React.useState<"catalog" | "cart">("catalog");
   const [isDailySummaryOpen, setIsDailySummaryOpen] = React.useState(false);
 
-  // Domain Hooks
+  // Domain Hooks & Offline Status
+  const network = useNetworkStatus();
   const catalog = useCatalog();
   const cart = useCart();
   const checkout = useCheckout();
@@ -117,7 +119,34 @@ export default function POSPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Network & IndexedDB Sync Status Indicator */}
+          <div
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all",
+              network.isOnline && !catalog.isOfflineCache
+                ? "bg-[var(--color-status-success-bg)] text-[var(--color-status-success-text)] border-[var(--color-status-success-border)]"
+                : "bg-[var(--color-status-warning-bg)] text-[var(--color-status-warning-text)] border-[var(--color-status-warning-border)]"
+            )}
+            title={
+              network.isOnline && !catalog.isOfflineCache
+                ? t("pos.offline.onlineStatus")
+                : t("pos.offline.cachedNotice")
+            }
+          >
+            {network.isOnline && !catalog.isOfflineCache ? (
+              <>
+                <Wifi className="h-3.5 w-3.5 text-[var(--color-status-success-text)]" />
+                <span>{t("pos.offline.onlineStatus")}</span>
+              </>
+            ) : (
+              <>
+                <Database className="h-3.5 w-3.5 text-[var(--color-status-warning-text)]" />
+                <span>{t("pos.offline.offlineStatus")}</span>
+              </>
+            )}
+          </div>
+
           <Button
             type="button"
             variant="outline"
@@ -140,6 +169,24 @@ export default function POSPage() {
           />
         </div>
       </div>
+
+      {/* Offline Stale-While-Revalidate Notice Banner */}
+      {(!network.isOnline || catalog.isOfflineCache) && (
+        <div className="px-4 py-2.5 rounded-xl border border-[var(--color-status-warning-border)] bg-[var(--color-status-warning-bg)]/20 text-xs flex items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2 text-[var(--color-status-warning-text)]">
+            <Database className="h-4 w-4 shrink-0" />
+            <span>{t("pos.offline.cachedNotice")}</span>
+          </div>
+          {catalog.lastSyncAt && (
+            <span className="font-mono text-[11px] text-[var(--color-text-tertiary)] shrink-0">
+              {t("pos.offline.lastSync").replace(
+                "{time}",
+                new Date(catalog.lastSyncAt).toLocaleTimeString()
+              )}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Main Content Workspace */}
       {viewMode === "register" ? (
