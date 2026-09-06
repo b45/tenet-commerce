@@ -51,7 +51,7 @@ func main() {
 	jwtService := pkgAuth.NewJWTService()
 	tenantRepo := tenant.NewRepository(db)
 	authRepo := internalAuth.NewRepository(db)
-	authHandler := internalAuth.NewHandler(authRepo, jwtService)
+	authHandler := internalAuth.NewHandler(authRepo, jwtService, rdb)
 
 	entitlementRepo := entitlement.NewRepository(db)
 	entitlementService := entitlement.NewService(entitlementRepo, rdb)

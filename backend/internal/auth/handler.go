@@ -1,9 +1,13 @@
 package auth
 
 import (
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
+	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
@@ -11,13 +15,19 @@ import (
 type Handler struct {
 	repo       *Repository
 	jwtService *pkgAuth.JWTService
+	redis      *pkgRedis.Client
 }
 
-// NewHandler creates a new auth handler
-func NewHandler(repo *Repository, jwtService *pkgAuth.JWTService) *Handler {
+// NewHandler creates a new auth handler with optional Redis for token revocation
+func NewHandler(repo *Repository, jwtService *pkgAuth.JWTService, redisClient ...*pkgRedis.Client) *Handler {
+	var rdb *pkgRedis.Client
+	if len(redisClient) > 0 && redisClient[0] != nil {
+		rdb = redisClient[0]
+	}
 	return &Handler{
 		repo:       repo,
 		jwtService: jwtService,
+		redis:      rdb,
 	}
 }
 
@@ -27,9 +37,10 @@ func (h *Handler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.POST("/refresh", h.RefreshToken)
 }
 
-// RegisterProtectedRoutes registers authenticated identity endpoints (me)
+// RegisterProtectedRoutes registers authenticated identity endpoints (me, logout)
 func (h *Handler) RegisterProtectedRoutes(rg *gin.RouterGroup) {
 	rg.GET("/me", h.Me)
+	rg.POST("/logout", h.Logout)
 }
 
 // Login handles user authentication and JWT generation
@@ -115,7 +126,18 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// 2. Fetch the user to ensure account is still active and retrieve latest permissions
+	// 2. Check if the refresh token is blacklisted in Redis
+	if h.redis != nil && h.redis.RDB != nil {
+		refreshHash := HashToken(req.RefreshToken)
+		blacklisted, err := h.redis.RDB.Exists(c.Request.Context(), BlacklistKeyPrefix+refreshHash).Result()
+		if err == nil && blacklisted > 0 {
+			log.Warn("Attempted refresh with revoked token", "user_id", claims.UserID)
+			response.Unauthorized(c, "TOKEN_REVOKED", "Refresh token has been revoked")
+			return
+		}
+	}
+
+	// 3. Fetch the user to ensure account is still active and retrieve latest permissions
 	user, err := h.repo.GetUserByID(c.Request.Context(), claims.UserID)
 	if err != nil {
 		log.Warn("Refresh token user not found or deactivated", "user_id", claims.UserID, "error", err)
@@ -123,7 +145,7 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// 3. Issue a new token pair
+	// 4. Issue a new token pair
 	newAccessToken, newRefreshToken, expiresIn, err := h.jwtService.GenerateTokenPair(
 		user.ID,
 		user.TenantID,
@@ -134,6 +156,15 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		log.Error("Failed to issue refreshed token pair", "user_id", user.ID, "error", err)
 		response.InternalServerError(c, "TOKEN_REFRESH_FAILED", "Failed to refresh token")
 		return
+	}
+
+	// 5. Invalidate the old refresh token (Refresh Token Rotation)
+	if h.redis != nil && h.redis.RDB != nil {
+		remainingTTL := time.Until(claims.ExpiresAt.Time)
+		if remainingTTL > 0 {
+			refreshHash := HashToken(req.RefreshToken)
+			_ = h.redis.RDB.Set(c.Request.Context(), BlacklistKeyPrefix+refreshHash, "rotated", remainingTTL).Err()
+		}
 	}
 
 	log.Info("Token refreshed successfully", "user_id", user.ID, "tenant_slug", user.TenantSlug)
@@ -151,6 +182,70 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 			TenantSlug:  user.TenantSlug,
 			Permissions: pkgAuth.GetPermissionsForRole(user.Role),
 		},
+	})
+}
+
+// Logout invalidates the active session tokens by blacklisting them in Redis until their expiration
+// POST /api/v1/auth/logout
+func (h *Handler) Logout(c *gin.Context) {
+	log := logger.FromContext(c.Request.Context())
+
+	// 1. Retrieve access token from context (or header fallback)
+	tokenString := c.GetString("raw_token")
+	if tokenString == "" {
+		authHeader := c.GetHeader("Authorization")
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+			tokenString = strings.TrimSpace(parts[1])
+		}
+	}
+
+	claimsVal, exists := c.Get("jwt_claims")
+	if !exists {
+		log.Warn("Logout endpoint accessed without claims context")
+		response.Unauthorized(c, "UNAUTHORIZED", "Authentication context not found")
+		return
+	}
+
+	claims, ok := claimsVal.(*pkgAuth.CustomClaims)
+	if !ok {
+		log.Error("Failed to cast jwt_claims context to *CustomClaims")
+		response.InternalServerError(c, "CONTEXT_TYPE_ERROR", "Failed to parse auth claims")
+		return
+	}
+
+	// 2. Blacklist the Access Token in Redis for its remaining lifetime
+	if h.redis != nil && h.redis.RDB != nil && tokenString != "" {
+		ttl := time.Until(claims.ExpiresAt.Time)
+		if ttl > 0 {
+			accessHash := HashToken(tokenString)
+			if err := h.redis.RDB.Set(c.Request.Context(), BlacklistKeyPrefix+accessHash, "revoked", ttl).Err(); err != nil {
+				log.Error("Failed to blacklist access token in Redis", "error", err, "user_id", claims.UserID)
+			}
+		}
+	}
+
+	// 3. Optional: Revoke Refresh Token if supplied in request body
+	var req LogoutRequest
+	if err := c.ShouldBindJSON(&req); err == nil && req.RefreshToken != "" {
+		refreshClaims, err := h.jwtService.ValidateToken(req.RefreshToken, "refresh")
+		if err == nil && refreshClaims.UserID == claims.UserID {
+			if h.redis != nil && h.redis.RDB != nil {
+				refreshTTL := time.Until(refreshClaims.ExpiresAt.Time)
+				if refreshTTL > 0 {
+					refreshHash := HashToken(req.RefreshToken)
+					if err := h.redis.RDB.Set(c.Request.Context(), BlacklistKeyPrefix+refreshHash, "revoked", refreshTTL).Err(); err != nil {
+						log.Error("Failed to blacklist refresh token in Redis", "error", err, "user_id", claims.UserID)
+					}
+				}
+			}
+		}
+	}
+
+	log.Info("User logged out successfully", "user_id", claims.UserID, "tenant_slug", claims.TenantSlug)
+
+	response.OK(c, gin.H{
+		"message": "Logged out successfully",
 	})
 }
 

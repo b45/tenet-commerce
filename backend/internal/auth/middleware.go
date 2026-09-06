@@ -5,12 +5,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 	pkgAuth "github.com/b45/tenet-commerce/backend/pkg/auth"
+	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
 // JWTAuthMiddleware validates Bearer JWT access tokens and injects claims into Gin Context.
+// Optionally checks Redis for revoked/blacklisted tokens if a Redis client is provided.
 // This must run BEFORE tenant.ContextMiddleware so that tenant_slug is available from the token.
-func JWTAuthMiddleware(jwtService *pkgAuth.JWTService) gin.HandlerFunc {
+func JWTAuthMiddleware(jwtService *pkgAuth.JWTService, redisClient ...*pkgRedis.Client) gin.HandlerFunc {
+	var rdb *pkgRedis.Client
+	if len(redisClient) > 0 && redisClient[0] != nil {
+		rdb = redisClient[0]
+	}
+
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -31,8 +38,19 @@ func JWTAuthMiddleware(jwtService *pkgAuth.JWTService) gin.HandlerFunc {
 			return
 		}
 
+		// Check Redis blacklist if Redis is configured
+		if rdb != nil && rdb.RDB != nil {
+			tokenHash := HashToken(tokenString)
+			blacklisted, err := rdb.RDB.Exists(c.Request.Context(), BlacklistKeyPrefix+tokenHash).Result()
+			if err == nil && blacklisted > 0 {
+				response.AbortUnauthorized(c, "TOKEN_REVOKED", "Token has been revoked")
+				return
+			}
+		}
+
 		// Inject all authenticated context into Gin.
 		// These keys are the canonical source of truth for identity throughout the request.
+		c.Set("raw_token", tokenString)
 		c.Set("jwt_claims", claims)
 		c.Set("user_id", claims.UserID)
 		c.Set("tenant_id", claims.TenantID)

@@ -83,7 +83,7 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 		// =====================================================================
 		protected := apiV1.Group("")
 		protected.Use(
-			internalAuth.JWTAuthMiddleware(cfg.JWTService),
+			internalAuth.JWTAuthMiddleware(cfg.JWTService, cfg.RedisClient),
 			tenant.ContextMiddleware(cfg.PostgresDB, cfg.TenantRepo),
 		)
 
