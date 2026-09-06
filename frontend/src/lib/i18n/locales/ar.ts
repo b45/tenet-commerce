@@ -323,4 +323,35 @@ export const ar: TranslationSchema = {
       writeRequired: "يلزم إذن التعديل",
     },
   },
+  entitlements: {
+    loading: "جارٍ التحقق من صلاحيات الباقة...",
+    insufficientSubscription: {
+      title: "ترقية باقة الاشتراك مطلوبة",
+      description: "هذه الميزة غير مفعلة في باقة المتجر الحالية. يُرجى الترقية إلى باقة متقدمة للوصول.",
+      upgradeAction: "ترقية الباقة الآن",
+    },
+    insufficientPermission: {
+      title: "صلاحية المستخدم غير كافية",
+      description: "ليس لديك إذن الوصول إلى هذه الوظيفة. يرجى مراجعة مدير المتجر.",
+    },
+    disabledByOwner: {
+      title: "الميزة معطلة من قِبل المالك",
+      description: "تم إيقاف هذه الميزة مؤقتاً في إعدادات إدارة المتجر.",
+    },
+    quotaExceeded: {
+      title: "تم تجاوز الحد الاستيعابي المسموح",
+      description: "لقد وصلت إلى الحد الأقصى المسموح به لهذه الميزة ضمن باقتك الحالية.",
+      usageNotice: "الاستخدام الحالي: {current} من إجمالي {limit} متاح.",
+    },
+    serviceUnavailable: {
+      title: "خدمة الصلاحيات غير متاحة حالياً",
+      description: "تعذر التحقق من ترخيص الميزة بسبب انقطاع مؤقت في الاتصال.",
+      retryAction: "إعادة المحاولة",
+    },
+    tierBadge: {
+      starter: "باقة البداية",
+      growth: "باقة النمو",
+      enterprise: "باقة المؤسسات",
+    },
+  },
 };

@@ -337,4 +337,35 @@ export interface TranslationSchema {
       writeRequired: string;
     };
   };
+  entitlements: {
+    loading: string;
+    insufficientSubscription: {
+      title: string;
+      description: string;
+      upgradeAction: string;
+    };
+    insufficientPermission: {
+      title: string;
+      description: string;
+    };
+    disabledByOwner: {
+      title: string;
+      description: string;
+    };
+    quotaExceeded: {
+      title: string;
+      description: string;
+      usageNotice: string;
+    };
+    serviceUnavailable: {
+      title: string;
+      description: string;
+      retryAction: string;
+    };
+    tierBadge: {
+      starter: string;
+      growth: string;
+      enterprise: string;
+    };
+  };
 }
