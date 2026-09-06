@@ -128,12 +128,19 @@ export interface TranslationSchema {
     };
   };
   tender: {
+    unknownTitle: string;
+    rejectedTitle: string;
+    unknownHelp: string;
+    referenceTitle: string;
+    referenceHelp: string;
+    invalidAmount: string;
     modalTitle: string;
     modalDescription: string;
     billTotal: string;
     cashReceived: string;
     cashPlaceholder: string;
     presets: {
+      label: string;
       exact: string;
     };
     change: string;

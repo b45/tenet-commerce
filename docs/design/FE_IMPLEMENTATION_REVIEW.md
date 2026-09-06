@@ -8,6 +8,38 @@ Rujukan: [pedoman FE](../FRONTEND_GUIDELINES.md), [Phase 3](../FRONTEND_PHASE3_D
 
 ## Tindak lanjut implementasi: FE-S1, bagian pertama
 
+### Pembaruan 2026-09-06 — pemilih bahasa login dan header
+
+Revisi preferensi pengguna: selector berikut diperkecil menjadi native dropdown kode `ID / EN / AR`, lebar 80px dan area sentuh 44px, tanpa border/background dominan. Nama bahasa asli tetap menjadi accessible label pada opsi; kode Latin berarah LTR. Header kembali satu baris dengan kolom identitas fleksibel dan kontrol ringkas, bukan baris khusus bahasa. Nama tenant panjang memakai ellipsis dengan teks lengkap tetap di DOM/title (identitas ini bukan data transaksi); login tetap document flow agar tidak overlap logo. Revisi ini menggantikan ukuran 48px, nama opsi panjang, dan header dua baris yang dijelaskan sebagai iterasi sebelumnya di bawah. Tidak mengubah locale provider atau fitur bisnis.
+
+Menindaklanjuti laporan pengguna bahwa menu bahasa bertumpuk, source baseline `b48a8e8` menunjukkan selector login absolut di sudut kartu serta header satu baris dengan tinggi tetap dan segmented selector. Ini menggantikan deskripsi historis header di bawah apabila berbeda dari source baseline tersebut.
+
+- Login: selector berada dalam document flow pada baris tersendiri sebelum logo, bukan overlay absolut. Header kartu mendapat jarak terpisah.
+- Shared selector: satu native select dengan accessible name terjemahan, nama bahasa asli, arah opsi AR, font 16px dan target 48px. Varian compact/segmented yang tidak lagi digunakan dihapus; locale di luar registry tidak diteruskan ke setter. Provider/persistence locale tidak berubah.
+- Header: tinggi mengikuti konten; di bawah 480px identitas dan baris bahasa/logout terpisah, mulai 480px memakai dua kolom dengan identitas yang dapat membungkus. Menu/logout mempunyai target 48px. Role tetap tersedia di sidebar. Badge koneksi statis dan fallback nama tenant fiktif dihapus; tidak menambah pemeriksaan koneksi atau mengubah auth.
+- Dua tes tambahan memeriksa handler selector ID/EN/AR serta kontrak struktur layout login/header. Tes ini bukan pengukuran layout browser. Acceptance manual: 320/390/480/768px, tenant panjang, ID/EN/AR, keyboard dan zoom 200%; pastikan selector tidak menutup logo/identitas dan fokus tetap terlihat.
+
+Verifikasi: 46 tes, FE lint/build pada salinan sementara, serta backend build/vet/race-short lulus (exit 0). Kesalahan path relatif pada tes baru di run awal diperbaiki sebelum run final; tidak ada tes dihapus atau dilewati. Tidak menjalankan browser otomatis atau mengganggu dev server.
+
+Implementasi SaaS tetap ditunda. Perubahan ini merupakan patch lanjutan lokal, bukan bagian dari commit FE-R3 `b48a8e8`.
+
+### Status terbaru 2026-09-06 — FE-R3 dialog dan receipt
+
+Baseline kini `dfaefe1` (develop), termasuk merge shell/touch serta inventory. Catatan R1/R2 sebelumnya adalah riwayat, bukan pernyataan bahwa perubahan tersebut masih uncommitted. Patch dialog ini berada pada branch lokal `fix/52-pos-dialog-responsive`; belum commit/remote write.
+
+- Primitive Modal memakai native `<dialog>`: nama/deskripsi terhubung, modal background inert dan focus containment/restoration mengikuti browser. Saat dibuka, scroll dialog kembali ke awal dan fokus menuju heading, bukan input. Tinggi dibatasi ruang `100dvh` dan isi memakai satu scroll dialog, bukan panel receipt 55vh yang bersarang. Consumer history turut memakai primitive ini dan perlu regression review manual.
+- Dismissal dikontrol prop `dismissible`; pending/unknown tidak dapat ditutup dengan Escape, backdrop, atau tombol X. Klik di dalam area dialog/scrollbar tidak dianggap klik backdrop. Guard controller pembayaran sebelumnya tetap dipertahankan; tidak menambahkan retry atau key baru.
+- Tender tidak autofocus dan menggunakan tinggi input yang benar-benar tersedia, logical spacing RTL, preset/aksi setidaknya 48px, serta aksi bertumpuk pada layar sempit. Label peringatan/bantuan baru lengkap ID/EN/AR. Pesan error yang berasal dari controller masih mengikuti implementasi FE-S1; patch ini bukan audit seluruh lokalisasi error domain.
+- Receipt menempatkan status server, nomor transaksi, total dan kembalian sebelum tombol cetak/transaksi baru. Detail 20+ item menjadi disclosure yang dapat dibuka; nama/SKU/angka wrap. Semua jalur penutupan receipt tetap memakai lifecycle confirmed yang mengosongkan cart berbayar. Print CSS menyembunyikan dialog/backdrop agar tidak menutupi struktur thermal; hasil printer belum diverifikasi.
+
+Finalisasi source FE-R3: label preset nominal khusus ID/EN/AR menggantikan label Filter; petunjuk shortcut `(Enter)` dihapus karena tidak ada global Enter handler untuk pembayaran. Deskripsi/error panjang dapat membungkus, bantuan unknown memakai warna semantic warning, dan disclosure referensi memakai target 48px. Tidak menambahkan shortcut pembayaran atau mengubah controller/domain transaksi.
+
+Verifikasi terbaru: 44 tes lulus (termasuk inventory existing, dismissal modal/urutan receipt, effect setup/cleanup, guard tender pending/unknown, validasi nominal dan print callback tanpa sale baru). Frontend lint/build dan backend build/vet/race-short exit 0; build frontend memakai salinan sementara seperti dijelaskan di bawah. Tes menjalankan source/event handler/effect dengan adapter terbatas tanpa browser/DOM; tidak membuktikan interaksi native dialog, keyboard virtual, hasil print atau layout perangkat.
+
+Build sebelumnya pada workspace gagal membaca chunk `.next` ketika dev server aktif. Verifikasi final dilakukan pada salinan frontend sementara dengan dependency existing, tanpa `.env*`, tanpa mengubah konfigurasi repo atau menghentikan dev server. Build salinan berhasil; ini mendukung dugaan benturan output/cache, bukan bukti forensik penyebab tunggal. Environment produksi dan E2E tetap belum diuji.
+
+Acceptance manual FE-R3: buka/tutup dialog history dan pembayaran dengan keyboard; pastikan fokus kembali ke pemicu/logical destination; lihat dialog pada 320/390px, landscape dan zoom; isi nominal dengan keyboard layar tanpa autofocus/auto-pay; periksa unknown tidak membuka pembayaran pengganti; buka 20-item receipt, cetak/batalkan cetak dan pastikan tidak ada sale baru. Recovery setelah keluar route/reload/crash dan kontrak harga tetap release blocker. Tabel history compact dan audit focus menyeluruh masih pekerjaan terpisah.
+
 ### Pembaruan berikutnya: FE-R1 shell/header responsive
 
 Baseline berikutnya adalah `b31225b` di develop: i18n dan sebagian navigasi mobile telah digabung sebelum patch ini. FE-R1 dikembangkan terpisah di branch lokal `fix/52-responsive-shell-header`; tidak mengubah logika/controller pembayaran.
