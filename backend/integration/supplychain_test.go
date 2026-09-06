@@ -416,7 +416,7 @@ func TestSupplyChain_ExactMoney_ThreeUnitsAt10001Produces30003(t *testing.T) {
 
 	// Step 4: Verify ledger journal entry posted has debit and credit = exactly 30003.00
 	assertLedgerJournalExists(t, db, gr.ID, 30003.0)
-	assertPOStatus(t, db, createdPO.ID, "FULLY_RECEIVED")
+	assertPOStatus(t, db, createdPO.ID, "RECEIVED")
 }
 
 func TestSupplyChain_RejectsFractionalAndOverflowCosts(t *testing.T) {
