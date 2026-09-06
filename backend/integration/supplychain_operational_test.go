@@ -34,6 +34,7 @@ func TestSupplyChain_SupplierOperations_ListDetailUpdate(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-sup-%d", time.Now().UnixNano()))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
@@ -90,6 +91,7 @@ func TestSupplyChain_SupplierOperations_ListDetailUpdate(t *testing.T) {
 	updBody, _ := json.Marshal(updatePayload)
 	updReq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/suppliers/%s", supplierID), bytes.NewReader(updBody))
 	updReq.Header.Set("Content-Type", "application/json")
+	updReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-sup-upd-%d", time.Now().UnixNano()))
 	updW := httptest.NewRecorder()
 	router.ServeHTTP(updW, updReq)
 	require.Equal(t, http.StatusOK, updW.Code)
@@ -118,6 +120,7 @@ func TestSupplyChain_CertificateRenewalAndRevoke(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-sup-cert-%d", time.Now().UnixNano()))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
@@ -144,6 +147,7 @@ func TestSupplyChain_CertificateRenewalAndRevoke(t *testing.T) {
 
 	certReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/supply-chain/suppliers/%s/certificates", supplierID), bytes.NewReader(certBody))
 	certReq.Header.Set("Content-Type", "application/json")
+	certReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cert-reg-%d", now.UnixNano()))
 	certW := httptest.NewRecorder()
 	router.ServeHTTP(certW, certReq)
 	require.Equal(t, http.StatusCreated, certW.Code)
@@ -170,6 +174,7 @@ func TestSupplyChain_CertificateRenewalAndRevoke(t *testing.T) {
 
 	// 4. Revoke the certificate
 	revokeReq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/certificates/%s/revoke", certID), nil)
+	revokeReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cert-rev-%d", time.Now().UnixNano()))
 	revokeW := httptest.NewRecorder()
 	router.ServeHTTP(revokeW, revokeReq)
 	require.Equal(t, http.StatusOK, revokeW.Code)
@@ -196,7 +201,7 @@ func TestSupplyChain_PurchaseOrder_ListDetailAndCancel(t *testing.T) {
 	now := time.Now()
 	createPayload := supplychain.CreateSupplierRequest{
 		Code:          fmt.Sprintf("SUP-PO-%d", now.UnixNano()),
-		CompanyName:   "PT Berkah Pangan Mandiri",
+		CompanyName:   "PT Berkah Jaya Daging",
 		ContactPerson: "Fajar",
 		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
 			CertType:          "HALAL_MUI",
@@ -211,6 +216,7 @@ func TestSupplyChain_PurchaseOrder_ListDetailAndCancel(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-sup-po-%d", now.UnixNano()))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
@@ -295,6 +301,7 @@ func TestSupplyChain_PurchaseOrder_ListDetailAndCancel(t *testing.T) {
 
 	// 6. Cancel PO
 	cancelReq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s/cancel", poID), nil)
+	cancelReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cancel-po-%d", time.Now().UnixNano()))
 	cancelW := httptest.NewRecorder()
 	router.ServeHTTP(cancelW, cancelReq)
 	require.Equal(t, http.StatusOK, cancelW.Code)
@@ -335,6 +342,7 @@ func TestSupplyChain_GoodsReceiptAndTraceability(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-sup-trace-%d", now.UnixNano()))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)

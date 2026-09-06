@@ -921,8 +921,22 @@ func (r *Repository) CreateCategory(ctx context.Context, conn *pgxpool.Conn, req
 	return &cat, nil
 }
 
-// UpdateCategory updates an existing category
+// UpdateCategory updates an existing category with row-level locking
 func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateCategoryRequest) (*Category, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM categories WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, fmt.Errorf("failed locking category for update: %w", err)
+	}
+
 	query := `
 		UPDATE categories
 		SET name = $1, code = $2, parent_id = $3
@@ -931,7 +945,7 @@ func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id 
 	`
 	var cat Category
 	var parentID *string
-	err := conn.QueryRow(ctx, query, req.Name, strings.ToUpper(strings.TrimSpace(req.Code)), req.ParentID, id).
+	err = tx.QueryRow(ctx, query, req.Name, strings.ToUpper(strings.TrimSpace(req.Code)), req.ParentID, id).
 		Scan(&cat.ID, &cat.Name, &cat.Code, &parentID, &cat.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -944,17 +958,30 @@ func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id 
 	}
 	cat.ParentID = parentID
 
-	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM products WHERE category_id = $1 AND is_active = TRUE`, id).Scan(&cat.ProductCount)
+	_ = tx.QueryRow(ctx, `SELECT COUNT(*) FROM products WHERE category_id = $1 AND is_active = TRUE`, id).Scan(&cat.ProductCount)
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing category update: %w", err)
+	}
+
 	return &cat, nil
 }
 
-// DeleteCategory removes a category, unlinking any assigned products
+// DeleteCategory removes a category, unlinking any assigned products with row-level locking
 func (r *Repository) DeleteCategory(ctx context.Context, conn *pgxpool.Conn, id string) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed beginning transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM categories WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCategoryNotFound
+		}
+		return fmt.Errorf("failed locking category for deletion: %w", err)
+	}
 
 	_, err = tx.Exec(ctx, `UPDATE products SET category_id = NULL WHERE category_id = $1`, id)
 	if err != nil {
@@ -1145,6 +1172,15 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 	}
 	defer tx.Rollback(ctx)
 
+	// Acquire row-level lock to prevent concurrent update races
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
+		return nil, fmt.Errorf("failed locking product for update: %w", err)
+	}
+
 	tagsJSON, err := json.Marshal(req.ComplianceTags)
 	if err != nil {
 		tagsJSON = []byte("[]")
@@ -1239,16 +1275,30 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 	}, nil
 }
 
-// DeleteProduct performs a soft delete by marking is_active = FALSE
+// DeleteProduct performs a soft delete by marking is_active = FALSE with row-level locking
 func (r *Repository) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id string) error {
-	res, err := conn.Exec(ctx, `UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, id)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrProductNotFound
+		}
+		return fmt.Errorf("failed locking product for deletion: %w", err)
+	}
+
+	res, err := tx.Exec(ctx, `UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed soft-deleting product: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return ErrProductNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // AdjustInventoryStock applies an atomic stock adjustment to an inventory item with row-level locking

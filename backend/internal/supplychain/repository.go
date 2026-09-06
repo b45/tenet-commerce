@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -415,10 +416,30 @@ func (r *Repository) GetSupplierWithCertificates(ctx context.Context, conn *pgxp
 	return &sd, nil
 }
 
-// UpdateSupplier updates supplier contact information or active status
+// UpdateSupplier updates supplier contact information or active status with row-level locking
 func (r *Repository) UpdateSupplier(ctx context.Context, conn *pgxpool.Conn, id uuid.UUID, req *UpdateSupplierRequest) (*Supplier, error) {
-	supplier, err := r.GetSupplierByID(ctx, conn, id)
+	tx, err := conn.Begin(ctx)
 	if err != nil {
+		return nil, fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock supplier row for update
+	queryLock := `
+		SELECT id, code, company_name, contact_person, contact_email, contact_phone, is_active, created_at
+		FROM suppliers
+		WHERE id = $1
+		FOR UPDATE
+	`
+	var supplier Supplier
+	err = tx.QueryRow(ctx, queryLock, id).Scan(
+		&supplier.ID, &supplier.Code, &supplier.CompanyName, &supplier.ContactPerson,
+		&supplier.ContactEmail, &supplier.ContactPhone, &supplier.IsActive, &supplier.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 
@@ -443,12 +464,16 @@ func (r *Repository) UpdateSupplier(ctx context.Context, conn *pgxpool.Conn, id 
 		SET company_name = $1, contact_person = $2, contact_email = $3, contact_phone = $4, is_active = $5
 		WHERE id = $6
 	`
-	_, err = conn.Exec(ctx, query, supplier.CompanyName, supplier.ContactPerson, supplier.ContactEmail, supplier.ContactPhone, supplier.IsActive, id)
+	_, err = tx.Exec(ctx, query, supplier.CompanyName, supplier.ContactPerson, supplier.ContactEmail, supplier.ContactPhone, supplier.IsActive, id)
 	if err != nil {
 		return nil, err
 	}
 
-	return supplier, nil
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing supplier update: %w", err)
+	}
+
+	return &supplier, nil
 }
 
 // GetSupplierByID fetches basic supplier by ID
@@ -507,9 +532,23 @@ func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxp
 	return certs, nil
 }
 
-// RevokeCertificate marks a certificate as expired immediately
+// RevokeCertificate marks a certificate as expired immediately with row-level locking
 func (r *Repository) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, certID uuid.UUID) error {
-	cmd, err := conn.Exec(ctx, `
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM compliance_certificates WHERE id = $1 FOR UPDATE`, certID).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	cmd, err := tx.Exec(ctx, `
 		UPDATE compliance_certificates
 		SET expiry_date = CURRENT_DATE - INTERVAL '1 day'
 		WHERE id = $1
@@ -520,7 +559,7 @@ func (r *Repository) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, 
 	if cmd.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ListPurchaseOrders returns a paginated list of PO summaries with optional status filter

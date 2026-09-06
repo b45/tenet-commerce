@@ -1050,6 +1050,11 @@
                         "method": "PUT",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_qris_cfg_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1148,6 +1153,11 @@
                         "method": "POST",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_prod_create_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1191,6 +1201,11 @@
                         "method": "PUT",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_prod_upd_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1233,7 +1248,13 @@
                     ],
                     "request": {
                         "method": "DELETE",
-                        "header": [],
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_prod_del_{{$timestamp}}",
+                                "type": "text"
+                            }
+                        ],
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/products/{{last_created_product_id}}",
                             "host": [
@@ -1320,6 +1341,11 @@
                         "method": "POST",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cat_create_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1363,6 +1389,11 @@
                         "method": "PUT",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cat_upd_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1405,7 +1436,13 @@
                     ],
                     "request": {
                         "method": "DELETE",
-                        "header": [],
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cat_del_{{$timestamp}}",
+                                "type": "text"
+                            }
+                        ],
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/categories/{{last_created_category_id}}",
                             "host": [
@@ -1551,6 +1588,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "darussalam-store",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_ds_{{$timestamp}}",
                                 "type": "text"
                             },
                             {
@@ -1702,6 +1744,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_ab_nocert_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1804,6 +1851,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_ab_cert_{{$timestamp}}",
                                 "type": "text"
                             },
                             {
@@ -2268,6 +2320,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_upd_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -2344,6 +2401,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cert_reg_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -2384,6 +2446,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cert_rev_{{$timestamp}}",
                                 "type": "text"
                             }
                         ],
@@ -2487,6 +2554,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_po_cancel_{{$timestamp}}",
                                 "type": "text"
                             }
                         ],

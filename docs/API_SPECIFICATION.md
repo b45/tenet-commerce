@@ -10,16 +10,12 @@
 ### 1.1 Base URL & Content Negotiation
 - **Local base URL:** `http://localhost:8081/api/v1`
 - **Content-Type:** `application/json; charset=utf-8`
-- **Production transport:** deployment-specific; this repository does not yet provide a production TLS/API-gateway deployment.
-
 ### 1.2 Required Request Headers
 ```http
 Authorization: Bearer <JWT_ACCESS_TOKEN>
-Idempotency-Key: <client-generated key> # Required by current middleware only for POS checkout, void, and stock adjustment
+Idempotency-Key: <client-generated key> # Required for all state-mutating endpoints (POS checkout/void/adjust, catalog products/categories/qris, supply chain, and ledger entries)
 X-Tenant-ID: <TENANT_SLUG>              # Fallback only; authenticated JWT tenant context has priority
 ```
-
-### 1.3 Health Check
 - **Endpoint:** `GET /health`
 - **Auth:** Public
 - **Response:** `200 OK` with the application health payload. This endpoint is outside the `/api/v1` namespace.
@@ -471,6 +467,7 @@ Password for all seeded dev accounts: `Password123!`
 ```
 
 - **Update QRIS Configuration:** `PUT /api/v1/pos/qris`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `inventory:write`)
 - **Request Body:**
 ```json
@@ -508,6 +505,7 @@ Password for all seeded dev accounts: `Password123!`
     ```
 
 - **Create Product:** `POST /api/v1/pos/products`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Request Body:**
     ```json
@@ -528,11 +526,13 @@ Password for all seeded dev accounts: `Password123!`
   - **Response (201 Created):** Returns created `Product` object.
 
 - **Update Product:** `PUT /api/v1/pos/products/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Request Body:** Similar to create product (without SKU and initial stock).
   - **Response (200 OK):** Returns updated `Product` object.
 
 - **Soft Delete Product:** `DELETE /api/v1/pos/products/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Response (200 OK):** `{"success": true, "data": {"message": "Product soft-deleted successfully", "id": "..."}}`
 
@@ -555,10 +555,14 @@ Password for all seeded dev accounts: `Password123!`
     }
     ```
 - **Create Category:** `POST /api/v1/pos/categories`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
+  - **Auth:** Requires permission: `inventory:write`
   - **Request Body:** `{"name": "Kue Kering Lebaran", "code": "CAT-KERING"}`
   - **Response (201 Created):** Returns created category.
 - **Update Category:** `PUT /api/v1/pos/categories/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Delete Category:** `DELETE /api/v1/pos/categories/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 
 ### 3.10 Inventory Stock Adjustment & Spoilage Write-Off
 - **Endpoint:** `POST /api/v1/pos/inventory/adjust`
@@ -604,6 +608,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.1 Register Supplier (with Optional Compliance Certificate)
 - **Endpoint:** `POST /api/v1/supply-chain/suppliers`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
 - **Request Body:**
 ```json
@@ -626,6 +631,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.2 Create Purchase Order (Enforcing Configurable Compliance)
 - **Endpoint:** `POST /api/v1/supply-chain/purchase-orders`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
 - **Request Body:**
 ```json
@@ -735,6 +741,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.6 Update Supplier
 - **Endpoint:** `PUT /api/v1/supply-chain/suppliers/:id`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Request Body:**
 ```json
@@ -755,6 +762,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.8 Register Certificate Renewal
 - **Endpoint:** `POST /api/v1/supply-chain/suppliers/:id/certificates`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Request Body:**
 ```json
@@ -771,6 +779,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.9 Revoke Certificate
 - **Endpoint:** `PUT /api/v1/supply-chain/certificates/:id/revoke`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Response (200 OK):** Immediately marks certificate expired (`{"success": true, "data": {"revoked": true}}`).
 
@@ -792,6 +801,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.12 Cancel Purchase Order
 - **Endpoint:** `PUT /api/v1/supply-chain/purchase-orders/:id/cancel`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Rules:** Only `DRAFT` or `ISSUED` purchase orders with zero received goods can be cancelled.
 - **Response (200 OK):** `{"success": true, "data": {"cancelled": true}}`.
