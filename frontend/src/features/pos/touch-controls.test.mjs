@@ -27,6 +27,12 @@ function load(path, react = require("react"), globals = {}, i18n) {
       if (name === "@/components/ui/modal") return { Modal: "dialog" };
       if (name === "@/components/ui/alert") return { Alert: "aside" };
       if (name === "@/lib/date") return { formatDateTime: value => value };
+      if (name === "@/features/auth/hooks/use-auth") return { useAuth: () => ({ user: { tenant_slug: "test-tenant" } }) };
+      if (name === "@/lib/offline/db") return {
+        saveCartDraft: () => Promise.resolve(),
+        getCartDraft: () => Promise.resolve([]),
+        clearCartDraft: () => Promise.resolve(),
+      };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
@@ -136,6 +142,8 @@ test("production cart updater keeps quantity one; explicit remove still deletes"
     useState: () => [state, update => { state = update(state); }],
     useCallback: fn => fn,
     useMemo: fn => fn(),
+    useRef: (val) => ({ current: val }),
+    useEffect: () => {},
   };
   const { useCart } = load("./hooks/use-cart.ts", fakeReact);
   const cart = useCart();
