@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { UserProfile } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
+import { useCapabilities } from "@/features/auth/hooks/use-capabilities";
 import {
   ShoppingCart,
   Receipt,
@@ -14,6 +15,7 @@ import {
   Truck,
   BookOpen,
   LayoutDashboard,
+  Lock,
   X,
 } from "lucide-react";
 
@@ -30,6 +32,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   permission?: string;
   roles?: string[];
+  featureKey?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -81,12 +84,14 @@ const NAV_ITEMS: NavItem[] = [
     href: "/dashboard",
     icon: LayoutDashboard,
     roles: ["MANAGER", "SUPER_ADMIN"],
+    featureKey: "pos.daily_summary",
   },
 ];
 
 export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { t } = useTranslation();
+  const { checkFeature } = useCapabilities();
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const desktopRef = React.useRef<HTMLElement>(null);
 
@@ -139,8 +144,11 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
       </div>
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label={t("nav.navigation")}>
         {filteredNav.map(item => {
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const active = item.href === "/pos"
+            ? pathname === "/pos"
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
+          const isLocked = item.featureKey ? !checkFeature(item.featureKey).allowed : false;
           return (
             <Link key={item.href} href={item.href} onClick={onClose}
               aria-current={active ? "page" : undefined}
@@ -149,7 +157,10 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
                 active ? "bg-[var(--color-surface-base)] text-[var(--color-action-primary)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-base)]"
               )}>
               <Icon className="h-5 w-5 shrink-0" />
-              <span className="min-w-0 break-words">{t(item.labelKey)}</span>
+              <span className="min-w-0 break-words flex-1">{t(item.labelKey)}</span>
+              {isLocked && (
+                <Lock className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+              )}
             </Link>
           );
         })}

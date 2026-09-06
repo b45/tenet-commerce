@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { apiClient, ApiError } from "@/lib/api";
+import { apiClient, ApiError, type UserProfile } from "@/lib/api";
 import { useAuth } from "./use-auth";
 
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED";
@@ -45,16 +45,26 @@ export interface UseCapabilitiesReturn {
   checkFeature: (featureKey: string) => FeatureDecision;
 }
 
-export function useCapabilities(): UseCapabilitiesReturn {
-  const { user, isLoading: isAuthLoading } = useAuth();
+export interface CapabilitiesProviderProps {
+  children: React.ReactNode;
+  initialUser?: UserProfile | null;
+}
+
+const CapabilitiesContext = React.createContext<UseCapabilitiesReturn | null>(null);
+
+function useCapabilitiesInternal(skip = false, overrideUser?: UserProfile | null): UseCapabilitiesReturn {
+  const { user: authUser, isLoading: isAuthLoading } = useAuth();
+  const effectiveUser = overrideUser !== undefined ? overrideUser : authUser;
+  const effectiveLoading = overrideUser !== undefined ? false : isAuthLoading;
+
   const [capabilities, setCapabilities] = React.useState<TenantCapabilities | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
   const [isServiceUnavailable, setIsServiceUnavailable] = React.useState<boolean>(false);
 
   const fetchCapabilities = React.useCallback(async () => {
-    if (!user) {
-      setCapabilities(null);
+    if (skip || !effectiveUser) {
+      if (!effectiveUser) setCapabilities(null);
       setIsLoading(false);
       return;
     }
@@ -83,17 +93,18 @@ export function useCapabilities(): UseCapabilitiesReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [effectiveUser, skip]);
 
   React.useEffect(() => {
-    if (isAuthLoading) return;
-    if (!user) {
+    if (skip) return;
+    if (effectiveLoading) return;
+    if (!effectiveUser) {
       setCapabilities(null);
       setIsLoading(false);
       return;
     }
     fetchCapabilities();
-  }, [user, isAuthLoading, fetchCapabilities]);
+  }, [effectiveUser, effectiveLoading, fetchCapabilities, skip]);
 
   const checkFeature = React.useCallback(
     (featureKey: string): FeatureDecision => {
@@ -119,10 +130,21 @@ export function useCapabilities(): UseCapabilitiesReturn {
 
   return {
     capabilities,
-    isLoading: isAuthLoading || isLoading,
+    isLoading: effectiveLoading || isLoading,
     error,
     isServiceUnavailable,
     refresh: fetchCapabilities,
     checkFeature,
   };
+}
+
+export function CapabilitiesProvider({ children, initialUser }: CapabilitiesProviderProps) {
+  const value = useCapabilitiesInternal(false, initialUser);
+  return React.createElement(CapabilitiesContext.Provider, { value }, children);
+}
+
+export function useCapabilities(): UseCapabilitiesReturn {
+  const context = React.useContext(CapabilitiesContext);
+  const standalone = useCapabilitiesInternal(Boolean(context));
+  return context ?? standalone;
 }

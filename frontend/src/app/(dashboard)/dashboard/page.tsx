@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { FeatureGate } from "@/components/auth/feature-gate";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -10,7 +11,8 @@ export default function DashboardPage() {
   const [viewFilter, setViewFilter] = React.useState("today");
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <FeatureGate featureKey="pos.daily_summary" requiredRole={["MANAGER", "SUPER_ADMIN"]}>
+      <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-[24px] font-bold tracking-tight text-[#0B0F19]">
@@ -117,5 +119,6 @@ export default function DashboardPage() {
         </CardHeader>
       </Card>
     </div>
+    </FeatureGate>
   );
 }

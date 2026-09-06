@@ -4,8 +4,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { authApi, type UserProfile } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { LanguageSelector } from "@/components/ui/language-selector";
 import { useTranslation } from "@/lib/i18n";
+import { useCapabilities } from "@/features/auth/hooks/use-capabilities";
 import { LogOut, Menu } from "lucide-react";
 
 interface HeaderProps {
@@ -17,6 +19,7 @@ interface HeaderProps {
 export function Header({ user, isSidebarOpen, onToggleSidebar }: HeaderProps) {
   const router = useRouter();
   const { t } = useTranslation();
+  const { capabilities } = useCapabilities();
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
   const handleLogout = async () => {
@@ -55,6 +58,11 @@ export function Header({ user, isSidebarOpen, onToggleSidebar }: HeaderProps) {
           <span title={user?.tenant_slug} className="min-w-0 truncate text-[var(--color-text-secondary)] font-medium">
             <bdi>{user?.tenant_slug || t("nav.sessionLoading")}</bdi>
           </span>
+          {capabilities?.plan && (
+            <Badge variant="outline" dot className="hidden sm:inline-flex text-[10px] py-0 px-2 h-5 font-medium border-emerald-600/25 text-emerald-700 bg-emerald-50/50">
+              {capabilities.plan.name}
+            </Badge>
+          )}
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { authApi, type UserProfile } from "@/lib/api";
+import { CapabilitiesProvider } from "@/features/auth/hooks/use-capabilities";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
 
@@ -51,24 +52,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen bg-[var(--color-surface-muted)]">
-      <Sidebar
-        user={user}
-        isOpen={isSidebarOpen}
-        onClose={closeSidebar}
-      />
-
-      <div className="flex flex-1 flex-col min-w-0">
-        <Header
+    <CapabilitiesProvider initialUser={user}>
+      <div className="flex min-h-screen bg-[var(--color-surface-muted)]">
+        <Sidebar
           user={user}
-          isSidebarOpen={isSidebarOpen}
-          onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+          isOpen={isSidebarOpen}
+          onClose={closeSidebar}
         />
 
-        <main className="min-w-0 flex-1 p-4 sm:p-6 xl:p-8">
-          {children}
-        </main>
+        <div className="flex flex-1 flex-col min-w-0">
+          <Header
+            user={user}
+            isSidebarOpen={isSidebarOpen}
+            onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+          />
+
+          <main className="min-w-0 flex-1 p-4 sm:p-6 xl:p-8">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </CapabilitiesProvider>
   );
 }
