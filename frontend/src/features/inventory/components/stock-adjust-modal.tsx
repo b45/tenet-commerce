@@ -88,7 +88,7 @@ export function StockAdjustModal({
     setErrorMessage(null);
 
     if (quantity <= 0) {
-      setErrorMessage("Jumlah penyesuaian harus lebih besar dari 0");
+      setErrorMessage(t("inventory.adjustModal.errors.quantityPositive"));
       return;
     }
 
@@ -106,7 +106,7 @@ export function StockAdjustModal({
       if (res.success) {
         onClose();
       } else {
-        setErrorMessage(res.error || "Gagal menyesuaikan stok");
+        setErrorMessage(res.error || t("inventory.adjustModal.errors.adjustFailed"));
       }
     } finally {
       setSubmitting(false);
@@ -144,7 +144,7 @@ export function StockAdjustModal({
             type="button"
             onClick={onClose}
             className="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]"
-            aria-label="Tutup modal"
+            aria-label={t("inventory.adjustModal.closeModal")}
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -174,7 +174,7 @@ export function StockAdjustModal({
                   {t("inventory.adjustModal.currentStock")}
                 </span>
                 <p className="font-mono text-sm font-semibold text-[var(--color-text-primary)]">
-                  {product.stock_quantity} unit
+                  {product.stock_quantity} {t("inventory.unit")}
                 </p>
               </div>
             </div>
@@ -289,7 +289,7 @@ export function StockAdjustModal({
               </span>
               <ArrowRight className="h-3.5 w-3.5 text-[var(--color-text-muted)]" aria-hidden="true" />
               <span className="rounded bg-neutral-200/70 px-1.5 py-0.5 text-[var(--color-text-primary)]">
-                {newStock} unit
+                {newStock} {t("inventory.unit")}
               </span>
             </div>
           </div>

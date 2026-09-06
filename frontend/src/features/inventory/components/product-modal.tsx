@@ -99,12 +99,12 @@ export function ProductModal({
     setErrorMessage(null);
 
     if (!name.trim()) {
-      setErrorMessage(t("inventory.productModal.name") + " wajib diisi");
+      setErrorMessage(t("inventory.productModal.errors.nameRequired"));
       return;
     }
 
     if (!isEdit && !sku.trim()) {
-      setErrorMessage(t("inventory.productModal.sku") + " wajib diisi");
+      setErrorMessage(t("inventory.productModal.errors.skuRequired"));
       return;
     }
 
@@ -127,7 +127,7 @@ export function ProductModal({
         if (res.success) {
           onClose();
         } else {
-          setErrorMessage(res.error || "Gagal memperbarui produk");
+          setErrorMessage(res.error || t("inventory.productModal.errors.updateFailed"));
         }
       } else {
         const payload: CreateProductPayload = {
@@ -148,7 +148,7 @@ export function ProductModal({
         if (res.success) {
           onClose();
         } else {
-          setErrorMessage(res.error || "Gagal membuat produk");
+          setErrorMessage(res.error || t("inventory.productModal.errors.createFailed"));
         }
       }
     } finally {
@@ -182,7 +182,7 @@ export function ProductModal({
             type="button"
             onClick={onClose}
             className="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]"
-            aria-label="Tutup modal"
+            aria-label={t("inventory.productModal.closeModal")}
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>

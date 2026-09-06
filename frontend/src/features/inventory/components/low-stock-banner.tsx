@@ -59,7 +59,7 @@ export function LowStockBanner({
           type="button"
           onClick={() => setDismissed(true)}
           className="rounded-lg p-1.5 text-amber-700 hover:bg-amber-200/50 hover:text-amber-900"
-          aria-label="Tutup pemberitahuan"
+          aria-label={t("inventory.lowStockBanner.dismiss")}
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>

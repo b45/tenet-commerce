@@ -85,6 +85,7 @@ export default function InventoryPage() {
           <button
             type="button"
             onClick={() => setFeedbackMessage(null)}
+            aria-label={t("inventory.close")}
             className="text-emerald-600 hover:text-emerald-800"
           >
             ✕
@@ -142,14 +143,14 @@ export default function InventoryPage() {
         onSubmitCreate={async (payload) => {
           const res = await createProduct(payload);
           if (res.success) {
-            showFeedback(`Produk ${payload.name} berhasil ditambahkan.`);
+            showFeedback(t("inventory.productModal.createSuccess", { name: payload.name }));
           }
           return res;
         }}
         onSubmitUpdate={async (id, payload) => {
           const res = await updateProduct(id, payload);
           if (res.success) {
-            showFeedback(`Produk ${payload.name} berhasil diperbarui.`);
+            showFeedback(t("inventory.productModal.updateSuccess", { name: payload.name }));
           }
           return res;
         }}

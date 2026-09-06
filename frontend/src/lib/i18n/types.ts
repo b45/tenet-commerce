@@ -217,10 +217,14 @@ export interface TranslationSchema {
     allCategories: string;
     addProduct: string;
     adjustStock: string;
+    refresh: string;
+    unit: string;
+    close: string;
     lowStockBanner: {
       alertTitle: string;
       alertMessage: string;
       viewItems: string;
+      dismiss: string;
     };
     table: {
       sku: string;
@@ -234,11 +238,14 @@ export interface TranslationSchema {
       active: string;
       inactive: string;
       halalBadge: string;
+      halalNotice: string;
       emptyTitle: string;
       emptyDescription: string;
       editAction: string;
       adjustAction: string;
       deleteAction: string;
+      loading: string;
+      generalCategory: string;
     };
     productModal: {
       createTitle: string;
@@ -263,6 +270,15 @@ export interface TranslationSchema {
       save: string;
       saving: string;
       cancel: string;
+      closeModal: string;
+      createSuccess: string;
+      updateSuccess: string;
+      errors: {
+        nameRequired: string;
+        skuRequired: string;
+        createFailed: string;
+        updateFailed: string;
+      };
     };
     adjustModal: {
       title: string;
@@ -290,7 +306,12 @@ export interface TranslationSchema {
       submit: string;
       submitting: string;
       cancel: string;
+      closeModal: string;
       successMessage: string;
+      errors: {
+        quantityPositive: string;
+        adjustFailed: string;
+      };
     };
     deleteDialog: {
       title: string;
@@ -298,7 +319,11 @@ export interface TranslationSchema {
       confirm: string;
       cancel: string;
       deleting: string;
+      closeDialog: string;
       successMessage: string;
+      errors: {
+        deleteFailed: string;
+      };
     };
     permissions: {
       readOnlyTooltip: string;

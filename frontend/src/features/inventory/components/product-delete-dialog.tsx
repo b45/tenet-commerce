@@ -49,7 +49,7 @@ export function ProductDeleteDialog({
       if (res.success) {
         onClose();
       } else {
-        setErrorMessage(res.error || "Gagal menonaktifkan produk");
+        setErrorMessage(res.error || t("inventory.deleteDialog.errors.deleteFailed"));
       }
     } finally {
       setSubmitting(false);
@@ -79,7 +79,7 @@ export function ProductDeleteDialog({
             type="button"
             onClick={onClose}
             className="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]"
-            aria-label="Tutup"
+            aria-label={t("inventory.deleteDialog.closeDialog")}
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>

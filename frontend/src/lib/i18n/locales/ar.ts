@@ -203,10 +203,14 @@ export const ar: TranslationSchema = {
     allCategories: "جميع التصنيفات",
     addProduct: "إضافة منتج",
     adjustStock: "تسوية المخزون",
+    refresh: "تحديث",
+    unit: "وحدة",
+    close: "إغلاق",
     lowStockBanner: {
       alertTitle: "تنبيه نقص المخزون",
       alertMessage: "يوجد {count} من المنتجات التي بلغت أو انخفضت عن حد إعادة الطلب الأدنى.",
       viewItems: "عرض المنتجات",
+      dismiss: "إغلاق التنبيه",
     },
     table: {
       sku: "رمز SKU / الباركود",
@@ -220,11 +224,14 @@ export const ar: TranslationSchema = {
       active: "نشط",
       inactive: "غير نشط",
       halalBadge: "حلال",
+      halalNotice: "معتمد بشهادة حلال رسمية",
       emptyTitle: "لم يتم العثور على منتجات",
       emptyDescription: "لا توجد منتجات تطابق معايير البحث أو التصفية الحالية.",
       editAction: "تعديل المنتج",
       adjustAction: "تسوية الجرد (أوبنامي)",
       deleteAction: "تعطيل",
+      loading: "جارٍ تحميل بيانات المخزون...",
+      generalCategory: "عام",
     },
     productModal: {
       createTitle: "إضافة منتج جديد",
@@ -249,6 +256,15 @@ export const ar: TranslationSchema = {
       save: "حفظ المنتج",
       saving: "جارٍ الحفظ...",
       cancel: "إلغاء",
+      closeModal: "إغلاق النافذة",
+      createSuccess: "تمت إضافة المنتج {name} بنجاح.",
+      updateSuccess: "تم تحديث بيانات المنتج {name} بنجاح.",
+      errors: {
+        nameRequired: "اسم المنتج مطلوب",
+        skuRequired: "رمز SKU للمنتج مطلوب",
+        createFailed: "فشل في إضافة المنتج",
+        updateFailed: "فشل في تحديث بيانات المنتج",
+      },
     },
     adjustModal: {
       title: "تسوية الجرد المخزني",
@@ -276,7 +292,12 @@ export const ar: TranslationSchema = {
       submit: "تأكيد التسوية",
       submitting: "جارٍ تنفيذ التسوية...",
       cancel: "إلغاء",
+      closeModal: "إغلاق النافذة",
       successMessage: "تمت تسوية مخزون {name} بنجاح ليصبح {quantity}.",
+      errors: {
+        quantityPositive: "يجب أن تكون كمية التسوية أكبر من صفر",
+        adjustFailed: "فشلت عملية تسوية المخزون",
+      },
     },
     deleteDialog: {
       title: "تعطيل المنتج",
@@ -284,7 +305,11 @@ export const ar: TranslationSchema = {
       confirm: "نعم، تعطيل",
       cancel: "إلغاء",
       deleting: "جارٍ التعطيل...",
+      closeDialog: "إغلاق النافذة",
       successMessage: "تم تعطيل المنتج {name} بنجاح.",
+      errors: {
+        deleteFailed: "فشل في تعطيل المنتج",
+      },
     },
     permissions: {
       readOnlyTooltip: "وصول مقيد: يلزم إذن inventory:write لتنفيذ هذا الإجراء.",
