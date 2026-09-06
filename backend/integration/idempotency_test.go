@@ -356,3 +356,73 @@ func TestIdempotency_KeyLengthLimit(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "IDEMPOTENCY_KEY_TOO_LONG")
 }
+
+// TestIdempotency_PostCommitCrashRecoveryAndSingleStockJournalEffect simulates a crash
+// after the business transaction commits but before the HTTP response or Redis cache write.
+// When the client retries with the same key, it must return the exact same document, exactly ONE stock decrement,
+// and exactly ONE balanced journal entry in the ledger.
+func TestIdempotency_PostCommitCrashRecoveryAndSingleStockJournalEffect(t *testing.T) {
+	db := newTestDatabase(t)
+	rdb := newTestRedisClient(t)
+
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posRepo := pos.NewRepository()
+	posService := pos.NewService(posRepo, ledgerService)
+
+	ctx := context.Background()
+	conn, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+
+	// Switch connection to tenant schema
+	_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart;")
+	require.NoError(t, err)
+
+	initialStock := stockForSKU(t, db, "SKU-CHICKEN-01")
+	idempotencyKey := fmt.Sprintf("idem-crash-recovery-%d", time.Now().UnixNano())
+
+	payload := pos.CheckoutRequest{
+		Items: []pos.CartItemRequest{
+			{SKU: "SKU-CHICKEN-01", Quantity: 3},
+		},
+		PaymentMethod: "CASH",
+		CashTendered:  func() *float64 { val := float64(200000); return &val }(),
+	}
+
+	// 1. First execution through service directly (simulating successful commit before network drop)
+	resp1, err := posService.Checkout(ctx, conn, "11111111-1111-1111-1111-111111111111", idempotencyKey, payload)
+	require.NoError(t, err)
+	require.NotNil(t, resp1)
+	assert.NotEmpty(t, resp1.TransactionID)
+
+	stockAfterFirst := stockForSKU(t, db, "SKU-CHICKEN-01")
+	assert.Equal(t, initialStock-3, stockAfterFirst, "stock decremented by 3 on initial commit")
+
+	// Verify exactly one journal entry exists for this transaction
+	var journalCount int
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM ledger_entries WHERE source_document_id = $1;", resp1.TransactionID).Scan(&journalCount)
+	require.NoError(t, err)
+	assert.Equal(t, 1, journalCount, "must have exactly 1 journal entry after first commit")
+
+	// 2. Client retries: service Checkout called again with identical idempotencyKey
+	resp2, err := posService.Checkout(ctx, conn, "11111111-1111-1111-1111-111111111111", idempotencyKey, payload)
+	require.NoError(t, err)
+	require.NotNil(t, resp2)
+
+	// Invariants after retry:
+	// - Returned document IDs match
+	assert.Equal(t, resp1.TransactionID, resp2.TransactionID)
+	assert.Equal(t, resp1.TransactionNumber, resp2.TransactionNumber)
+	assert.Equal(t, resp1.TotalAmount, resp2.TotalAmount)
+
+	// - Stock MUST NOT decrement again
+	stockAfterRetry := stockForSKU(t, db, "SKU-CHICKEN-01")
+	assert.Equal(t, stockAfterFirst, stockAfterRetry, "stock must NOT decrement a second time on retry")
+
+	// - Exactly ONE journal entry remains
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM ledger_entries WHERE source_document_id = $1;", resp1.TransactionID).Scan(&journalCount)
+	require.NoError(t, err)
+	assert.Equal(t, 1, journalCount, "must still have exactly 1 journal entry (no duplicate accounting effects)")
+
+	_ = rdb // clean up references
+}

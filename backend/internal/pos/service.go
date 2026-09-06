@@ -50,6 +50,37 @@ func (s *Service) Checkout(
 	}
 	defer tx.Rollback(ctx) // Safe: no-op if transaction has already been committed
 
+	// 1.1 Atomic Idempotency Check: if a transaction with this idempotency key was already committed,
+	// recover and replay the exact committed receipt without repeating stock or financial mutations.
+	if idempotencyKey != "" {
+		existingTxn, existingItems, err := s.repo.GetTransactionByIdempotencyKey(ctx, tx, idempotencyKey)
+		if err == nil && existingTxn != nil {
+			reqLogger.Info("Idempotent transaction already committed in business transaction; returning existing result",
+				"idempotency_key", idempotencyKey,
+				"transaction_number", existingTxn.TransactionNumber,
+			)
+			return &CheckoutResponse{
+				TransactionID:     existingTxn.ID,
+				TransactionNumber: existingTxn.TransactionNumber,
+				IdempotencyKey:    existingTxn.IdempotencyKey,
+				CashierID:         existingTxn.CashierID,
+				PaymentMethod:     existingTxn.PaymentMethod,
+				Status:            existingTxn.Status,
+				CustomerName:      existingTxn.CustomerName,
+				Notes:             existingTxn.Notes,
+				CashTendered:      existingTxn.CashTendered,
+				ChangeAmount:      existingTxn.ChangeAmount,
+				PaymentReference:  existingTxn.PaymentReference,
+				Items:             existingItems,
+				SubtotalAmount:    existingTxn.SubtotalAmount,
+				TaxAmount:         existingTxn.TaxAmount,
+				DiscountAmount:    existingTxn.DiscountAmount,
+				TotalAmount:       existingTxn.TotalAmount,
+				CreatedAt:         existingTxn.CreatedAt,
+			}, nil
+		}
+	}
+
 	// 2. Extract and aggregate SKUs
 	skuMap := make(map[string]int)
 	var skus []string
