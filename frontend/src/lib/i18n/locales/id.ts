@@ -203,10 +203,14 @@ export const id: TranslationSchema = {
     allCategories: "Semua Kategori",
     addProduct: "Tambah Produk",
     adjustStock: "Sesuaikan Stok",
+    refresh: "Perbarui",
+    unit: "unit",
+    close: "Tutup",
     lowStockBanner: {
       alertTitle: "Peringatan Stok Menipis",
       alertMessage: "Terdapat {count} produk yang telah mencapai atau di bawah ambang batas pemesanan ulang.",
       viewItems: "Lihat Produk",
+      dismiss: "Tutup pemberitahuan",
     },
     table: {
       sku: "SKU / Barcode",
@@ -220,11 +224,14 @@ export const id: TranslationSchema = {
       active: "Aktif",
       inactive: "Nonaktif",
       halalBadge: "Halal",
+      halalNotice: "Tersertifikasi Halal Resmi",
       emptyTitle: "Tidak Ada Produk Ditemukan",
       emptyDescription: "Tidak ada produk yang cocok dengan kriteria pencarian atau filter yang dipilih.",
       editAction: "Edit Produk",
       adjustAction: "Sesuaikan Stok (Opname)",
       deleteAction: "Nonaktifkan",
+      loading: "Memuat inventori...",
+      generalCategory: "Umum",
     },
     productModal: {
       createTitle: "Tambah Produk Baru",
@@ -249,6 +256,15 @@ export const id: TranslationSchema = {
       save: "Simpan Produk",
       saving: "Menyimpan...",
       cancel: "Batal",
+      closeModal: "Tutup modal",
+      createSuccess: "Produk {name} berhasil ditambahkan.",
+      updateSuccess: "Produk {name} berhasil diperbarui.",
+      errors: {
+        nameRequired: "Nama produk wajib diisi",
+        skuRequired: "SKU produk wajib diisi",
+        createFailed: "Gagal menambahkan produk",
+        updateFailed: "Gagal memperbarui produk",
+      },
     },
     adjustModal: {
       title: "Penyesuaian Stok (Stock Opname)",
@@ -276,7 +292,12 @@ export const id: TranslationSchema = {
       submit: "Konfirmasi Penyesuaian",
       submitting: "Memproses Penyesuaian...",
       cancel: "Batal",
+      closeModal: "Tutup modal",
       successMessage: "Stok produk {name} berhasil disesuaikan menjadi {quantity}.",
+      errors: {
+        quantityPositive: "Jumlah penyesuaian harus lebih besar dari 0",
+        adjustFailed: "Gagal menyesuaikan stok",
+      },
     },
     deleteDialog: {
       title: "Nonaktifkan Produk",
@@ -284,7 +305,11 @@ export const id: TranslationSchema = {
       confirm: "Ya, Nonaktifkan",
       cancel: "Batal",
       deleting: "Menonaktifkan...",
+      closeDialog: "Tutup dialog",
       successMessage: "Produk {name} berhasil dinonaktifkan.",
+      errors: {
+        deleteFailed: "Gagal menonaktifkan produk",
+      },
     },
     permissions: {
       readOnlyTooltip: "Akses terbatas: Memerlukan izin inventory:write untuk melakukan tindakan ini.",

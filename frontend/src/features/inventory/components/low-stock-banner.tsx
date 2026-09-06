@@ -25,17 +25,17 @@ export function LowStockBanner({
   return (
     <aside
       aria-label={t("inventory.lowStockBanner.alertTitle")}
-      className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-amber-900 shadow-sm backdrop-blur-sm dark:text-amber-200"
+      className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-amber-900 shadow-sm backdrop-blur-sm"
     >
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-200/60 text-amber-700">
           <AlertTriangle className="h-5 w-5" aria-hidden="true" />
         </div>
         <div>
-          <h2 className="text-sm font-semibold">
+          <h2 className="text-sm font-semibold text-amber-950">
             {t("inventory.lowStockBanner.alertTitle")}
           </h2>
-          <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+          <p className="text-xs text-amber-800">
             {t("inventory.lowStockBanner.alertMessage", { count })}
           </p>
         </div>
@@ -48,7 +48,7 @@ export function LowStockBanner({
           className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
             isFilterActive
               ? "bg-amber-600 text-white shadow-sm"
-              : "bg-amber-500/20 text-amber-900 hover:bg-amber-500/30 dark:text-amber-200"
+              : "bg-amber-200/60 text-amber-900 hover:bg-amber-200"
           }`}
         >
           <span>{t("inventory.lowStockBanner.viewItems")}</span>
@@ -58,8 +58,8 @@ export function LowStockBanner({
         <button
           type="button"
           onClick={() => setDismissed(true)}
-          className="rounded-lg p-1.5 text-amber-700/70 hover:bg-amber-500/20 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200"
-          aria-label="Tutup pemberitahuan"
+          className="rounded-lg p-1.5 text-amber-700 hover:bg-amber-200/50 hover:text-amber-900"
+          aria-label={t("inventory.lowStockBanner.dismiss")}
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>

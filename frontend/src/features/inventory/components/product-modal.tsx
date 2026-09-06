@@ -99,12 +99,12 @@ export function ProductModal({
     setErrorMessage(null);
 
     if (!name.trim()) {
-      setErrorMessage(t("inventory.productModal.name") + " wajib diisi");
+      setErrorMessage(t("inventory.productModal.errors.nameRequired"));
       return;
     }
 
     if (!isEdit && !sku.trim()) {
-      setErrorMessage(t("inventory.productModal.sku") + " wajib diisi");
+      setErrorMessage(t("inventory.productModal.errors.skuRequired"));
       return;
     }
 
@@ -127,7 +127,7 @@ export function ProductModal({
         if (res.success) {
           onClose();
         } else {
-          setErrorMessage(res.error || "Gagal memperbarui produk");
+          setErrorMessage(res.error || t("inventory.productModal.errors.updateFailed"));
         }
       } else {
         const payload: CreateProductPayload = {
@@ -148,7 +148,7 @@ export function ProductModal({
         if (res.success) {
           onClose();
         } else {
-          setErrorMessage(res.error || "Gagal membuat produk");
+          setErrorMessage(res.error || t("inventory.productModal.errors.createFailed"));
         }
       }
     } finally {
@@ -168,12 +168,12 @@ export function ProductModal({
           onClose();
         }
       }}
-      className="m-auto w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-0 shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900"
+      className="m-auto w-full max-w-lg rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-base)] p-0 shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm"
     >
       <div className="flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4 dark:border-neutral-800">
-          <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <div className="flex items-center justify-between border-b border-[var(--color-border-hairline)] px-6 py-4">
+          <h3 className="text-base font-semibold text-[var(--color-text-primary)]">
             {isEdit
               ? t("inventory.productModal.editTitle")
               : t("inventory.productModal.createTitle")}
@@ -181,8 +181,8 @@ export function ProductModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800"
-            aria-label="Tutup modal"
+            className="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]"
+            aria-label={t("inventory.productModal.closeModal")}
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -191,7 +191,7 @@ export function ProductModal({
         {/* Scrollable Form Body */}
         <form onSubmit={handleSubmit} className="overflow-y-auto px-6 py-4 space-y-4">
           {errorMessage && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-600 dark:text-rose-400">
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-600">
               {errorMessage}
             </div>
           )}
@@ -199,7 +199,7 @@ export function ProductModal({
           {/* SKU & Barcode */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                 {t("inventory.productModal.sku")} *
               </label>
               <input
@@ -209,12 +209,12 @@ export function ProductModal({
                 value={sku}
                 onChange={(e) => setSku(e.target.value.toUpperCase())}
                 placeholder={t("inventory.productModal.skuPlaceholder")}
-                className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-neutral-50/50 px-3 font-mono text-xs text-neutral-900 uppercase focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:bg-neutral-100 disabled:text-neutral-400 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100 dark:disabled:bg-neutral-800"
+                className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-[var(--color-surface-muted)] px-3 font-mono text-xs text-[var(--color-text-primary)] uppercase focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)] disabled:bg-neutral-100 disabled:text-neutral-400"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                 {t("inventory.productModal.barcode")}
               </label>
               <input
@@ -222,14 +222,14 @@ export function ProductModal({
                 value={barcode}
                 onChange={(e) => setBarcode(e.target.value)}
                 placeholder={t("inventory.productModal.barcodePlaceholder")}
-                className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+                className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 font-mono text-xs text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
               />
             </div>
           </div>
 
           {/* Product Name */}
           <div>
-            <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+            <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
               {t("inventory.productModal.name")} *
             </label>
             <input
@@ -238,19 +238,19 @@ export function ProductModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t("inventory.productModal.namePlaceholder")}
-              className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+              className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
             />
           </div>
 
           {/* Category */}
           <div>
-            <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+            <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
               {t("inventory.productModal.category")}
             </label>
             <select
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value)}
-              className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-xs text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+              className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
             >
               <option value="">{t("inventory.productModal.selectCategory")}</option>
               {categories.map((c) => (
@@ -264,7 +264,7 @@ export function ProductModal({
           {/* Pricing: Sale Price & Cost Price */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                 {t("inventory.productModal.unitPrice")} *
               </label>
               <input
@@ -274,12 +274,12 @@ export function ProductModal({
                 required
                 value={unitPrice || ""}
                 onChange={(e) => setUnitPrice(Number(e.target.value))}
-                className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 font-mono text-sm font-semibold text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+                className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 font-mono text-sm font-semibold text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                 {t("inventory.productModal.costPrice")}
               </label>
               <input
@@ -288,7 +288,7 @@ export function ProductModal({
                 step="100"
                 value={costPrice || ""}
                 onChange={(e) => setCostPrice(Number(e.target.value))}
-                className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 font-mono text-sm text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+                className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 font-mono text-sm text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
               />
             </div>
           </div>
@@ -297,7 +297,7 @@ export function ProductModal({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {!isEdit && (
               <div>
-                <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                   {t("inventory.productModal.initialStock")}
                 </label>
                 <input
@@ -305,13 +305,13 @@ export function ProductModal({
                   min="0"
                   value={initialStock || ""}
                   onChange={(e) => setInitialStock(Number(e.target.value))}
-                  className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 font-mono text-sm text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+                  className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 font-mono text-sm text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                 {t("inventory.productModal.reorderThreshold")}
               </label>
               <input
@@ -319,14 +319,14 @@ export function ProductModal({
                 min="0"
                 value={reorderThreshold || ""}
                 onChange={(e) => setReorderThreshold(Number(e.target.value))}
-                className="mt-1.5 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 font-mono text-sm text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+                className="mt-1.5 h-10 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white px-3 font-mono text-sm text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
               />
             </div>
           </div>
 
           {/* Description */}
           <div>
-            <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+            <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
               {t("inventory.productModal.description")}
             </label>
             <textarea
@@ -334,21 +334,21 @@ export function ProductModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("inventory.productModal.descriptionPlaceholder")}
-              className="mt-1.5 w-full rounded-xl border border-neutral-200 bg-white p-3 text-xs text-neutral-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-100"
+              className="mt-1.5 w-full rounded-xl border border-[var(--color-border-hairline)] bg-white p-3 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-action-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]"
             />
           </div>
 
           {/* Halal Certified & Active Checkboxes */}
-          <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/50 p-4 dark:border-neutral-800 dark:bg-neutral-800/30">
+          <div className="space-y-3 rounded-xl border border-[var(--color-border-hairline)] bg-[var(--color-surface-muted)] p-4">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={isHalal}
                 onChange={(e) => setIsHalal(e.target.checked)}
-                className="h-4 w-4 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500 dark:border-neutral-700"
+                className="h-4 w-4 rounded border-neutral-300 text-[var(--color-status-success-text)] focus:ring-[var(--color-action-primary)]"
               />
-              <div className="flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+              <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-primary)]">
+                <ShieldCheck className="h-4 w-4 text-[var(--color-status-success-text)]" aria-hidden="true" />
                 <span>{t("inventory.productModal.halalCertified")}</span>
               </div>
             </label>
@@ -358,27 +358,27 @@ export function ProductModal({
                 type="checkbox"
                 checked={isActive}
                 onChange={(e) => setIsActive(e.target.checked)}
-                className="h-4 w-4 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500 dark:border-neutral-700"
+                className="h-4 w-4 rounded border-neutral-300 text-[var(--color-action-primary)] focus:ring-[var(--color-action-primary)]"
               />
-              <span className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+              <span className="text-xs font-medium text-[var(--color-text-primary)]">
                 {t("inventory.productModal.activeStatus")}
               </span>
             </label>
           </div>
 
           {/* Footer Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-[var(--color-border-hairline)]">
             <button
               type="button"
               onClick={onClose}
-              className="h-10 rounded-xl px-4 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+              className="h-10 rounded-xl px-4 text-xs font-medium text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-muted)]"
             >
               {t("inventory.productModal.cancel")}
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="h-10 rounded-xl bg-emerald-600 px-5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+              className="h-10 rounded-xl bg-[var(--color-action-primary)] px-5 text-xs font-medium text-white shadow-sm transition hover:bg-[var(--color-action-primary-hover)] disabled:opacity-50"
             >
               {submitting
                 ? t("inventory.productModal.saving")

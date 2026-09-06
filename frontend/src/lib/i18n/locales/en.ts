@@ -203,10 +203,14 @@ export const en: TranslationSchema = {
     allCategories: "All Categories",
     addProduct: "Add Product",
     adjustStock: "Adjust Stock",
+    refresh: "Refresh",
+    unit: "unit",
+    close: "Close",
     lowStockBanner: {
       alertTitle: "Low Stock Warning",
       alertMessage: "There are {count} products at or below their reorder threshold.",
       viewItems: "View Products",
+      dismiss: "Dismiss alert",
     },
     table: {
       sku: "SKU / Barcode",
@@ -220,11 +224,14 @@ export const en: TranslationSchema = {
       active: "Active",
       inactive: "Inactive",
       halalBadge: "Halal",
+      halalNotice: "Officially Halal Certified",
       emptyTitle: "No Products Found",
       emptyDescription: "No products matched the search query or active filters.",
       editAction: "Edit Product",
       adjustAction: "Adjust Stock (Opname)",
       deleteAction: "Deactivate",
+      loading: "Loading inventory...",
+      generalCategory: "General",
     },
     productModal: {
       createTitle: "Add New Product",
@@ -249,6 +256,15 @@ export const en: TranslationSchema = {
       save: "Save Product",
       saving: "Saving...",
       cancel: "Cancel",
+      closeModal: "Close modal",
+      createSuccess: "Product {name} successfully added.",
+      updateSuccess: "Product {name} successfully updated.",
+      errors: {
+        nameRequired: "Product name is required",
+        skuRequired: "Product SKU is required",
+        createFailed: "Failed to create product",
+        updateFailed: "Failed to update product",
+      },
     },
     adjustModal: {
       title: "Stock Adjustment (Stock Opname)",
@@ -276,7 +292,12 @@ export const en: TranslationSchema = {
       submit: "Confirm Adjustment",
       submitting: "Processing Adjustment...",
       cancel: "Cancel",
+      closeModal: "Close modal",
       successMessage: "Stock for {name} was successfully adjusted to {quantity}.",
+      errors: {
+        quantityPositive: "Adjustment quantity must be greater than 0",
+        adjustFailed: "Failed to adjust stock",
+      },
     },
     deleteDialog: {
       title: "Deactivate Product",
@@ -284,7 +305,11 @@ export const en: TranslationSchema = {
       confirm: "Yes, Deactivate",
       cancel: "Cancel",
       deleting: "Deactivating...",
+      closeDialog: "Close dialog",
       successMessage: "Product {name} has been deactivated.",
+      errors: {
+        deleteFailed: "Failed to deactivate product",
+      },
     },
     permissions: {
       readOnlyTooltip: "Restricted Access: Requires inventory:write permission to perform this action.",
