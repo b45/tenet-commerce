@@ -13,6 +13,9 @@ const (
 
 	DefaultTTL        = 24 * time.Hour
 	InProgressLockTTL = 30 * time.Second
+
+	MaxKeyLength     = 128
+	MaxBodySizeBytes = 2 * 1024 * 1024 // 2 MB
 )
 
 // Record represents a persisted idempotency request record in the tenant schema.
