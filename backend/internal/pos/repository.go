@@ -219,6 +219,64 @@ func (r *Repository) GenerateTransactionNumber() string {
 	return fmt.Sprintf("TXN-%s-%s", datePart, hexPart)
 }
 
+// GetTransactionByIdempotencyKey retrieves an existing transaction by its unique idempotency key
+func (r *Repository) GetTransactionByIdempotencyKey(ctx context.Context, tx pgx.Tx, key string) (*Transaction, []TransactionItem, error) {
+	queryTxn := `
+		SELECT 
+			id, transaction_number, idempotency_key, cashier_id,
+			subtotal_amount, tax_amount, discount_amount, total_amount,
+			payment_method, status, customer_name, notes,
+			COALESCE(cash_tendered, 0), COALESCE(change_amount, 0),
+			payment_reference, void_reason, voided_at, voided_by, created_at
+		FROM transactions
+		WHERE idempotency_key = $1
+	`
+
+	var t Transaction
+	err := tx.QueryRow(ctx, queryTxn, key).Scan(
+		&t.ID, &t.TransactionNumber, &t.IdempotencyKey, &t.CashierID,
+		&t.SubtotalAmount, &t.TaxAmount, &t.DiscountAmount, &t.TotalAmount,
+		&t.PaymentMethod, &t.Status, &t.CustomerName, &t.Notes,
+		&t.CashTendered, &t.ChangeAmount, &t.PaymentReference,
+		&t.VoidReason, &t.VoidedAt, &t.VoidedBy, &t.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, ErrTransactionNotFound
+		}
+		return nil, nil, fmt.Errorf("query transaction by idempotency key: %w", err)
+	}
+
+	queryItems := `
+		SELECT 
+			ti.id, ti.transaction_id, ti.product_id, p.sku, p.name,
+			ti.quantity, ti.unit_price, ti.cost_price, ti.subtotal
+		FROM transaction_items ti
+		JOIN products p ON ti.product_id = p.id
+		WHERE ti.transaction_id = $1
+		ORDER BY ti.id ASC
+	`
+	rows, err := tx.Query(ctx, queryItems, t.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query transaction items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []TransactionItem
+	for rows.Next() {
+		var item TransactionItem
+		if err := rows.Scan(
+			&item.ID, &item.TransactionID, &item.ProductID, &item.SKU, &item.Name,
+			&item.Quantity, &item.UnitPrice, &item.CostPrice, &item.Subtotal,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan transaction item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	return &t, items, nil
+}
+
 // CreateTransaction inserts a master transaction record inside an active database transaction
 func (r *Repository) CreateTransaction(ctx context.Context, tx pgx.Tx, txn *Transaction) error {
 	query := `
