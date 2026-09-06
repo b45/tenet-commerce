@@ -70,6 +70,59 @@ CREATE TABLE public.users (
 );
 
 CREATE INDEX idx_users_tenant_email ON public.users(tenant_id, email);
+
+-- Subscription Plans Catalog
+CREATE TABLE public.plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(63) NOT NULL UNIQUE,          -- 'starter', 'growth', 'enterprise'
+    name VARCHAR(255) NOT NULL,
+    version INT NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Plan Features & Quota Grants
+CREATE TABLE public.plan_features (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plan_id UUID NOT NULL REFERENCES public.plans(id) ON DELETE CASCADE,
+    feature_key VARCHAR(127) NOT NULL,
+    grant_type VARCHAR(31) NOT NULL DEFAULT 'BOOLEAN' CHECK (grant_type IN ('BOOLEAN', 'QUOTA')),
+    quota_limit INT NULL,                      -- NULL represents unlimited capacity
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_plan_feature UNIQUE (plan_id, feature_key)
+);
+
+CREATE INDEX idx_plan_features_plan_key ON public.plan_features(plan_id, feature_key);
+
+-- Tenant Subscriptions
+CREATE TABLE public.tenant_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL UNIQUE REFERENCES public.tenants(id) ON DELETE RESTRICT,
+    plan_id UUID NOT NULL REFERENCES public.plans(id) ON DELETE RESTRICT,
+    status VARCHAR(31) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELED')),
+    current_period_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    current_period_end TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '365 days'),
+    canceled_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_tenant_subscriptions_tenant ON public.tenant_subscriptions(tenant_id);
+
+-- Subscription Audit Log
+CREATE TABLE public.subscription_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    actor_id UUID NULL REFERENCES public.users(id) ON DELETE SET NULL,
+    action VARCHAR(63) NOT NULL,
+    before_state JSONB NULL,
+    after_state JSONB NOT NULL,
+    reason TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 ```
 
 ---

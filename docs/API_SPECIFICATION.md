@@ -112,14 +112,81 @@ Password for all seeded dev accounts: `Password123!`
   "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
-- **Response:** The same token-pair envelope as login. The current implementation issues a new access and refresh token after validating the submitted refresh token.
+- **Response:** The same token-pair envelope as login.
+- **Security & Lifecycle Rules:**
+  - Enforces **Refresh Token Rotation**: Upon successful refresh, the submitted refresh token is rotated and blacklisted in Redis (`auth:blacklist:<token_hash>`) for its remaining TTL to prevent replay attacks.
+  - Revoked refresh tokens are rejected immediately with HTTP 401 `TOKEN_REVOKED`.
 
 ### 2.3 Current Identity
 - **Endpoint:** `GET /api/v1/auth/me`
 - **Auth:** Bearer access token
 - **Response:** The authenticated JWT identity (`id`, `tenant_slug`, `role`, and `permissions`).
+- **Security Rules:**
+  - Validates cryptographic signature and checks Redis blacklist.
+  - If the token has been revoked via logout, returns HTTP 401 `TOKEN_REVOKED`.
 
-### 2.4 Tenant Provisioning — Planned / Not Registered
+### 2.4 User Session Logout
+- **Endpoint:** `POST /api/v1/auth/logout`
+- **Auth:** Bearer access token
+- **Description:** Invalidates the current session by writing the SHA-256 digest of the Bearer access token (and optionally the submitted refresh token) to Redis (`auth:blacklist:<sha256_hash>`) with a TTL equal to the token's remaining lifespan.
+- **Request Body (Optional):**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Logged out successfully"
+  }
+}
+```
+- **Error Responses:**
+  - `401 UNAUTHORIZED` / `MISSING_AUTH_HEADER`: No Bearer token provided.
+  - `401 TOKEN_REVOKED`: Token already revoked.
+
+### 2.5 Tenant Capabilities Introspection
+- **Endpoint:** `GET /api/v1/me/capabilities`
+- **Auth:** Bearer access token
+- **Description:** Returns the active subscription tier, policy version, and authoritative feature capability decisions for the tenant context.
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "tenant_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "plan": {
+      "code": "growth",
+      "name": "Growth Business Tier",
+      "status": "ACTIVE"
+    },
+    "capabilities": {
+      "pos.checkout": {
+        "allowed": true,
+        "reason": "ENTITLED",
+        "grant_type": "BOOLEAN"
+      },
+      "pos.daily_summary": {
+        "allowed": true,
+        "reason": "ENTITLED",
+        "grant_type": "BOOLEAN"
+      },
+      "catalog.max_products": {
+        "allowed": true,
+        "reason": "ENTITLED",
+        "grant_type": "QUOTA",
+        "quota_limit": 1000
+      }
+    },
+    "policy_version": 1
+  }
+}
+```
+
+### 2.6 Tenant Provisioning — Planned / Not Registered
 - **Status:** Not implemented as an HTTP endpoint. Tenant registry and schema provisioning are currently development/setup concerns and will be formalized by the tenant-migration hardening workstream.
 - **Future design reference (not an active contract):**
 - **Endpoint:** `POST /api/v1/tenants`
@@ -354,7 +421,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 3.6 Daily Cashier Sales Summary (X/Z-Report)
 - **Endpoint:** `GET /api/v1/pos/daily-summary`
-- **Auth:** `CASHIER`, `MANAGER`, `SUPER_ADMIN` (Requires permission: `pos:read`)
+- **Auth & Entitlements:** `CASHIER`, `MANAGER`, `SUPER_ADMIN` (Requires permission: `pos:read` AND tenant package entitlement: `pos.daily_summary`). Inactive subscriptions or Starter tiers receive `403 Forbidden` (`FEATURE_NOT_ENTITLED`).
 - **Query Parameters:**
   - `date`: `YYYY-MM-DD` (optional, default: current date)
   - `cashier_id`: UUID (optional, filter by specific cashier)
@@ -894,7 +961,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 7.1 Get Aggregated Store Dashboard
 - **Endpoint:** `GET /api/v1/manager/dashboard`
-- **Auth:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN`)
+- **Auth & Entitlements:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN` AND tenant package entitlement: `pos.daily_summary`). Inactive subscriptions or Starter tiers receive `403 Forbidden` (`FEATURE_NOT_ENTITLED`).
 - **Description:** Real-time business aggregations across sales revenue, inventory depletion alerts, Halal certificate expirations, and ledger account status.
 - **Success Response (200 OK):**
 ```json

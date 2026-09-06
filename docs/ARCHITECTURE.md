@@ -1,6 +1,8 @@
 # Technical Architecture & System Design
 ## Tenet Commerce: Multi-Tenant Enterprise POS & Halal Supply Chain
 
+Proposed extension: [SaaS feature access and entitlement design](SAAS_FEATURE_ACCESS_DESIGN.md). This is a future design, not implemented subscription enforcement.
+
 > **Implementation boundary (2026-09-03):** the Phase 1–2 Go backend is the implemented system. Diagrams and sections that describe the Next.js offline client, AI auditor, Zakat engine, production CI/CD, durable idempotency, Redlock, or a tenant-migration runner are target designs for later phases unless explicitly identified as current runtime behavior. See [Implementation Status](IMPLEMENTATION_STATUS.md).
 
 ---
