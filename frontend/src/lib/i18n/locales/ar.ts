@@ -391,5 +391,7 @@ export const ar: TranslationSchema = {
     loading: "جاري تحميل ملخص المبيعات اليومي...",
     thermalHeader: "ملخص مبيعات الكاشير اليومي (تقرير X/Z)",
     thermalFooter: "تقرير مطبوع آلياً من نظام تينيت التجاري (نقطة البيع).",
+    printTime: "وقت الطباعة",
+    endOfReport: "*** نهاية تقرير الوردية (X/Z) ***",
   },
 };

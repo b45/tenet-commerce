@@ -405,5 +405,7 @@ export interface TranslationSchema {
     loading: string;
     thermalHeader: string;
     thermalFooter: string;
+    printTime: string;
+    endOfReport: string;
   };
 }

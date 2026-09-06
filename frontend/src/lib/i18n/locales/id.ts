@@ -391,5 +391,7 @@ export const id: TranslationSchema = {
     loading: "Memuat laporan ringkasan harian...",
     thermalHeader: "RINGKASAN PENJUALAN KASIR (X/Z REPORT)",
     thermalFooter: "Laporan dicetak otomatis dari sistem POS Tenet Commerce.",
+    printTime: "Waktu Cetak",
+    endOfReport: "*** AKHIR LAPORAN SHIFT (X/Z) ***",
   },
 };

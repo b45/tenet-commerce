@@ -21,6 +21,8 @@ import {
   Layers,
 } from "lucide-react";
 
+import { createPortal } from "react-dom";
+
 export interface DailySummaryModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -28,10 +30,28 @@ export interface DailySummaryModalProps {
 
 export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
   const { t } = useTranslation();
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      document.body.setAttribute("data-print-target", "daily-summary");
+    } else {
+      document.body.removeAttribute("data-print-target");
+    }
+    return () => {
+      document.body.removeAttribute("data-print-target");
+    };
+  }, [isOpen]);
+
   const { summary, isLoading, error, selectedDate, setSelectedDate, refetch } =
     useDailySummary(undefined, isOpen);
 
   const handlePrint = () => {
+    document.body.setAttribute("data-print-target", "daily-summary");
     window.print();
   };
 
@@ -262,8 +282,11 @@ export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
                 </Button>
               </div>
 
-              {/* Hidden Thermal Print Component */}
-              <ThermalDailySummary summary={summary} />
+              {/* Hidden Thermal Print Component mounted directly to body to bypass dialog print restriction */}
+              {mounted && summary && isOpen && createPortal(
+                <ThermalDailySummary summary={summary} />,
+                document.body
+              )}
             </div>
           ) : (
             <div className="py-8 text-center text-sm text-[var(--color-text-secondary)]">

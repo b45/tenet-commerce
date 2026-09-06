@@ -44,7 +44,7 @@ export function ThermalDailySummary({
           <span className="font-bold">{summary.date}</span>
         </div>
         <div className="flex justify-between">
-          <span>Waktu Cetak:</span>
+          <span>{t("dailySummary.printTime")}:</span>
           <span>{formatDateTime(new Date().toISOString())}</span>
         </div>
         {summary.cashier_id && (
@@ -114,7 +114,7 @@ export function ThermalDailySummary({
         <p className="font-semibold text-black">
           {t("dailySummary.thermalFooter")}
         </p>
-        <p>*** END OF SHIFT REPORT ***</p>
+        <p className="font-mono font-bold text-black">{t("dailySummary.endOfReport")}</p>
       </div>
     </div>
   );
