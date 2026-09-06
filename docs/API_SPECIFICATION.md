@@ -267,6 +267,7 @@ Password for all seeded dev accounts: `Password123!`
 }
 ```
 - **Cash settlement rule:** when `payment_method` is `CASH`, `cash_tendered` is required and must be at least the calculated total. For `QRIS` and `SIMULATED_CARD`, omit `cash_tendered`.
+- **Monetary validation rule:** All monetary fields (`unit_price`, `cost_price`, `discount_amount`, `cash_tendered`) must be non-negative, non-fractional integer IDR amounts. Fractional amounts (e.g. `100.50`) and amounts exceeding caps (> 1B IDR per transaction, > 2B IDR cash tender) are rejected with `400 Bad Request` (`INVALID_MONETARY_AMOUNT`).
 - **Response (201 Created):**
 ```json
 {
@@ -647,6 +648,7 @@ Password for all seeded dev accounts: `Password123!`
   ]
 }
 ```
+- **Monetary validation rule:** `unit_cost` must be a non-negative, non-fractional integer IDR value not exceeding 1,000,000,000 IDR. Fractional amounts or overflow return `400 Bad Request` (`INVALID_MONETARY_AMOUNT`).
 - **Error Response if Certificate Expired (422 Unprocessable Entity):**
 ```json
 {

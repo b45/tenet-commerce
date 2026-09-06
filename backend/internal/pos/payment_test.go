@@ -26,6 +26,8 @@ func TestValidatePaymentSettlement(t *testing.T) {
 		{name: "cash rejects insufficient tender", paymentMethod: "CASH", cashTendered: &insufficient, wantErr: ErrInsufficientCashTendered},
 		{name: "cash accepts exact tender", paymentMethod: "CASH", cashTendered: &equal, wantTendered: equal, wantChange: 0},
 		{name: "cash calculates change", paymentMethod: "CASH", cashTendered: &tendered, wantTendered: tendered, wantChange: 25000},
+		{name: "cash rejects fractional tender", paymentMethod: "CASH", cashTendered: func() *float64 { v := 150000.50; return &v }(), wantErr: ErrInvalidMonetaryAmount},
+		{name: "cash rejects tender exceeding limit", paymentMethod: "CASH", cashTendered: func() *float64 { v := 2000000001.0; return &v }(), wantErr: ErrInvalidMonetaryAmount},
 		{name: "non-cash rejects cash tender", paymentMethod: "QRIS", cashTendered: &tendered, wantErr: ErrCashTenderedNotAllowed},
 		{name: "non-cash has no cash settlement", paymentMethod: "SIMULATED_CARD", wantTendered: 0, wantChange: 0},
 	}

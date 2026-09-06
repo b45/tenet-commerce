@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"time"
 
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
@@ -117,32 +116,59 @@ func (s *Service) Checkout(
 				ErrInsufficientStock, product.Name, totalRequested, product.StockQuantity)
 		}
 
-		unitPriceMoney, _ := money.FromFloat(product.UnitPrice, "IDR")
-		itemSubtotalMoney, _ := unitPriceMoney.Mul(int64(item.Quantity))
-		subtotalMoney, _ = subtotalMoney.Add(itemSubtotalMoney)
+		unitPriceMoney, err := money.FromExactFloat(product.UnitPrice, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: product '%s' unit price: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		itemSubtotalMoney, err := unitPriceMoney.Mul(int64(item.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: item '%s' subtotal calculation: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		subtotalMoney, err = subtotalMoney.Add(itemSubtotalMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: subtotal calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
 
-		costPriceMoney, _ := money.FromFloat(product.CostPrice, "IDR")
-		itemCOGSMoney, _ := costPriceMoney.Mul(int64(item.Quantity))
-		totalCOGSMoney, _ = totalCOGSMoney.Add(itemCOGSMoney)
+		costPriceMoney, err := money.FromExactFloat(product.CostPrice, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: product '%s' cost price: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		itemCOGSMoney, err := costPriceMoney.Mul(int64(item.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: item '%s' COGS calculation: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		totalCOGSMoney, err = totalCOGSMoney.Add(itemCOGSMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: total COGS calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
 
 		lineItems = append(lineItems, TransactionItem{
 			ProductID: product.ID,
 			SKU:       product.SKU,
 			Name:      product.Name,
 			Quantity:  item.Quantity,
-			UnitPrice: product.UnitPrice,
-			CostPrice: product.CostPrice,
+			UnitPrice: unitPriceMoney.ToFloat(),
+			CostPrice: costPriceMoney.ToFloat(),
 			Subtotal:  itemSubtotalMoney.ToFloat(),
 		})
 	}
 
 	// 5. Calculate final amounts using exact-money precision
 	taxAmount := 0.00
-	discountMoney, _ := money.FromFloat(req.DiscountAmount, "IDR")
+	discountMoney, err := money.ValidateIDR(req.DiscountAmount, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: discount amount: %v", ErrInvalidMonetaryAmount, err)
+	}
 	if discountMoney.Amount() > subtotalMoney.Amount() {
 		discountMoney = subtotalMoney
 	}
-	totalAmountMoney, _ := subtotalMoney.Sub(discountMoney)
+	totalAmountMoney, err := subtotalMoney.Sub(discountMoney)
+	if err != nil {
+		return nil, fmt.Errorf("%w: total amount calculation: %v", ErrInvalidMonetaryAmount, err)
+	}
+	if totalAmountMoney.Amount() > money.MaxTransactionAmount {
+		return nil, ErrTransactionLimitExceeded
+	}
 
 	// 5.1 Validate settlement before any inventory or ledger mutation.
 	// A completed CASH sale must have a tender amount sufficient to cover the receipt total.
@@ -265,14 +291,14 @@ func validatePaymentSettlement(paymentMethod string, cashTendered *float64, tota
 		return 0, 0, fmt.Errorf("%w: cash_tendered is required", ErrInsufficientCashTendered)
 	}
 
-	tenderMoney, err := money.FromFloat(*cashTendered, "IDR")
+	tenderMoney, err := money.ValidateIDR(*cashTendered, money.MaxTenderAmount)
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid cash tendered amount: %w", err)
+		return 0, 0, fmt.Errorf("%w: cash tendered: %v", ErrInvalidMonetaryAmount, err)
 	}
 
-	totalMoney, err := money.FromFloat(totalAmount, "IDR")
+	totalMoney, err := money.FromExactFloat(totalAmount, money.CurrencyIDR)
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid total amount: %w", err)
+		return 0, 0, fmt.Errorf("%w: total amount: %v", ErrInvalidMonetaryAmount, err)
 	}
 
 	if tenderMoney.Amount() < totalMoney.Amount() {
@@ -327,15 +353,27 @@ func (s *Service) VoidTransaction(
 		return nil, fmt.Errorf("failed retrieving transaction line items: %w", err)
 	}
 
-	// 5. Restock inventory and compute total COGS
-	var totalCOGS float64
+	// 5. Restock inventory and compute total COGS using exact-money precision
+	totalCOGSMoney := money.IDR(0)
 	for _, item := range items {
 		if err := s.repo.IncrementStock(ctx, tx, item.ProductID, item.Quantity); err != nil {
 			reqLogger.Error("Failed restocking inventory during void", "product_id", item.ProductID, "error", err)
 			return nil, fmt.Errorf("failed restocking product %s: %w", item.SKU, err)
 		}
-		totalCOGS += math.Round(item.CostPrice*float64(item.Quantity)*100) / 100
+		itemCostMoney, err := money.FromExactFloat(item.CostPrice, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: item cost price: %v", ErrInvalidMonetaryAmount, err)
+		}
+		subCOGSMoney, err := itemCostMoney.Mul(int64(item.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: line COGS calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
+		totalCOGSMoney, err = totalCOGSMoney.Add(subCOGSMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: total COGS calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
 	}
+	totalCOGS := totalCOGSMoney.ToFloat()
 
 	// 6. Mark transaction VOIDED
 	if err := s.repo.MarkTransactionVoided(ctx, tx, txn.ID, cashierID, req.Reason); err != nil {

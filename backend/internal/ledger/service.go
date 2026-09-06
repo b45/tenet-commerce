@@ -15,11 +15,12 @@ import (
 )
 
 var (
-	ErrUnbalancedEntry      = errors.New("ledger entry is unbalanced: total debits must equal total credits")
-	ErrZeroAmountEntry      = errors.New("ledger entry has zero amount")
-	ErrInsufficientLines    = errors.New("ledger entry must have at least two lines")
-	ErrInvalidLineDirection = errors.New("ledger entry line must have either positive debit or positive credit, not both or negative")
-	ErrAlreadyReversed      = errors.New("journal entry has already been reversed")
+	ErrUnbalancedEntry       = errors.New("ledger entry is unbalanced: total debits must equal total credits")
+	ErrZeroAmountEntry       = errors.New("ledger entry has zero amount")
+	ErrInsufficientLines     = errors.New("ledger entry must have at least two lines")
+	ErrInvalidLineDirection  = errors.New("ledger entry line must have either positive debit or positive credit, not both or negative")
+	ErrAlreadyReversed       = errors.New("journal entry has already been reversed")
+	ErrInvalidMonetaryAmount = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
 )
 
 type Service struct {
@@ -108,9 +109,9 @@ func (s *Service) validateBalance(lines []EntryLine) error {
 		}
 
 		if line.DebitAmount > 0 {
-			dMoney, err := money.FromFloat(line.DebitAmount, "IDR")
+			dMoney, err := money.FromExactFloat(line.DebitAmount, money.CurrencyIDR)
 			if err != nil {
-				return fmt.Errorf("invalid debit amount: %w", err)
+				return fmt.Errorf("%w: debit amount: %v", ErrInvalidMonetaryAmount, err)
 			}
 			sumDebit, err = sumDebit.Add(dMoney)
 			if err != nil {
@@ -119,9 +120,9 @@ func (s *Service) validateBalance(lines []EntryLine) error {
 		}
 
 		if line.CreditAmount > 0 {
-			cMoney, err := money.FromFloat(line.CreditAmount, "IDR")
+			cMoney, err := money.FromExactFloat(line.CreditAmount, money.CurrencyIDR)
 			if err != nil {
-				return fmt.Errorf("invalid credit amount: %w", err)
+				return fmt.Errorf("%w: credit amount: %v", ErrInvalidMonetaryAmount, err)
 			}
 			sumCredit, err = sumCredit.Add(cMoney)
 			if err != nil {
@@ -407,10 +408,24 @@ func (s *Service) PostGoodsReceiptJournal(ctx context.Context, tx pgx.Tx, grID u
 //   - Debit 1030 (Merchandise Inventory)
 //   - Credit 5020 (Inventory Shrinkage & Loss)
 func (s *Service) PostInventoryAdjustmentJournal(ctx context.Context, tx pgx.Tx, adjID uuid.UUID, productName string, quantityDelta int, unitCost float64, reason string, notes string) (*Entry, error) {
-	totalValue := math.Abs(float64(quantityDelta)) * unitCost
-	if totalValue <= 0 {
-		return nil, nil // No monetary adjustment required if total value is 0
+	if quantityDelta == 0 {
+		return nil, nil
 	}
+
+	costMoney, err := money.FromExactFloat(unitCost, money.CurrencyIDR)
+	if err != nil {
+		return nil, fmt.Errorf("%w: inventory adjustment unit cost: %v", ErrInvalidMonetaryAmount, err)
+	}
+
+	deltaAbs := int64(math.Abs(float64(quantityDelta)))
+	valMoney, err := costMoney.Mul(deltaAbs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: inventory adjustment value calculation: %v", ErrInvalidMonetaryAmount, err)
+	}
+	if valMoney.IsZero() {
+		return nil, nil
+	}
+	totalValue := valMoney.ToFloat()
 
 	entryNumber := fmt.Sprintf("JE-ADJ-%s-%s", time.Now().Format("20060102150405"), adjID.String()[:8])
 	memo := fmt.Sprintf("Inventory adjustment (%s): %s (delta: %d, reason: %s)", reason, productName, quantityDelta, notes)

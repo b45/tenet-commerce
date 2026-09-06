@@ -12,6 +12,11 @@ import (
 
 const (
 	CurrencyIDR = "IDR"
+
+	// ADR 002 Bound Constants
+	MaxTransactionAmount = int64(1_000_000_000) // Rp 1,000,000,000 (1 Billion IDR)
+	MaxTenderAmount      = int64(2_000_000_000) // Rp 2,000,000,000 (2 Billion IDR)
+	MaxLineItemQuantity  = 99_999
 )
 
 var (
@@ -19,6 +24,9 @@ var (
 	ErrDivisionByZero   = errors.New("cannot divide by zero or negative parts")
 	ErrOverflow         = errors.New("monetary arithmetic integer overflow")
 	ErrInvalidAmount    = errors.New("invalid monetary amount")
+	ErrFractionalAmount = errors.New("fractional monetary amount not allowed for IDR currency")
+	ErrExceedsMaxCap    = errors.New("monetary amount exceeds maximum transaction cap")
+	ErrNegativeAmount   = errors.New("negative monetary amount not allowed")
 )
 
 // Money represents an immutable exact monetary amount stored as an integer in minor units.
@@ -43,6 +51,43 @@ func New(amount int64, currency string) Money {
 // IDR is a convenience constructor for Indonesian Rupiah (1 unit = Rp 1).
 func IDR(amount int64) Money {
 	return New(amount, CurrencyIDR)
+}
+
+// FromExactFloat converts a float64 into an exact Money object.
+// If the input float contains a non-zero fractional subunit (e.g. 100.5), is non-finite,
+// or exceeds bounds, an error is returned rather than performing silent rounding.
+func FromExactFloat(val float64, currency string) (Money, error) {
+	if math.IsNaN(val) || math.IsInf(val, 0) {
+		return Money{}, ErrInvalidAmount
+	}
+	if val > float64(math.MaxInt64) || val < float64(math.MinInt64) {
+		return Money{}, ErrOverflow
+	}
+
+	rounded := math.Round(val)
+	if math.Abs(val-rounded) > 1e-6 {
+		return Money{}, ErrFractionalAmount
+	}
+
+	return New(int64(rounded), currency), nil
+}
+
+// ValidateIDR validates that a monetary value is non-fractional, non-negative, and does not exceed the cap.
+func ValidateIDR(val float64, maxCap int64) (Money, error) {
+	if math.IsNaN(val) || math.IsInf(val, 0) {
+		return Money{}, ErrInvalidAmount
+	}
+	if val < 0 {
+		return Money{}, ErrNegativeAmount
+	}
+	m, err := FromExactFloat(val, CurrencyIDR)
+	if err != nil {
+		return Money{}, err
+	}
+	if maxCap > 0 && m.Amount() > maxCap {
+		return Money{}, ErrExceedsMaxCap
+	}
+	return m, nil
 }
 
 // FromFloat converts a float64 into an exact Money object by rounding to the nearest minor unit.

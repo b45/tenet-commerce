@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,16 +18,24 @@ func TestValidateBalance(t *testing.T) {
 		{
 			name: "Balanced Entry Succeeds",
 			lines: []EntryLine{
-				{ID: uuid.New(), DebitAmount: 100.50, CreditAmount: 0},
-				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 100.50},
+				{ID: uuid.New(), DebitAmount: 10000, CreditAmount: 0},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 10000},
 			},
 			wantErr: nil,
 		},
 		{
-			name: "Unbalanced Entry Rejected",
+			name: "Fractional Debit Rejected",
 			lines: []EntryLine{
 				{ID: uuid.New(), DebitAmount: 100.50, CreditAmount: 0},
-				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 100.00},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 100.50},
+			},
+			wantErr: ErrInvalidMonetaryAmount,
+		},
+		{
+			name: "Unbalanced Entry Rejected",
+			lines: []EntryLine{
+				{ID: uuid.New(), DebitAmount: 10001, CreditAmount: 0},
+				{ID: uuid.New(), DebitAmount: 0, CreditAmount: 10000},
 			},
 			wantErr: ErrUnbalancedEntry,
 		},
@@ -92,7 +101,13 @@ func TestValidateBalance(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := s.validateBalance(tt.lines)
-			if err != tt.wantErr {
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Errorf("validateBalance() unexpected error = %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("validateBalance() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

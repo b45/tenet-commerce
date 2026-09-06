@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/b45/tenet-commerce/backend/pkg/money"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -26,6 +27,8 @@ var (
 	ErrSKUAlreadyExists         = errors.New("product SKU already exists")
 	ErrBarcodeAlreadyExists     = errors.New("product barcode already exists")
 	ErrNegativeAdjustmentStock  = errors.New("insufficient stock for negative adjustment")
+	ErrInvalidMonetaryAmount    = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
+	ErrTransactionLimitExceeded = errors.New("transaction total exceeds maximum limit of 1,000,000,000 IDR")
 )
 
 // Repository handles database operations for the POS module within a tenant schema
@@ -1087,6 +1090,15 @@ func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req 
 		reorderThreshold = req.ReorderThreshold
 	}
 
+	unitPriceMoney, err := money.ValidateIDR(req.UnitPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: unit_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+	costPriceMoney, err := money.ValidateIDR(req.CostPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cost_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+
 	productQuery := `
 		INSERT INTO products (
 			name, sku, barcode, description, category_id, unit_price, cost_price, compliance_tags, is_active, created_at, updated_at
@@ -1105,8 +1117,8 @@ func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req 
 		req.Barcode,
 		req.Description,
 		req.CategoryID,
-		req.UnitPrice,
-		req.CostPrice,
+		unitPriceMoney.ToFloat(),
+		costPriceMoney.ToFloat(),
 		tagsJSON,
 		isActive,
 	).Scan(&productID, &createdAt, &updatedAt)
@@ -1191,6 +1203,15 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 		isActive = *req.IsActive
 	}
 
+	unitPriceMoney, err := money.ValidateIDR(req.UnitPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: unit_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+	costPriceMoney, err := money.ValidateIDR(req.CostPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cost_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+
 	query := `
 		UPDATE products
 		SET name = $1, barcode = $2, description = $3, category_id = $4,
@@ -1207,8 +1228,8 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 		req.Barcode,
 		req.Description,
 		req.CategoryID,
-		req.UnitPrice,
-		req.CostPrice,
+		unitPriceMoney.ToFloat(),
+		costPriceMoney.ToFloat(),
 		tagsJSON,
 		isActive,
 		id,

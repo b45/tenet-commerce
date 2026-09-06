@@ -328,6 +328,140 @@ func TestSupplyChain_HalalComplianceHardBlocksReceiptOnExpiredCert(t *testing.T)
 	assertPOStatus(t, db, createdPO.ID, "ISSUED")
 }
 
+func TestSupplyChain_ExactMoney_ThreeUnitsAt10001Produces30003(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// Step 1: Create Supplier
+	supplierReq := supplychain.CreateSupplierRequest{
+		Code:        fmt.Sprintf("SUPP-EXACT-%d", time.Now().UnixNano()%1000000),
+		CompanyName: "Exact Meat Supplier",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertType:          "HALAL_MUI",
+			CertificateNumber: fmt.Sprintf("EXACT-CERT-%d", time.Now().UnixNano()%1000000),
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Poultry",
+			ValidFrom:         "2024-01-01",
+			ExpiryDate:        "2030-01-01",
+		},
+	}
+	sBody, _ := json.Marshal(supplierReq)
+	reqS := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(sBody))
+	reqS.Header.Set("Content-Type", "application/json")
+	reqS.Header.Set("Idempotency-Key", fmt.Sprintf("exact-supp-%d", time.Now().UnixNano()))
+	wS := httptest.NewRecorder()
+	router.ServeHTTP(wS, reqS)
+	require.Equal(t, http.StatusCreated, wS.Code)
+
+	var sResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wS.Body.Bytes(), &sResp))
+	var supplier supplychain.Supplier
+	require.NoError(t, json.Unmarshal(sResp.Data, &supplier))
+
+	productID := "10000000-0000-0000-0000-000000000001"
+
+	// Step 2: Create Purchase Order with 3 units @ 10,001 IDR.
+	// Invariant: 3 * 10001 = exactly 30003 IDR without floating point penny drift.
+	poReq := supplychain.CreatePurchaseOrderRequest{
+		SupplierID: supplier.ID.String(),
+		Items: []supplychain.CreatePOItemRequest{
+			{
+				ProductID: productID,
+				Quantity:  3,
+				UnitCost:  10001,
+			},
+		},
+	}
+	poBody, _ := json.Marshal(poReq)
+	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-exact-key-%d", time.Now().UnixNano()))
+	wPO := httptest.NewRecorder()
+	router.ServeHTTP(wPO, reqPO)
+	require.Equal(t, http.StatusCreated, wPO.Code)
+
+	var poResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wPO.Body.Bytes(), &poResp))
+	var createdPO supplychain.PurchaseOrder
+	require.NoError(t, json.Unmarshal(poResp.Data, &createdPO))
+	assert.Equal(t, 30003.0, createdPO.TotalAmount)
+	require.Len(t, createdPO.Items, 1)
+	assert.Equal(t, 30003.0, createdPO.Items[0].Subtotal)
+
+	// Step 3: Receive all 3 units via Goods Receipt
+	grKey := fmt.Sprintf("gr-exact-key-%d", time.Now().UnixNano())
+	grReq := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Exact receipt: 3 units at 10001 IDR",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID, ReceivedQuantity: 3},
+		},
+	}
+	grBody, _ := json.Marshal(grReq)
+	reqGR := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody))
+	reqGR.Header.Set("Content-Type", "application/json")
+	reqGR.Header.Set("Idempotency-Key", grKey)
+	wGR := httptest.NewRecorder()
+	router.ServeHTTP(wGR, reqGR)
+	require.Equal(t, http.StatusCreated, wGR.Code)
+
+	var grResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wGR.Body.Bytes(), &grResp))
+	var gr supplychain.GoodsReceipt
+	require.NoError(t, json.Unmarshal(grResp.Data, &gr))
+
+	// Step 4: Verify ledger journal entry posted has debit and credit = exactly 30003.00
+	assertLedgerJournalExists(t, db, gr.ID, 30003.0)
+	assertPOStatus(t, db, createdPO.ID, "FULLY_RECEIVED")
+}
+
+func TestSupplyChain_RejectsFractionalAndOverflowCosts(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	productID := "10000000-0000-0000-0000-000000000001"
+
+	// 1. Fractional unit cost (e.g. 10001.50) must be rejected with 400 Bad Request
+	poReqFractional := map[string]interface{}{
+		"supplier_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		"items": []map[string]interface{}{
+			{
+				"product_id": productID,
+				"quantity":   3,
+				"unit_cost":  10001.50,
+			},
+		},
+	}
+	poBody1, _ := json.Marshal(poReqFractional)
+	reqPO1 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody1))
+	reqPO1.Header.Set("Content-Type", "application/json")
+	reqPO1.Header.Set("Idempotency-Key", fmt.Sprintf("po-frac-key-%d", time.Now().UnixNano()))
+	wPO1 := httptest.NewRecorder()
+	router.ServeHTTP(wPO1, reqPO1)
+	assert.Equal(t, http.StatusBadRequest, wPO1.Code)
+	assert.Contains(t, wPO1.Body.String(), "INVALID_MONETARY_AMOUNT")
+
+	// 2. Unit cost exceeding 1 Billion IDR must be rejected with 400 Bad Request
+	poReqOverflow := map[string]interface{}{
+		"supplier_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		"items": []map[string]interface{}{
+			{
+				"product_id": productID,
+				"quantity":   1,
+				"unit_cost":  1000000001,
+			},
+		},
+	}
+	poBody2, _ := json.Marshal(poReqOverflow)
+	reqPO2 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody2))
+	reqPO2.Header.Set("Content-Type", "application/json")
+	reqPO2.Header.Set("Idempotency-Key", fmt.Sprintf("po-overflow-key-%d", time.Now().UnixNano()))
+	wPO2 := httptest.NewRecorder()
+	router.ServeHTTP(wPO2, reqPO2)
+	assert.Equal(t, http.StatusBadRequest, wPO2.Code)
+	assert.Contains(t, wPO2.Body.String(), "INVALID_MONETARY_AMOUNT")
+}
+
 func assertPOStatus(t *testing.T, db *database.PostgresDB, poID uuid.UUID, expectedStatus string) {
 	t.Helper()
 	conn, err := db.Pool.Acquire(context.Background())
