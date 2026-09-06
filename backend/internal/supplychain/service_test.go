@@ -6,30 +6,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
+	"github.com/b45/tenet-commerce/backend/pkg/database"
 )
 
 // This test requires a running database on localhost:5432 with the tenet_commerce db
 // To run: make test
 
 func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
-	// 1. Setup DB connection
-	// Assuming test DB is available as per Makefile
+	// 1. Setup DB connection using standard configuration
 	ctx := context.Background()
-	connString := "postgres://postgres:postgres@localhost:5432/tenet_commerce?sslmode=disable"
-	pool, err := pgxpool.New(ctx, connString)
+	db, err := database.NewPostgresDB(ctx)
 	if err != nil {
-		t.Skip("Database not available, skipping integration test", err)
+		t.Skipf("Database not available, skipping integration test: %v", err)
 	}
-	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		t.Skip("Database not pingable, skipping integration test", err)
-	}
+	defer db.Close()
+	pool := db.Pool
 
 	repo := NewRepository()
 	ledgerService := ledger.NewService(ledger.NewRepository())
@@ -50,7 +45,7 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 
 		// 1. Create Supplier WITHOUT Certificate
 		reqSupplier := &CreateSupplierRequest{
-			Code:          "SUP-DS-01",
+			Code:          "SUP-DS-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Without Cert",
 			ContactPerson: "Budi",
 		}
@@ -92,7 +87,7 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 
 		// 1. Try to create PO without cert - Should FAIL with ErrComplianceCertRequired
 		reqSupplier := &CreateSupplierRequest{
-			Code:          "SUP-AB-01",
+			Code:          "SUP-AB-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Try Bypass",
 		}
 		supplierNoCert, err := svc.CreateSupplier(ctx, conn, reqSupplier)
@@ -111,11 +106,11 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 		validDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
 		expiryDate := time.Now().AddDate(1, 0, 0).Format("2006-01-02") // 1 year later
 		reqSupplierValid := &CreateSupplierRequest{
-			Code:          "SUP-AB-02",
+			Code:          "SUP-AB-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Valid Cert",
 			ComplianceCertificate: &CreateComplianceCertRequest{
 				CertType:          "HALAL_MUI",
-				CertificateNumber: "CERT-002",
+				CertificateNumber: "CERT-" + uuid.NewString()[:8],
 				IssuingAuthority:  "MUI",
 				Scope:             "Meat",
 				ValidFrom:         validDate,
@@ -146,11 +141,11 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 		// 4. Create Supplier WITH Expired Cert
 		expiredDate := time.Now().AddDate(-1, 0, 0).Format("2006-01-02")
 		reqSupplierExpired := &CreateSupplierRequest{
-			Code:          "SUP-AB-03",
+			Code:          "SUP-AB-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Expired Cert",
 			ComplianceCertificate: &CreateComplianceCertRequest{
 				CertType:          "HALAL_MUI",
-				CertificateNumber: "CERT-EXPIRED",
+				CertificateNumber: "CERT-EXP-" + uuid.NewString()[:8],
 				IssuingAuthority:  "MUI",
 				Scope:             "Meat",
 				ValidFrom:         time.Now().AddDate(-2, 0, 0).Format("2006-01-02"),

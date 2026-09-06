@@ -45,10 +45,6 @@ func setupAuthIntegrationRouter(t *testing.T, db *database.PostgresDB, rdb *pkgR
 }
 
 func TestAuth_LoginLogoutAndRevocationLifecycle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
 	db := newTestDatabase(t)
 	rdb := newTestRedisClient(t)
 	router, _ := setupAuthIntegrationRouter(t, db, rdb)

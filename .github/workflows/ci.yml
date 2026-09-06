@@ -40,8 +40,11 @@ jobs:
       - name: Verify Docker is available for integration tests
         run: docker info
 
-      - name: Run Go Tests with Race Detector and Hermetic Integration Suite
+      - name: Run Go Unit Tests with Race Detector
         run: go test -v -race -short -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Run Hermetic Integration Tests (Testcontainers)
+        run: go test -v -race ./integration
 
       - name: Upload Backend Coverage
         uses: actions/upload-artifact@v4
@@ -52,7 +55,7 @@ jobs:
           if-no-files-found: ignore
 
   frontend-ci:
-    name: Frontend (Next.js Lint & Build)
+    name: Frontend (Next.js Lint, Build & Test)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,3 +80,6 @@ jobs:
 
       - name: Build Next.js project
         run: npm run build
+
+      - name: Run Frontend Tests (i18n Parity, Logic & UI Components)
+        run: npm test
