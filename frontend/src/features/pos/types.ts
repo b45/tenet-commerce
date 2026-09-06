@@ -126,3 +126,22 @@ export type CheckoutStep =
   | "completed"
   | "rejected"
   | "unknown_error";
+
+export interface PaymentSummary {
+  count: number;
+  total_amount: number;
+}
+
+export interface DailySummaryResponse {
+  date: string;
+  cashier_id?: string;
+  total_orders: number;
+  completed_orders: number;
+  voided_orders: number;
+  gross_sales: number;
+  discounts: number;
+  net_sales: number;
+  total_cogs: number;
+  gross_profit: number;
+  payment_breakdown: Record<string, PaymentSummary>;
+}

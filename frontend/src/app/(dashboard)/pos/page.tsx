@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Button } from "@/components/ui/button";
 import { useCatalog } from "@/features/pos/hooks/use-catalog";
 import { useCart } from "@/features/pos/hooks/use-cart";
 import { useCheckout } from "@/features/pos/hooks/use-checkout";
@@ -12,6 +13,7 @@ import { TenderModal } from "@/features/pos/components/tender-modal";
 import { ReceiptModal } from "@/features/pos/components/receipt-modal";
 import { ThermalReceipt } from "@/features/pos/components/thermal-receipt";
 import { OrderHistory } from "@/features/pos/components/order-history";
+import { DailySummaryModal } from "@/features/pos/components/daily-summary-modal";
 import type { POSViewMode } from "@/features/pos/types";
 import { formatIDR } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -21,6 +23,7 @@ export default function POSPage() {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = React.useState<POSViewMode>("register");
   const [mobileTab, setMobileTab] = React.useState<"catalog" | "cart">("catalog");
+  const [isDailySummaryOpen, setIsDailySummaryOpen] = React.useState(false);
 
   // Domain Hooks
   const catalog = useCatalog();
@@ -114,7 +117,18 @@ export default function POSPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIsDailySummaryOpen(true)}
+            className="text-xs h-8 gap-1.5 font-medium border-[var(--color-border-hairline)]"
+          >
+            <FileText className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />
+            <span>{t("dailySummary.buttonLabel")}</span>
+          </Button>
+
           <SegmentedControl
             options={[
               { value: "register", label: t("pos.tabs.register") },
@@ -252,6 +266,12 @@ export default function POSPage() {
         onClose={handleNewTransaction}
         receipt={checkout.receipt}
         onNewTransaction={handleNewTransaction}
+      />
+
+      {/* Daily Summary Modal Dialog */}
+      <DailySummaryModal
+        isOpen={isDailySummaryOpen}
+        onClose={() => setIsDailySummaryOpen(false)}
       />
 
       {/* Hidden 80mm Thermal Receipt Print Structure */}

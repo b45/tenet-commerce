@@ -368,4 +368,42 @@ export interface TranslationSchema {
       enterprise: string;
     };
   };
+  dailySummary: {
+    buttonLabel: string;
+    modalTitle: string;
+    modalDescription: string;
+    dateLabel: string;
+    filterToday: string;
+    metrics: {
+      grossSales: string;
+      netSales: string;
+      discounts: string;
+      cogs: string;
+      grossProfit: string;
+      margin: string;
+    };
+    orders: {
+      title: string;
+      total: string;
+      completed: string;
+      voided: string;
+    };
+    payments: {
+      title: string;
+      method: string;
+      count: string;
+      amount: string;
+      cash: string;
+      qris: string;
+    };
+    actions: {
+      print: string;
+      close: string;
+      refresh: string;
+    };
+    emptyState: string;
+    loading: string;
+    thermalHeader: string;
+    thermalFooter: string;
+  };
 }
