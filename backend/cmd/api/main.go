@@ -6,6 +6,7 @@ import (
 	"os"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/entitlement"
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/internal/manager"
 	"github.com/b45/tenet-commerce/backend/internal/pos"
@@ -50,7 +51,11 @@ func main() {
 	jwtService := pkgAuth.NewJWTService()
 	tenantRepo := tenant.NewRepository(db)
 	authRepo := internalAuth.NewRepository(db)
-	authHandler := internalAuth.NewHandler(authRepo, jwtService)
+	authHandler := internalAuth.NewHandler(authRepo, jwtService, rdb)
+
+	entitlementRepo := entitlement.NewRepository(db)
+	entitlementService := entitlement.NewService(entitlementRepo, rdb)
+	entitlementHandler := entitlement.NewHandler(entitlementService)
 
 	ledgerRepo := ledger.NewRepository()
 	ledgerService := ledger.NewService(ledgerRepo)
@@ -58,7 +63,7 @@ func main() {
 
 	posRepo := pos.NewRepository()
 	posService := pos.NewService(posRepo, ledgerService)
-	posHandler := pos.NewHandler(posService)
+	posHandler := pos.NewHandler(posService, entitlementService)
 
 	supplychainRepo := supplychain.NewRepository()
 	supplychainService := supplychain.NewService(supplychainRepo, ledgerService)
@@ -66,7 +71,7 @@ func main() {
 
 	managerRepo := manager.NewRepository()
 	managerService := manager.NewService(managerRepo)
-	managerHandler := manager.NewHandler(managerService)
+	managerHandler := manager.NewHandler(managerService, entitlementService)
 
 	// 4. Setup Modular Router (Domain-Driven Routing)
 	router := SetupRouter(RouterConfig{
@@ -75,6 +80,8 @@ func main() {
 		SupplyChainHandler: supplychainHandler,
 		LedgerHandler:      ledgerHandler,
 		ManagerHandler:     managerHandler,
+		EntitlementHandler: entitlementHandler,
+		EntitlementService: entitlementService,
 		TenantRepo:         tenantRepo,
 		JWTService:         jwtService,
 		RedisClient:        rdb,

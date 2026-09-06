@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/entitlement"
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/internal/manager"
 	"github.com/b45/tenet-commerce/backend/internal/pos"
@@ -26,6 +27,8 @@ type RouterConfig struct {
 	SupplyChainHandler *supplychain.Handler
 	LedgerHandler      *ledger.Handler
 	ManagerHandler     *manager.Handler
+	EntitlementHandler *entitlement.Handler
+	EntitlementService *entitlement.Service
 	TenantRepo         *tenant.Repository
 	JWTService         *pkgAuth.JWTService
 	RedisClient        *pkgRedis.Client
@@ -80,12 +83,17 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 		// =====================================================================
 		protected := apiV1.Group("")
 		protected.Use(
-			internalAuth.JWTAuthMiddleware(cfg.JWTService),
+			internalAuth.JWTAuthMiddleware(cfg.JWTService, cfg.RedisClient),
 			tenant.ContextMiddleware(cfg.PostgresDB, cfg.TenantRepo),
 		)
 
 		// Identity & Self-Profile Introspection
 		cfg.AuthHandler.RegisterProtectedRoutes(protected.Group("/auth"))
+
+		// Capability Introspection for Client Feature Gating
+		if cfg.EntitlementHandler != nil {
+			cfg.EntitlementHandler.RegisterRoutes(protected)
+		}
 
 		// Core Domain 1: Point of Sale & Checkout Engine (Idempotency & Row Locking)
 		cfg.POSHandler.RegisterRoutes(protected.Group("/pos"), cfg.RedisClient)

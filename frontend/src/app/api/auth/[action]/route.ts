@@ -170,6 +170,29 @@ export async function POST(
   }
 
   if (action === "logout") {
+    const accessToken = request.cookies.get("tenet_access_token")?.value;
+    const refreshToken = request.cookies.get("tenet_refresh_token")?.value;
+
+    if (accessToken) {
+      try {
+        await fetch(`${BACKEND_URL}/api/v1/auth/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            "X-Trace-ID": traceId,
+            "X-Forwarded-For": clientIp,
+            "X-Real-IP": clientIp,
+            "User-Agent": userAgent,
+          },
+          body: JSON.stringify({ refresh_token: refreshToken || "" }),
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("BFF failed to call backend logout, proceeding with cookie eviction:", err);
+      }
+    }
+
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({
       source: "tenet_auth_audit",

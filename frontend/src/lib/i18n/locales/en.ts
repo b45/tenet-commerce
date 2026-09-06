@@ -323,4 +323,35 @@ export const en: TranslationSchema = {
       writeRequired: "Write Permission Required",
     },
   },
+  entitlements: {
+    loading: "Verifying feature capability...",
+    insufficientSubscription: {
+      title: "Subscription Upgrade Required",
+      description: "This capability is not included in your current store subscription tier. Please upgrade to unlock access.",
+      upgradeAction: "Upgrade Subscription",
+    },
+    insufficientPermission: {
+      title: "Insufficient User Permission",
+      description: "Your user role lacks permission to access this capability. Contact your store manager.",
+    },
+    disabledByOwner: {
+      title: "Disabled by Store Owner",
+      description: "This feature is currently turned off in store management settings.",
+    },
+    quotaExceeded: {
+      title: "Usage Quota Exceeded",
+      description: "You have reached the maximum quota allocation for this feature under your current plan.",
+      usageNotice: "Current usage: {current} of {limit} quota limit.",
+    },
+    serviceUnavailable: {
+      title: "Entitlement Service Unavailable",
+      description: "Unable to verify feature capability due to a temporary network disruption.",
+      retryAction: "Retry",
+    },
+    tierBadge: {
+      starter: "Starter Tier",
+      growth: "Growth Tier",
+      enterprise: "Enterprise Tier",
+    },
+  },
 };

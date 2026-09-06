@@ -323,4 +323,35 @@ export const id: TranslationSchema = {
       writeRequired: "Memerlukan Izin Tulis",
     },
   },
+  entitlements: {
+    loading: "Memverifikasi lisensi fitur...",
+    insufficientSubscription: {
+      title: "Peningkatan Paket Diperlukan",
+      description: "Fitur ini tidak tersedia dalam paket langganan toko saat ini. Silakan tingkatkan paket untuk membuka akses.",
+      upgradeAction: "Tingkatkan Paket",
+    },
+    insufficientPermission: {
+      title: "Izin Pengguna Tidak Cukup",
+      description: "Akun Anda tidak memiliki hak akses untuk fungsi ini. Hubungi manajer toko.",
+    },
+    disabledByOwner: {
+      title: "Fitur Dinonaktifkan oleh Pemilik",
+      description: "Fitur ini dinonaktifkan dalam pengaturan operasional toko.",
+    },
+    quotaExceeded: {
+      title: "Batas Kuota Terlampaui",
+      description: "Anda telah mencapai kapasitas batas maksimum untuk fitur ini dalam paket saat ini.",
+      usageNotice: "Penggunaan saat ini: {current} dari kuota {limit}.",
+    },
+    serviceUnavailable: {
+      title: "Layanan Izin Sedang Tidak Tersedia",
+      description: "Gagal memeriksa lisensi fitur karena gangguan koneksi sementara.",
+      retryAction: "Coba Lagi",
+    },
+    tierBadge: {
+      starter: "Paket Starter",
+      growth: "Paket Growth",
+      enterprise: "Paket Enterprise",
+    },
+  },
 };
