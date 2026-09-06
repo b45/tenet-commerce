@@ -9,21 +9,23 @@ import (
 	"time"
 
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
+	"github.com/b45/tenet-commerce/backend/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	ErrComplianceCertRequired = errors.New("compliance certificate is required under strict mode")
-	ErrComplianceCertExpired  = errors.New("compliance certificate is expired")
-	ErrComplianceCertInvalid  = errors.New("compliance certificate is not valid for this transaction")
-	ErrInvalidPOStatus        = errors.New("invalid purchase order status for this operation")
-	ErrEmptyReceipt           = errors.New("goods receipt must contain at least one item")
-	ErrZeroValueReceipt       = errors.New("goods receipt inbound valuation must be greater than zero")
-	ErrReceiptItemNotOnPO     = errors.New("goods receipt item does not exist on purchase order")
-	ErrDuplicateReceiptItem   = errors.New("goods receipt contains a duplicate product")
-	ErrReceiptQuantityExceeds = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
-	ErrIdempotencyKeyConflict = errors.New("idempotency key is already associated with another purchase order")
+	ErrComplianceCertRequired   = errors.New("compliance certificate is required under strict mode")
+	ErrComplianceCertExpired    = errors.New("compliance certificate is expired")
+	ErrComplianceCertInvalid    = errors.New("compliance certificate is not valid for this transaction")
+	ErrInvalidPOStatus          = errors.New("invalid purchase order status for this operation")
+	ErrEmptyReceipt             = errors.New("goods receipt must contain at least one item")
+	ErrZeroValueReceipt         = errors.New("goods receipt inbound valuation must be greater than zero")
+	ErrReceiptItemNotOnPO       = errors.New("goods receipt item does not exist on purchase order")
+	ErrDuplicateReceiptItem     = errors.New("goods receipt contains a duplicate product")
+	ErrReceiptQuantityExceeds   = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
+	ErrIdempotencyKeyConflict   = errors.New("idempotency key is already associated with another purchase order")
+	ErrInvalidMonetaryAmount    = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
 )
 
 type Service struct {
@@ -177,22 +179,41 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, conn *pgxpool.Conn, r
 		IssuedDate:       time.Now(),
 	}
 
-	var totalAmount float64
+	totalMoney := money.IDR(0)
 	for _, reqItem := range req.Items {
 		productID, _ := uuid.Parse(reqItem.ProductID)
-		subtotal := float64(reqItem.Quantity) * reqItem.UnitCost
-		totalAmount += subtotal
+		if reqItem.Quantity <= 0 || reqItem.Quantity > money.MaxLineItemQuantity {
+			return nil, fmt.Errorf("invalid quantity %d: must be between 1 and %d", reqItem.Quantity, money.MaxLineItemQuantity)
+		}
+
+		unitCostMoney, err := money.ValidateIDR(reqItem.UnitCost, money.MaxTransactionAmount)
+		if err != nil {
+			return nil, fmt.Errorf("%w: unit cost: %v", ErrInvalidMonetaryAmount, err)
+		}
+
+		subtotalMoney, err := unitCostMoney.Mul(int64(reqItem.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: subtotal calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
+
+		totalMoney, err = totalMoney.Add(subtotalMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: total calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
+		if totalMoney.Amount() > money.MaxTransactionAmount {
+			return nil, fmt.Errorf("%w: total PO amount exceeds %d IDR", ErrInvalidMonetaryAmount, money.MaxTransactionAmount)
+		}
 
 		po.Items = append(po.Items, PurchaseOrderItem{
 			ID:              uuid.New(),
 			PurchaseOrderID: po.ID,
 			ProductID:       productID,
 			Quantity:        reqItem.Quantity,
-			UnitCost:        reqItem.UnitCost,
-			Subtotal:        subtotal,
+			UnitCost:        unitCostMoney.ToFloat(),
+			Subtotal:        subtotalMoney.ToFloat(),
 		})
 	}
-	po.TotalAmount = totalAmount
+	po.TotalAmount = totalMoney.ToFloat()
 
 	tx, err := conn.Begin(ctx)
 	if err != nil {
@@ -329,7 +350,7 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 	}
 
 	requestedByProduct := make(map[uuid.UUID]int, len(requested))
-	var inboundValue float64
+	inboundMoney := money.IDR(0)
 	for _, requestItem := range requested {
 		productID, err := uuid.Parse(requestItem.ProductID)
 		if err != nil {
@@ -346,6 +367,19 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 			return 0, false, ErrReceiptQuantityExceeds
 		}
 
+		unitCostMoney, err := money.FromExactFloat(poItem.UnitCost, money.CurrencyIDR)
+		if err != nil {
+			return 0, false, fmt.Errorf("invalid purchase order unit cost: %w", err)
+		}
+		itemInboundMoney, err := unitCostMoney.Mul(int64(requestItem.ReceivedQuantity))
+		if err != nil {
+			return 0, false, fmt.Errorf("failed calculating inbound valuation: %w", err)
+		}
+		inboundMoney, err = inboundMoney.Add(itemInboundMoney)
+		if err != nil {
+			return 0, false, fmt.Errorf("failed aggregating inbound valuation: %w", err)
+		}
+
 		requestedByProduct[productID] = requestItem.ReceivedQuantity
 		gr.Items = append(gr.Items, GoodsReceiptItem{
 			ID:               uuid.New(),
@@ -353,12 +387,12 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 			ProductID:        productID,
 			ReceivedQuantity: requestItem.ReceivedQuantity,
 		})
-		inboundValue += float64(requestItem.ReceivedQuantity) * poItem.UnitCost
 	}
 
-	if inboundValue <= 0 {
+	if !inboundMoney.IsPositive() {
 		return 0, false, ErrZeroValueReceipt
 	}
+	inboundValue := inboundMoney.ToFloat()
 
 	for productID, poItem := range poByProduct {
 		if received[productID]+requestedByProduct[productID] != poItem.Quantity {

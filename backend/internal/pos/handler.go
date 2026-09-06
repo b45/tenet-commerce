@@ -209,6 +209,11 @@ func (h *Handler) Checkout(c *gin.Context) {
 
 	receipt, err := h.service.Checkout(c.Request.Context(), conn, cashierID, idempotencyKey, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) || errors.Is(err, ErrTransactionLimitExceeded) {
+			log.Warn("Checkout rejected due to monetary bounds or invalid exact amount", "error", err, "cashier_id", cashierID)
+			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrInsufficientCashTendered) {
 			log.Warn("Checkout rejected: insufficient cash tendered", "error", err, "cashier_id", cashierID)
 			response.BadRequest(c, "INSUFFICIENT_CASH_TENDERED", err.Error())
@@ -527,6 +532,10 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 
 	product, err := h.service.CreateProduct(c.Request.Context(), conn, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) {
+			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrSKUAlreadyExists) {
 			response.Conflict(c, "SKU_ALREADY_EXISTS", "Product SKU already exists")
 			return
@@ -567,6 +576,10 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 
 	product, err := h.service.UpdateProduct(c.Request.Context(), conn, id, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) {
+			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrProductNotFound) {
 			response.NotFound(c, "PRODUCT_NOT_FOUND", "Product not found")
 			return

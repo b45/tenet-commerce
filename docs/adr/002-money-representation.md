@@ -49,9 +49,11 @@ Tenet Commerce processes Point-of-Sale checkouts, inventory valuations, goods re
 
 ### 3.4 Wire Format Protocol (Frontend $\leftrightarrow$ Backend)
 - **Outbound to Backend (Requests)**:
-  - Payloads (`POST /pos/checkout`, `POST /supply-chain/po`) transmit exact integer amounts for minor units (`amount: 45000`) or standard numeric values without fractional exponents.
-  - Tender amounts must be integers: `amount_tendered >= total_amount`.
+  - Payloads (`POST /pos/checkout`, `POST /supply-chain/purchase-orders`, `POST /ledger/entries`) transmit exact integer amounts for minor units (`amount: 45000`) or standard numeric values without fractional exponents.
+  - Fractional inputs (e.g. `100.50`), out-of-bounds quantities (> `99,999`), or amounts exceeding caps are rejected with `400 Bad Request` (`INVALID_MONETARY_AMOUNT` / `ErrInvalidMonetaryAmount`) without silent rounding.
+  - Tender amounts must be integers: `amount_tendered >= total_amount` and `<= 2,000,000,000 IDR`.
 - **Inbound from Backend (Responses)**:
+  - Canonical values represent integer Rupiah minor units.
   - Frontend parsing utility `parseMoneyFromAPI(val: unknown): number` normalizes input:
     - If `number`: rounded via `Math.round(val)` if float.
     - If `string`: stripped of non-digit characters except negative sign and parsed via `parseInt(clean, 10)`.

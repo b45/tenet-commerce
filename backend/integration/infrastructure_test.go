@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,6 +38,12 @@ const (
 var integrationDSN string
 
 func TestMain(m *testing.M) {
+	flag.Parse()
+	if testing.Short() {
+		fmt.Println("skipping integration tests in -short mode")
+		os.Exit(0)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 

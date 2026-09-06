@@ -124,6 +124,11 @@ func (h *Handler) CreatePurchaseOrder(c *gin.Context) {
 
 	po, err := h.service.CreatePurchaseOrder(c.Request.Context(), conn, &req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) {
+			log.Warn("Purchase order rejected due to invalid monetary amount", "error", err)
+			response.AbortBadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) {
 			log.Warn("Purchase order creation hard-blocked by Halal compliance engine", "supplier_id", req.SupplierID, "error", err)
 			response.UnprocessableEntity(c, "COMPLIANCE_ERROR", err.Error())
