@@ -5,7 +5,7 @@
 
 ## 1. Master Sprint Schedule & Phases
 
-> The dated chart below is the original planning baseline, not a record of actual completion dates. For Phase 3, the [Frontend Design and Delivery Plan](FRONTEND_PHASE3_DESIGN.md) supersedes its calendar estimates with dependency-based work packages. Its P3-00 readiness review must reconcile the conflicting hardening-status claims in this roadmap and IMPLEMENTATION_STATUS.md before dependent frontend mutations are enabled.
+> The dated chart below is the original planning baseline, not a record of actual completion dates. For Phase 3, the [Frontend Design and Delivery Plan](FRONTEND_PHASE3_DESIGN.md) supersedes its calendar estimates with dependency-based work packages. Phase 2 Hardening Gate (G2) has officially passed and signed off.
 
 ```mermaid
 gantt
