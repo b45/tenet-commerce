@@ -310,7 +310,7 @@ export const ar: TranslationSchema = {
       closeModal: "إغلاق النافذة",
       successMessage: "تمت تسوية مخزون {name} بنجاح ليصبح {quantity}.",
       errors: {
-        quantityPositive: "يجب أن تكون كمية التسوية أكبر من صفر",
+        quantityPositive: "أدخل صفراً أو أكثر لجرد مخزون البضائع، أو أكثر من صفر للتسوية",
         adjustFailed: "فشلت عملية تسوية المخزون",
       },
     },

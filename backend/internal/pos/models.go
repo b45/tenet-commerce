@@ -231,11 +231,12 @@ type UpdateProductRequest struct {
 
 // StockAdjustmentRequest represents the payload for POST /api/v1/pos/inventory/adjust
 type StockAdjustmentRequest struct {
-	ProductID      string `json:"product_id" binding:"required"`
-	AdjustmentType string `json:"adjustment_type" binding:"required,oneof=ADD SUBTRACT SET"`
-	Quantity       int    `json:"quantity" binding:"required,gt=0"`
-	Reason         string `json:"reason" binding:"required,oneof=DAMAGE EXPIRED AUDIT_CORRECTION RESTOCK OTHER"`
-	Notes          string `json:"notes,omitempty"`
+	ProductID        string `json:"product_id" binding:"required"`
+	AdjustmentType   string `json:"adjustment_type" binding:"required,oneof=ADD SUBTRACT SET"`
+	Quantity         int    `json:"quantity" binding:"gte=0"`
+	ExpectedQuantity *int   `json:"expected_quantity,omitempty" binding:"omitempty,gte=0"`
+	Reason           string `json:"reason" binding:"required,oneof=DAMAGE EXPIRED AUDIT_CORRECTION RESTOCK OTHER"`
+	Notes            string `json:"notes,omitempty"`
 }
 
 // StockAdjustmentResponse represents the result of a stock adjustment
@@ -250,4 +251,3 @@ type StockAdjustmentResponse struct {
 	LedgerEntryNumber *string   `json:"ledger_entry_number,omitempty"`
 	AdjustedAt        time.Time `json:"adjusted_at"`
 }
-

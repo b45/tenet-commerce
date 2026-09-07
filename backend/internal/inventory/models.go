@@ -16,11 +16,12 @@ const (
 
 // Source Document Types
 const (
-	SourceDocOpeningBalance    = "OPENING_BALANCE"
-	SourceDocGoodsReceipt      = "GOODS_RECEIPT"
-	SourceDocPOSSale           = "POS_SALE"
-	SourceDocPOSVoid           = "POS_VOID"
-	SourceDocManualAdjustment  = "MANUAL_ADJUSTMENT"
+	SourceDocOpeningBalance   = "OPENING_BALANCE"
+	SourceDocGoodsReceipt     = "GOODS_RECEIPT"
+	SourceDocPOSSale          = "POS_SALE"
+	SourceDocPOSVoid          = "POS_VOID"
+	SourceDocManualAdjustment = "MANUAL_ADJUSTMENT"
+	SourceDocProductCreate    = "PRODUCT_CREATE"
 )
 
 // DefaultCoreLocation is the authoritative single operational warehouse location for core

@@ -53,20 +53,22 @@ func (r *Repository) PostMovementTx(ctx context.Context, tx pgx.Tx, p PostMoveme
 		return nil, err
 	}
 
-	location := p.WarehouseLocation
-	if strings.TrimSpace(location) == "" {
-		location = DefaultCoreLocation
-	}
-
 	occurredAt := p.OccurredAt
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
 	}
 
 	// 2. Lock inventory row before writing movement or updating balance
-	currQty, _, err := r.LockInventoryForUpdate(ctx, tx, p.ProductID)
+	currQty, lockedLocation, err := r.LockInventoryForUpdate(ctx, tx, p.ProductID)
 	if err != nil {
 		return nil, err
+	}
+	location := p.WarehouseLocation
+	if strings.TrimSpace(location) == "" {
+		location = lockedLocation
+	}
+	if strings.TrimSpace(location) == "" {
+		location = DefaultCoreLocation
 	}
 
 	newQty := currQty + p.QuantityDelta

@@ -16,24 +16,24 @@ import (
 )
 
 var (
-	ErrComplianceCertRequired = errors.New("compliance certificate is required under strict mode")
-	ErrComplianceCertExpired  = errors.New("compliance certificate is expired")
-	ErrComplianceCertInvalid  = errors.New("compliance certificate is not valid for this transaction")
-	ErrSupplierInactive       = errors.New("supplier is inactive")
-	ErrInvalidPOStatus        = errors.New("invalid purchase order status for this operation")
-	ErrEmptyReceipt           = errors.New("goods receipt must contain at least one item")
-	ErrZeroValueReceipt       = errors.New("goods receipt inbound valuation must be greater than zero")
-	ErrReceiptItemNotOnPO     = errors.New("goods receipt item does not exist on purchase order")
-	ErrDuplicateReceiptItem   = errors.New("goods receipt contains a duplicate product")
-	ErrReceiptQuantityExceeds = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
-	ErrIdempotencyKeyConflict = errors.New("idempotency key is already associated with another purchase order")
-	ErrInvalidMonetaryAmount  = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
-	ErrInvalidQCArithmetic                 = errors.New("delivered quantity must equal accepted plus rejected quantity")
+	ErrComplianceCertRequired               = errors.New("compliance certificate is required under strict mode")
+	ErrComplianceCertExpired                = errors.New("compliance certificate is expired")
+	ErrComplianceCertInvalid                = errors.New("compliance certificate is not valid for this transaction")
+	ErrSupplierInactive                     = errors.New("supplier is inactive")
+	ErrInvalidPOStatus                      = errors.New("invalid purchase order status for this operation")
+	ErrEmptyReceipt                         = errors.New("goods receipt must contain at least one item")
+	ErrZeroValueReceipt                     = errors.New("goods receipt inbound valuation must be greater than zero")
+	ErrReceiptItemNotOnPO                   = errors.New("goods receipt item does not exist on purchase order")
+	ErrDuplicateReceiptItem                 = errors.New("goods receipt contains a duplicate product")
+	ErrReceiptQuantityExceeds               = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
+	ErrIdempotencyKeyConflict               = errors.New("idempotency key is already associated with another purchase order")
+	ErrInvalidMonetaryAmount                = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
+	ErrInvalidQCArithmetic                  = errors.New("delivered quantity must equal accepted plus rejected quantity")
 	ErrQCReasonRequired                     = errors.New("qc_reason is required when rejected quantity is greater than zero")
 	ErrPOCannotBeCancelled                  = errors.New("only DRAFT or ISSUED purchase orders can be cancelled")
 	ErrPOCannotBeCancelledWithAcceptedGoods = errors.New("cannot cancel purchase order with received goods")
+	ErrProductNotAvailable                  = errors.New("purchase order product does not exist or is inactive")
 )
-
 
 type Service struct {
 	repo          *Repository
@@ -132,7 +132,10 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, conn *pgxpool.Conn, r
 
 	totalMoney := money.IDR(0)
 	for _, reqItem := range req.Items {
-		productID, _ := uuid.Parse(reqItem.ProductID)
+		productID, err := uuid.Parse(reqItem.ProductID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid product id", ErrProductNotAvailable)
+		}
 		if reqItem.Quantity <= 0 || reqItem.Quantity > money.MaxLineItemQuantity {
 			return nil, fmt.Errorf("invalid quantity %d: must be between 1 and %d", reqItem.Quantity, money.MaxLineItemQuantity)
 		}
@@ -175,6 +178,13 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, conn *pgxpool.Conn, r
 	// COMPLIANCE INTERCEPTOR (HARD-BLOCK), evaluated inside the PO transaction.
 	po.ComplianceEvaluation, err = s.checkCompliance(ctx, tx, supplierID, certID)
 	if err != nil {
+		return nil, err
+	}
+	productIDs := make([]uuid.UUID, 0, len(po.Items))
+	for _, item := range po.Items {
+		productIDs = append(productIDs, item.ProductID)
+	}
+	if err := s.repo.LockActiveProductsForPurchaseOrder(ctx, tx, productIDs); err != nil {
 		return nil, err
 	}
 
@@ -372,7 +382,6 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 			return 0, false, false, ErrInvalidQCArithmetic
 		}
 
-
 		outstanding := poItem.Quantity - received[productID]
 		if delivered > outstanding {
 			return 0, false, false, ErrReceiptQuantityExceeds
@@ -435,7 +444,6 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 	}
 	return inboundValue, true, hasAccepted, nil
 }
-
 
 // ListSuppliers returns a paginated list of suppliers with optional is_active filter
 func (s *Service) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isActive *bool, limit, offset int) ([]Supplier, error) {

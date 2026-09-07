@@ -466,6 +466,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Creates the sale, one immutable OUT movement per transaction line, the inventory balance update, and balanced sales/COGS journal in one transaction. Same-key retries return the original result without another movement.",
                         "method": "POST",
                         "header": [
                             {
@@ -921,6 +922,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Voids a completed sale and posts one linked IN reversal movement per original transaction line using the original quantity and cost basis. The status, stock, movements, and reversal journal commit atomically; same-key retries do not restock twice.",
                         "method": "POST",
                         "header": [
                             {
@@ -1150,6 +1152,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Creates the product and inventory row atomically. A positive initial_stock posts one immutable OPENING movement linked to the product and authenticated actor; zero initial stock creates no movement.",
                         "method": "POST",
                         "header": [
                             {
@@ -1198,6 +1201,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Updates product metadata and inventory configuration without changing stock quantity. Deactivation returns 409 PRODUCT_HAS_OUTSTANDING_PO while an issued or partially received PO has outstanding quantity.",
                         "method": "PUT",
                         "header": [
                             {
@@ -1247,6 +1251,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Soft-deletes a product while preserving transaction and stock-movement traceability. Returns 409 PRODUCT_HAS_OUTSTANDING_PO while an issued or partially received PO has outstanding quantity.",
                         "method": "DELETE",
                         "header": [
                             {
@@ -1490,6 +1495,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Posts one immutable ADJUSTMENT movement atomically with its audit record and journal. ADD and SUBTRACT require a positive quantity. SET accepts an absolute quantity including zero and requires expected_quantity; a changed authoritative balance returns 409 STALE_STOCK_COUNT.",
                         "method": "POST",
                         "header": [
                             {
@@ -1646,6 +1652,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Creates a purchase order only when every referenced product exists and remains active under a row lock. Missing, malformed, or inactive product IDs return 422 PRODUCT_NOT_AVAILABLE with no PO mutation.",
                         "method": "POST",
                         "header": [
                             {
