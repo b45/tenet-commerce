@@ -595,3 +595,14 @@ func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID st
 func (s *Service) GetLowStock(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
 	return s.repo.GetLowStockProducts(ctx, conn)
 }
+
+// GetStockCard retrieves stock movement history for a product with opening and closing balances
+func (s *Service) GetStockCard(ctx context.Context, conn *pgxpool.Conn, filter StockCardFilter) (*StockCardResponse, error) {
+	return s.repo.GetStockCard(ctx, conn, filter)
+}
+
+// GetStockOverview calculates aggregated stock statistics across all active products
+func (s *Service) GetStockOverview(ctx context.Context, conn *pgxpool.Conn) (*StockOverviewCard, error) {
+	return s.repo.GetStockOverview(ctx, conn)
+}
+

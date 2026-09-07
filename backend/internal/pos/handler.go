@@ -94,6 +94,15 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 		internalAuth.RequirePermission("inventory:read"),
 		h.GetLowStock,
 	)
+	rg.GET("/inventory/card",
+		internalAuth.RequirePermission("inventory:read"),
+		h.GetStockCard,
+	)
+	rg.GET("/inventory/overview",
+		internalAuth.RequirePermission("inventory:read"),
+		h.GetStockOverview,
+	)
+
 
 	// Checkout & Orders
 	rg.POST("/checkout",
@@ -884,3 +893,114 @@ func (h *Handler) GetLowStock(c *gin.Context) {
 		Total: len(products),
 	})
 }
+
+// GetStockCard retrieves windowed stock movement card report for a product with running balances
+// GET /api/v1/pos/inventory/card?product_id=...&start_date=...&end_date=...&limit=...&offset=...
+func (h *Handler) GetStockCard(c *gin.Context) {
+	log := logger.FromContext(c.Request.Context())
+	connVal, exists := c.Get("db_conn")
+	if !exists {
+		response.InternalServerError(c, "DATABASE_CONTEXT_LOST", "Database connection context not found")
+		return
+	}
+	conn, ok := connVal.(*pgxpool.Conn)
+	if !ok {
+		response.InternalServerError(c, "DATABASE_TYPE_ERROR", "Invalid connection context type")
+		return
+	}
+
+	productID := c.Query("product_id")
+	if productID == "" {
+		response.BadRequest(c, "MISSING_PRODUCT_ID", "product_id query parameter is required")
+		return
+	}
+
+	limit := 50
+	if lStr := c.Query("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	offset := 0
+	if oStr := c.Query("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	var startDate *time.Time
+	if sStr := c.Query("start_date"); sStr != "" {
+		if t, err := time.Parse(time.RFC3339, sStr); err == nil {
+			startDate = &t
+		} else if t, err := time.Parse("2006-01-02", sStr); err == nil {
+			startDate = &t
+		} else {
+			response.BadRequest(c, "INVALID_START_DATE", "start_date must be RFC3339 or YYYY-MM-DD")
+			return
+		}
+	}
+
+	var endDate *time.Time
+	if eStr := c.Query("end_date"); eStr != "" {
+		if t, err := time.Parse(time.RFC3339, eStr); err == nil {
+			endDate = &t
+		} else if t, err := time.Parse("2006-01-02", eStr); err == nil {
+			// Set to end of day 23:59:59
+			tEnd := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, t.Location())
+			endDate = &tEnd
+		} else {
+			response.BadRequest(c, "INVALID_END_DATE", "end_date must be RFC3339 or YYYY-MM-DD")
+			return
+		}
+	}
+
+	filter := StockCardFilter{
+		ProductID: productID,
+		StartDate: startDate,
+		EndDate:   endDate,
+		Limit:     limit,
+		Offset:    offset,
+	}
+
+	stockCard, err := h.service.GetStockCard(c.Request.Context(), conn, filter)
+	if err != nil {
+		if strings.Contains(err.Error(), "product not found") || strings.Contains(err.Error(), "invalid product id") {
+			response.NotFound(c, "PRODUCT_NOT_FOUND", err.Error())
+			return
+		}
+		log.Error("Failed querying stock card", "error", err)
+		response.InternalServerError(c, "STOCK_CARD_FETCH_FAILED", err.Error())
+		return
+	}
+
+	response.OKWithMeta(c, stockCard, response.Meta{
+		Total: stockCard.TotalMovements,
+	})
+}
+
+// GetStockOverview calculates high-level inventory totals across all active SKUs
+// GET /api/v1/pos/inventory/overview
+func (h *Handler) GetStockOverview(c *gin.Context) {
+	log := logger.FromContext(c.Request.Context())
+	connVal, exists := c.Get("db_conn")
+	if !exists {
+		response.InternalServerError(c, "DATABASE_CONTEXT_LOST", "Database connection context not found")
+		return
+	}
+	conn, ok := connVal.(*pgxpool.Conn)
+	if !ok {
+		response.InternalServerError(c, "DATABASE_TYPE_ERROR", "Invalid connection context type")
+		return
+	}
+
+	card, err := h.service.GetStockOverview(c.Request.Context(), conn)
+	if err != nil {
+		log.Error("Failed calculating stock overview", "error", err)
+		response.InternalServerError(c, "STOCK_OVERVIEW_FAILED", err.Error())
+		return
+	}
+
+	response.OK(c, card)
+}
+
