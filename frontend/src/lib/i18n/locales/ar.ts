@@ -2,6 +2,11 @@ import type { TranslationSchema } from "../types";
 
 export const ar: TranslationSchema = {
   common: {
+    maintenance: {
+      title: "صيانة مجدولة",
+      message: "تم إيقاف التغييرات الجديدة مؤقتاً. تظل البيانات الحالية متاحة.",
+      retry: "تحقق مرة أخرى",
+    },
     actions: {
       cancel: "إلغاء",
       confirm: "تأكيد",

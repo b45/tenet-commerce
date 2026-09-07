@@ -2,6 +2,11 @@ import type { TranslationSchema } from "../types";
 
 export const en: TranslationSchema = {
   common: {
+    maintenance: {
+      title: "Scheduled maintenance",
+      message: "New changes are temporarily paused. Existing data remains available.",
+      retry: "Check again",
+    },
     actions: {
       cancel: "Cancel",
       confirm: "Confirm",

@@ -19,6 +19,9 @@ X-Tenant-ID: <TENANT_SLUG>              # Fallback only; authenticated JWT tenan
 - **Endpoint:** `GET /health`
 - **Auth:** Public
 - **Response:** `200 OK` with the application health payload. This endpoint is outside the `/api/v1` namespace.
+- **Endpoint:** `GET /ready`
+- **Auth:** Public
+- **Response:** `200 OK` when PostgreSQL and Redis are reachable; `503 Service Unavailable` when dependencies are unavailable or `APP_MAINTENANCE_MODE=true`. This endpoint is outside the `/api/v1` namespace and emits `Retry-After: 300` during maintenance.
 
 ### 1.4 Standard Response Envelope
 ```json

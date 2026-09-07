@@ -1702,7 +1702,7 @@
                         }
                     ],
                     "request": {
-                        "description": "Creates a purchase order only when every referenced product exists and remains active under a row lock. Missing, malformed, or inactive product IDs return 422 PRODUCT_NOT_AVAILABLE with no PO mutation.",
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision.",
                         "method": "POST",
                         "header": [
                             {
@@ -1736,8 +1736,7 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        },
-                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
+                        }
                     },
                     "response": []
                 },
@@ -2770,7 +2769,6 @@
                         "description": "Receives ordered items into inventory with inline quality check (delivered = accepted + rejected). Deterministic row locking and atomic stock increments for accepted quantity only. Validates compliance status, closes PO to RECEIVED when 100% fulfilled, posts balanced double-entry ledger journal for accepted valuation, and rolls back cleanly if inventory records or compliance fail."
                     },
                     "response": []
-
                 },
                 {
                     "name": "List Goods Receipts",
@@ -2837,7 +2835,6 @@
                         "description": "Returns full Goods Receipt details including inline QC records per line item (delivered_quantity, accepted_quantity, rejected_quantity, qc_outcome, qc_reason, inspected_by, inspected_at), ledger cross-reference, and immutable compliance_evaluation. Accepted receipt lines posted after the inventory cutover include stock_movement_id (UUID); rejected-only and legacy lines without a movement omit this field. Accepted stock movements, receipt records, PO status, and ledger postings commit atomically."
                     },
                     "response": []
-
                 },
                 {
                     "name": "Product Traceability Lineage",
@@ -2890,6 +2887,23 @@
                             ],
                             "path": [
                                 "health"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Readiness Check",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/ready",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "ready"
                             ]
                         }
                     },

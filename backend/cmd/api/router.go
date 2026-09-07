@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +56,7 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 	router.Use(logger.TraceMiddleware())     // 2. Distributed Tracing (trace_id, span_id)
 	router.Use(logger.AccessLogMiddleware()) // 3. Structured JSON Access Logging
 	router.Use(logger.RecoveryMiddleware())  // 4. Panic Recovery with stack trace logging
+	router.Use(maintenanceMiddleware())
 
 	// Standard JSON 404 and 405 error responses for all undefined endpoints
 	router.NoRoute(func(c *gin.Context) {
@@ -71,6 +74,11 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 		})
 	})
 	router.GET("/ready", func(c *gin.Context) {
+		if maintenanceModeEnabled() {
+			c.Header("Retry-After", "300")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "maintenance"})
+			return
+		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 750*time.Millisecond)
 		defer cancel()
 		if cfg.PostgresDB == nil || cfg.PostgresDB.Pool == nil || cfg.PostgresDB.Pool.Ping(ctx) != nil {
@@ -124,4 +132,32 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 	}
 
 	return router
+}
+
+func maintenanceModeEnabled() bool {
+	enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("APP_MAINTENANCE_MODE")))
+	return enabled
+}
+
+func maintenanceMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !maintenanceModeEnabled() || !isMutationMethod(c.Request.Method) || c.Request.URL.Path == "/api/v1/auth/logout" {
+			c.Next()
+			return
+		}
+
+		c.Header("Retry-After", "300")
+		message := strings.TrimSpace(os.Getenv("APP_MAINTENANCE_MESSAGE"))
+		if message == "" {
+			message = "Temporarily unavailable for scheduled maintenance."
+		}
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   gin.H{"code": "MAINTENANCE_MODE", "message": message},
+		})
+	}
+}
+
+func isMutationMethod(method string) bool {
+	return method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete
 }

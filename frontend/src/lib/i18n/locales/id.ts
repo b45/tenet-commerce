@@ -2,6 +2,11 @@ import type { TranslationSchema } from "../types";
 
 export const id: TranslationSchema = {
   common: {
+    maintenance: {
+      title: "Pemeliharaan terjadwal",
+      message: "Perubahan baru sementara dihentikan. Data yang ada tetap dapat dilihat.",
+      retry: "Periksa lagi",
+    },
     actions: {
       cancel: "Batal",
       confirm: "Konfirmasi",

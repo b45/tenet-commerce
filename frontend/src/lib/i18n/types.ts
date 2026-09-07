@@ -16,6 +16,11 @@ export interface LocaleConfig {
 
 export interface TranslationSchema {
   common: {
+    maintenance: {
+      title: string;
+      message: string;
+      retry: string;
+    };
     actions: {
       cancel: string;
       confirm: string;
