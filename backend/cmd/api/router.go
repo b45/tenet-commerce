@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -67,6 +69,19 @@ func SetupRouter(cfg RouterConfig) *gin.Engine {
 			"status": "healthy",
 			"app":    "tenet-commerce",
 		})
+	})
+	router.GET("/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 750*time.Millisecond)
+		defer cancel()
+		if cfg.PostgresDB == nil || cfg.PostgresDB.Pool == nil || cfg.PostgresDB.Pool.Ping(ctx) != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
+			return
+		}
+		if cfg.RedisClient == nil || cfg.RedisClient.RDB == nil || cfg.RedisClient.RDB.Ping(ctx).Err() != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 
 	// API v1 Namespace (Central Route Manifest)
