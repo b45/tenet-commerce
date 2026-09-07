@@ -602,7 +602,8 @@ VALUES
     ('10000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-BG01', '8992001000030', 'Bolu Gulung Pandan Keju', 'Bolu gulung aroma pandan asli suji dengan taburan parutan keju melimpah', 45000.00, 28000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-RS01', '8992001000040', 'Roti Sisir Butter Premium', 'Roti sisir mentega jadul lembut, manis gurih nagih', 18000.00, 11000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000030', 'SKU-PASTRY-CA01', '8992001000050', 'Croissant Almond Halal', 'Croissant renyah berlapis dengan isian almond paste dan topping almond panggang', 25000.00, 15000.00, '["HALAL_MUI"]', TRUE),
-    ('10000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000040', 'SKU-SNACK-LL01', '8992001000060', 'Lapis Legit Prunes Slice', 'Lapis legit rempah klasik dengan potongan buah prunes pilihan', 28000.00, 18000.00, '["HALAL_MUI"]', TRUE)
+    ('10000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000040', 'SKU-SNACK-LL01', '8992001000060', 'Lapis Legit Prunes Slice', 'Lapis legit rempah klasik dengan potongan buah prunes pilihan', 28000.00, 18000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000099', 'c0000000-0000-0000-0000-000000000003', 'SKU-DEMO-01', '8999001000099', 'Sirup Gula Tebu Al-Barakah (Demo SKU)', 'Produk demo deterministik untuk pengujian golden journey dan showcase', 15000.00, 10000.00, '["HALAL_MUI"]', TRUE)
 ON CONFLICT (sku) DO UPDATE SET 
     name = EXCLUDED.name,
     unit_price = EXCLUDED.unit_price,
@@ -613,7 +614,27 @@ ON CONFLICT (sku) DO UPDATE SET
 -- 5.8 Seed Inventory Stock for tenant_al_barakah_mart
 INSERT INTO tenant_al_barakah_mart.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
 SELECT id, 50, 10, 'MAIN_STORE' FROM tenant_al_barakah_mart.products
+WHERE sku <> 'SKU-DEMO-01'
 ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- Explicit opening inventory for deterministic demo fixture (opening stock 0, threshold 10)
+INSERT INTO tenant_al_barakah_mart.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
+SELECT id, 0, 10, 'MAIN_STORE' FROM tenant_al_barakah_mart.products
+WHERE sku = 'SKU-DEMO-01'
+ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- 5.9 Seed Deterministic Demo Supplier and Halal Compliance Certificate
+INSERT INTO tenant_al_barakah_mart.suppliers (id, code, company_name, contact_person, contact_email, contact_phone, is_active)
+VALUES 
+    ('a1000000-0000-0000-0000-000000000001', 'SUP-DEMO-VALID-01', 'PT Berkah Pangan Madani (Demo Supplier)', 'Haji Ridwan', 'ridwan@berkahpangan.co.id', '08123456780', TRUE),
+    ('a1000000-0000-0000-0000-000000000002', 'SUP-DEMO-EXP-01', 'CV Segar Abadi Jaya (Expired Cert Demo)', 'Pak Hendra', 'hendra@segarabadi.co.id', '08123456781', TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO tenant_al_barakah_mart.compliance_certificates (id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url)
+VALUES
+    ('c1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'HALAL_MUI', 'CERT-DEMO-HALAL-2099', 'BPJPH', 'Sugar, Syrup & Agro Processing', '2024-01-01', '2099-12-31', 'https://halal.go.id/cert/CERT-DEMO-HALAL-2099'),
+    ('c1000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000002', 'HALAL_MUI', 'CERT-DEMO-HALAL-EXPIRED', 'BPJPH', 'Poultry & Meat Processing', '2020-01-01', '2021-12-31', 'https://halal.go.id/cert/CERT-DEMO-HALAL-EXPIRED')
+ON CONFLICT (certificate_number) DO NOTHING;
 
 -- ==============================================================================
 -- 6. SCHEMA SETUP: tenant_darussalam_store
@@ -899,6 +920,17 @@ ON CONFLICT (sku) DO UPDATE SET
 INSERT INTO tenant_darussalam_store.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
 SELECT id, 30, 5, 'MAIN_STORE' FROM tenant_darussalam_store.products
 ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- 6.7.1 Seed Deterministic Demo Supplier and Halal Compliance Certificate for tenant_darussalam_store
+INSERT INTO tenant_darussalam_store.suppliers (id, code, company_name, contact_person, contact_email, contact_phone, is_active)
+VALUES 
+    ('b1000000-0000-0000-0000-000000000001', 'SUP-DS-DEMO-01', 'CV Nabawi Import Mandiri (Tenant B Demo Supplier)', 'Ahmad Nabawi', 'ahmad@nabawi.co.id', '08129876543', TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO tenant_darussalam_store.compliance_certificates (id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url)
+VALUES
+    ('c2000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'HALAL_MUI', 'CERT-DS-DEMO-2099', 'BPJPH', 'Import Dates & Holy Water', '2024-01-01', '2099-12-31', 'https://halal.go.id/cert/CERT-DS-DEMO-2099')
+ON CONFLICT (certificate_number) DO NOTHING;
 
 -- 6.8 Ledger Engine
 

@@ -16,13 +16,9 @@ db-down: ## Stop local infrastructure containers
 	docker compose down
 
 .PHONY: db-reset
-db-reset: ## Reset local PostgreSQL database and re-apply seed data
-	docker compose down -v
-	docker compose up -d postgres redis
-	@echo "Waiting for postgres to be ready..."
-	@sleep 3
-	docker exec -i tenet_postgres psql -U postgres -d tenet_commerce < scripts/init_dev_db.sql
-	@echo "Database reset and seeded successfully!"
+db-reset: ## Reset local PostgreSQL database and re-apply seed data (opt-in demo guard)
+	@CONFIRM_DEMO_RESET=$${CONFIRM_DEMO_RESET:-true} ./scripts/reset_dev_db.sh
+
 
 # --- Backend Commands ---
 .PHONY: run
