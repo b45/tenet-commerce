@@ -66,7 +66,7 @@ test.describe("TPC-029 real backend authentication", () => {
     await expect(page.getByRole("main")).toBeVisible();
     const checkout = await api.post("/api/v1/pos/checkout", {
       headers: { ...headers, "Idempotency-Key": `${key}-sale` },
-      data: { items: [{ product_id: product.id, quantity: 1 }], payment_method: "CASH", cash_tendered: 15000 },
+      data: { items: [{ sku: "SKU-DEMO-01", quantity: 1 }], payment_method: "CASH", cash_tendered: 15000 },
     });
     expect(checkout.status()).toBe(201);
     const transactionID = (await checkout.json()).data.transaction_id;
