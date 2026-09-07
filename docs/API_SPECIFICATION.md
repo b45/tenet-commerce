@@ -865,8 +865,40 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 - **Endpoint:** `PUT /api/v1/supply-chain/purchase-orders/:id/cancel`
 - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
-- **Rules:** Only `DRAFT` or `ISSUED` purchase orders with zero received goods can be cancelled.
-- **Response (200 OK):** `{"success": true, "data": {"cancelled": true}}`.
+- **Request Body (Optional):**
+```json
+{
+  "reason": "Supplier unable to fulfill raw material specifications"
+}
+```
+- **Rules:**
+  - Enforces database row-level locking (`SELECT ... FOR UPDATE`) serializing against concurrent receiving (`POST /api/v1/supply-chain/goods-receipts`).
+  - Cancellation is permitted if the PO is in `DRAFT` or `ISSUED` status with zero accepted goods (`total_accepted == 0`).
+  - Purchase orders with all-rejected QC inspections (where `accepted_quantity = 0`) can be cancelled while preserving historical inspection audit records intact.
+  - Purchase orders in `PARTIALLY_RECEIVED` or `RECEIVED` status cannot be cancelled and return `409 Conflict`.
+  - Replays of cancellation requests on an already cancelled PO are idempotent and return `200 OK` with the current record.
+- **Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "cancelled": true,
+    "purchase_order": {
+      "id": "82355942-c4c1-4ca8-91f8-b6db03330a7c",
+      "po_number": "PO-20260907-001",
+      "supplier_id": "e6f8af3f-f80b-4773-b3cc-9689e65b1ad3",
+      "compliance_cert_id": "c1f0d4ea-b9e7-4f24-9b55-d14fe4bb049e",
+      "total_amount": 500000.00,
+      "status": "CANCELLED",
+      "issued_date": "2026-09-07T00:00:00Z",
+      "created_at": "2026-09-07T08:00:00Z",
+      "cancellation_reason": "Supplier unable to fulfill raw material specifications",
+      "cancelled_by": "11111111-1111-1111-1111-111111111111",
+      "cancelled_at": "2026-09-07T08:15:00Z"
+    }
+  }
+}
+```
 
 ### 4.13 List Goods Receipts
 - **Endpoint:** `GET /api/v1/supply-chain/goods-receipts`

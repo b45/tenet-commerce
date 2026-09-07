@@ -2643,6 +2643,15 @@
                                     "value": "{{ab_po_id}}"
                                 }
                             ]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Supplier unable to deliver goods on schedule\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         }
                     },
                     "response": []

@@ -454,15 +454,40 @@ func (h *Handler) CancelPurchaseOrder(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.CancelPurchaseOrder(c.Request.Context(), conn, id); err != nil {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		response.AbortUnauthorized(c, "UNAUTHORIZED", "Missing user ID in context")
+		return
+	}
+	actorID, err := uuid.Parse(userIDVal.(string))
+	if err != nil {
+		response.AbortUnauthorized(c, "UNAUTHORIZED", "Invalid user ID format in context")
+		return
+	}
+
+	var req CancelPurchaseOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Optional reason or fallback if body empty
+		req.Reason = "Cancelled by user"
+	}
+
+	cancelledPO, err := h.service.CancelPurchaseOrder(c.Request.Context(), conn, id, actorID, req.Reason)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			response.NotFound(c, "PO_NOT_FOUND", "Purchase order not found")
+			return
+		}
+		if errors.Is(err, ErrPOCannotBeCancelled) || errors.Is(err, ErrPOCannotBeCancelledWithAcceptedGoods) {
+			response.AbortConflict(c, "PO_CANCELLATION_CONFLICT", err.Error())
 			return
 		}
 		response.UnprocessableEntity(c, "PO_CANCELLATION_FAILED", err.Error())
 		return
 	}
-	response.OK(c, gin.H{"cancelled": true})
+	response.OK(c, gin.H{
+		"cancelled":      true,
+		"purchase_order": cancelledPO,
+	})
 }
 
 // ListGoodsReceipts handles GET /api/v1/supply-chain/goods-receipts

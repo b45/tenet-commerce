@@ -51,9 +51,12 @@ type PurchaseOrder struct {
 	SupplierID           uuid.UUID           `json:"supplier_id"`
 	ComplianceCertID     *uuid.UUID          `json:"compliance_cert_id"`
 	TotalAmount          float64             `json:"total_amount"`
-	Status               string              `json:"status"` // DRAFT, ISSUED, RECEIVED, CANCELLED
+	Status               string              `json:"status"` // DRAFT, ISSUED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED
 	IssuedDate           time.Time           `json:"issued_date"`
 	CreatedAt            time.Time           `json:"created_at"`
+	CancellationReason   *string             `json:"cancellation_reason,omitempty"`
+	CancelledBy          *uuid.UUID          `json:"cancelled_by,omitempty"`
+	CancelledAt          *time.Time          `json:"cancelled_at,omitempty"`
 	Items                []PurchaseOrderItem `json:"items,omitempty"`
 }
 
@@ -180,11 +183,14 @@ type PurchaseOrderSummary struct {
 	SupplierID       uuid.UUID  `json:"supplier_id"`
 	SupplierName     string     `json:"supplier_name"`
 	ComplianceCertID *uuid.UUID `json:"compliance_cert_id,omitempty"`
-	TotalAmount      float64    `json:"total_amount"`
-	Status           string     `json:"status"`
-	IssuedDate       time.Time  `json:"issued_date"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ItemCount        int        `json:"item_count"`
+	TotalAmount        float64    `json:"total_amount"`
+	Status             string     `json:"status"`
+	IssuedDate         time.Time  `json:"issued_date"`
+	CreatedAt          time.Time  `json:"created_at"`
+	CancellationReason *string    `json:"cancellation_reason,omitempty"`
+	CancelledBy        *uuid.UUID `json:"cancelled_by,omitempty"`
+	CancelledAt        *time.Time `json:"cancelled_at,omitempty"`
+	ItemCount          int        `json:"item_count"`
 }
 
 // PurchaseOrderDetailLine represents an item line within a PO detail
@@ -226,6 +232,9 @@ type PurchaseOrderDetail struct {
 	Status               string                    `json:"status"`
 	IssuedDate           time.Time                 `json:"issued_date"`
 	CreatedAt            time.Time                 `json:"created_at"`
+	CancellationReason   *string                   `json:"cancellation_reason,omitempty"`
+	CancelledBy          *uuid.UUID                `json:"cancelled_by,omitempty"`
+	CancelledAt          *time.Time                `json:"cancelled_at,omitempty"`
 	Items                []PurchaseOrderDetailLine `json:"items"`
 	GoodsReceipts        []GoodsReceiptSummary     `json:"goods_receipts"`
 }

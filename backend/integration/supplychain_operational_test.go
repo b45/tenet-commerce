@@ -308,7 +308,7 @@ func TestSupplyChain_PurchaseOrder_ListDetailAndCancel(t *testing.T) {
 	router.ServeHTTP(cancelW, cancelReq)
 	require.Equal(t, http.StatusOK, cancelW.Code)
 
-	// 7. Verify status changed to CANCELLED
+	// 7. Verify status changed to CANCELLED and cancellation audit metadata recorded
 	detailReq2 := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s", poID), nil)
 	detailW2 := httptest.NewRecorder()
 	router.ServeHTTP(detailW2, detailReq2)
@@ -319,6 +319,10 @@ func TestSupplyChain_PurchaseOrder_ListDetailAndCancel(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(detailW2.Body.Bytes(), &detailResp2))
 	assert.Equal(t, "CANCELLED", detailResp2.Data.Status)
+	assert.NotNil(t, detailResp2.Data.CancellationReason)
+	assert.NotNil(t, detailResp2.Data.CancelledBy)
+	assert.NotNil(t, detailResp2.Data.CancelledAt)
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", detailResp2.Data.CancelledBy.String())
 }
 
 func TestSupplyChain_GoodsReceiptAndTraceability(t *testing.T) {
@@ -485,4 +489,347 @@ func TestSupplyChain_GoodsReceiptAndTraceability(t *testing.T) {
 	require.NotEmpty(t, report.PurchaseOrders)
 	require.NotEmpty(t, report.GoodsReceipts)
 	assert.Equal(t, 15, report.GoodsReceipts[0].ReceivedQuantity)
+}
+
+func TestSupplyChain_PurchaseOrderCancellationSerializationAndConflicts(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// 1. Create a supplier with valid Halal certificate
+	now := time.Now()
+	createPayload := supplychain.CreateSupplierRequest{
+		Code:          fmt.Sprintf("SUP-SER-%d", now.UnixNano()),
+		CompanyName:   "PT Serpong Halal Distribution",
+		ContactPerson: "Hendro",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertType:          "HALAL_MUI",
+			CertificateNumber: fmt.Sprintf("MUI-SER-%d", now.UnixNano()),
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Meat Distribution",
+			ValidFrom:         now.AddDate(0, -1, 0).Format("2006-01-02"),
+			ExpiryDate:        now.AddDate(1, 0, 0).Format("2006-01-02"),
+		},
+	}
+	body, _ := json.Marshal(createPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-sup-ser-%d", now.UnixNano()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var createResp struct {
+		Data supplychain.Supplier `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &createResp))
+	supplierID := createResp.Data.ID
+	certID := createResp.Data.ComplianceCertificate.ID.String()
+
+	// Get a valid product ID
+	var productID uuid.UUID
+	{
+		ctx := context.Background()
+		conn, err := db.Pool.Acquire(ctx)
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public")
+		require.NoError(t, err)
+		err = conn.QueryRow(ctx, "SELECT id FROM products WHERE is_active = true ORDER BY name LIMIT 1").Scan(&productID)
+		require.NoError(t, err)
+		conn.Release()
+	}
+
+	t.Run("cannot cancel PO with accepted goods receipt", func(t *testing.T) {
+		// Create PO
+		poPayload := supplychain.CreatePurchaseOrderRequest{
+			SupplierID:       supplierID.String(),
+			ComplianceCertID: &certID,
+			Items: []supplychain.CreatePOItemRequest{
+				{ProductID: productID.String(), Quantity: 10, UnitCost: 20000},
+			},
+		}
+		poBody, _ := json.Marshal(poPayload)
+		poReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+		poReq.Header.Set("Content-Type", "application/json")
+		poReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-po-part-%d", time.Now().UnixNano()))
+		poW := httptest.NewRecorder()
+		router.ServeHTTP(poW, poReq)
+		require.Equal(t, http.StatusCreated, poW.Code)
+
+		var poResp struct {
+			Data supplychain.PurchaseOrder `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(poW.Body.Bytes(), &poResp))
+		poID := poResp.Data.ID
+
+		// Partially receive 4 units
+		del := 4
+		acc := 4
+		rej := 0
+		grPayload := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: poID.String(),
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID.String(),
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+				},
+			},
+		}
+		grBody, _ := json.Marshal(grPayload)
+		grReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody))
+		grReq.Header.Set("Content-Type", "application/json")
+		grReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-gr-part-%d", time.Now().UnixNano()))
+		grW := httptest.NewRecorder()
+		router.ServeHTTP(grW, grReq)
+		require.Equal(t, http.StatusCreated, grW.Code)
+
+		// Attempt to cancel PO -> MUST fail with 409 Conflict
+		cancelPayload := supplychain.CancelPurchaseOrderRequest{Reason: "Attempt cancel partially received"}
+		cancelBody, _ := json.Marshal(cancelPayload)
+		cancelReq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s/cancel", poID), bytes.NewReader(cancelBody))
+		cancelReq.Header.Set("Content-Type", "application/json")
+		cancelReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cancel-fail-%d", time.Now().UnixNano()))
+		cancelW := httptest.NewRecorder()
+		router.ServeHTTP(cancelW, cancelReq)
+		require.Equal(t, http.StatusConflict, cancelW.Code)
+
+		var errResp struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(cancelW.Body.Bytes(), &errResp))
+		assert.Equal(t, "PO_CANCELLATION_CONFLICT", errResp.Error.Code)
+		assert.Contains(t, errResp.Error.Message, "cannot cancel purchase order with received goods")
+	})
+
+	t.Run("cancelling PO after all-rejected QC succeeds and retains inspection record", func(t *testing.T) {
+		// Create PO
+		poPayload := supplychain.CreatePurchaseOrderRequest{
+			SupplierID:       supplierID.String(),
+			ComplianceCertID: &certID,
+			Items: []supplychain.CreatePOItemRequest{
+				{ProductID: productID.String(), Quantity: 15, UnitCost: 20000},
+			},
+		}
+		poBody, _ := json.Marshal(poPayload)
+		poReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+		poReq.Header.Set("Content-Type", "application/json")
+		poReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-po-rej-%d", time.Now().UnixNano()))
+		poW := httptest.NewRecorder()
+		router.ServeHTTP(poW, poReq)
+		require.Equal(t, http.StatusCreated, poW.Code)
+
+		var poResp struct {
+			Data supplychain.PurchaseOrder `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(poW.Body.Bytes(), &poResp))
+		poID := poResp.Data.ID
+
+		// Receive with all-rejected QC (delivered=5, accepted=0, rejected=5)
+		del := 5
+		acc := 0
+		rej := 5
+		qcReason := "Expired batch packaging damaged"
+		grPayload := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: poID.String(),
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID.String(),
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+					QCReason:          &qcReason,
+				},
+			},
+		}
+		grBody, _ := json.Marshal(grPayload)
+		grReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody))
+		grReq.Header.Set("Content-Type", "application/json")
+		grReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-gr-rej-%d", time.Now().UnixNano()))
+		grW := httptest.NewRecorder()
+		router.ServeHTTP(grW, grReq)
+		require.Equal(t, http.StatusCreated, grW.Code)
+
+		var grResp struct {
+			Data supplychain.GoodsReceipt `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(grW.Body.Bytes(), &grResp))
+		grID := grResp.Data.ID
+
+		// Cancel PO -> Since total accepted is 0, this MUST SUCCEED!
+		cancelPayload := supplychain.CancelPurchaseOrderRequest{Reason: "Supplier failed initial quality inspection"}
+		cancelBody, _ := json.Marshal(cancelPayload)
+		cancelReq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s/cancel", poID), bytes.NewReader(cancelBody))
+		cancelReq.Header.Set("Content-Type", "application/json")
+		cancelReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cancel-rej-%d", time.Now().UnixNano()))
+		cancelW := httptest.NewRecorder()
+		router.ServeHTTP(cancelW, cancelReq)
+		require.Equal(t, http.StatusOK, cancelW.Code)
+
+		var cancelResp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Cancelled     bool                    `json:"cancelled"`
+				PurchaseOrder supplychain.PurchaseOrder `json:"purchase_order"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(cancelW.Body.Bytes(), &cancelResp))
+		assert.True(t, cancelResp.Data.Cancelled)
+		assert.Equal(t, "CANCELLED", cancelResp.Data.PurchaseOrder.Status)
+		require.NotNil(t, cancelResp.Data.PurchaseOrder.CancellationReason)
+		assert.Equal(t, "Supplier failed initial quality inspection", *cancelResp.Data.PurchaseOrder.CancellationReason)
+
+		// Verify detail: PO status is CANCELLED and GoodsReceipt history with QC inspection remains intact
+		detailReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s", poID), nil)
+		detailW := httptest.NewRecorder()
+		router.ServeHTTP(detailW, detailReq)
+		require.Equal(t, http.StatusOK, detailW.Code)
+
+		var detailResp struct {
+			Data supplychain.PurchaseOrderDetail `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(detailW.Body.Bytes(), &detailResp))
+		assert.Equal(t, "CANCELLED", detailResp.Data.Status)
+		require.Len(t, detailResp.Data.GoodsReceipts, 1)
+		assert.Equal(t, grID, detailResp.Data.GoodsReceipts[0].ID)
+
+		// Verify GR detail confirms inspection record is intact
+		grDetailReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/goods-receipts/%s", grID), nil)
+		grDetailW := httptest.NewRecorder()
+		router.ServeHTTP(grDetailW, grDetailReq)
+		require.Equal(t, http.StatusOK, grDetailW.Code)
+
+		var grDetailResp struct {
+			Data supplychain.GoodsReceiptDetail `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(grDetailW.Body.Bytes(), &grDetailResp))
+		require.Len(t, grDetailResp.Data.Items, 1)
+		assert.Equal(t, "REJECT", grDetailResp.Data.Items[0].QCOutcome)
+		assert.Equal(t, 5, grDetailResp.Data.Items[0].RejectedQuantity)
+		assert.Equal(t, 0, grDetailResp.Data.Items[0].AcceptedQuantity)
+
+		// Try to receive against the cancelled PO -> MUST fail with 409 Conflict (no receipt on CANCELLED)
+		retryGRReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody))
+		retryGRReq.Header.Set("Content-Type", "application/json")
+		retryGRReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-gr-after-cancel-%d", time.Now().UnixNano()))
+		retryGRW := httptest.NewRecorder()
+		router.ServeHTTP(retryGRW, retryGRReq)
+		require.Equal(t, http.StatusConflict, retryGRW.Code)
+
+		var conflictResp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(retryGRW.Body.Bytes(), &conflictResp))
+		assert.Equal(t, "INVALID_PO_STATUS", conflictResp.Error.Code)
+
+		// Idempotent retry of cancellation on already CANCELLED PO returns success
+		idempotentCancelReq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s/cancel", poID), bytes.NewReader(cancelBody))
+		idempotentCancelReq.Header.Set("Content-Type", "application/json")
+		idempotentCancelReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cancel-retry-%d", time.Now().UnixNano()))
+		idempotentCancelW := httptest.NewRecorder()
+		router.ServeHTTP(idempotentCancelW, idempotentCancelReq)
+		require.Equal(t, http.StatusOK, idempotentCancelW.Code)
+	})
+
+	t.Run("concurrent cancel vs goods receipt race cleanly serializes without invalid states", func(t *testing.T) {
+		// Create PO
+		poPayload := supplychain.CreatePurchaseOrderRequest{
+			SupplierID:       supplierID.String(),
+			ComplianceCertID: &certID,
+			Items: []supplychain.CreatePOItemRequest{
+				{ProductID: productID.String(), Quantity: 10, UnitCost: 25000},
+			},
+		}
+		poBody, _ := json.Marshal(poPayload)
+		poReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+		poReq.Header.Set("Content-Type", "application/json")
+		poReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-po-race-%d", time.Now().UnixNano()))
+		poW := httptest.NewRecorder()
+		router.ServeHTTP(poW, poReq)
+		require.Equal(t, http.StatusCreated, poW.Code)
+
+		var poResp struct {
+			Data supplychain.PurchaseOrder `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(poW.Body.Bytes(), &poResp))
+		poID := poResp.Data.ID
+
+		del := 5
+		acc := 5
+		rej := 0
+		grPayload := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: poID.String(),
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID.String(),
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+				},
+			},
+		}
+		grBody, _ := json.Marshal(grPayload)
+
+		cancelPayload := supplychain.CancelPurchaseOrderRequest{Reason: "Concurrent cancel test"}
+		cancelBody, _ := json.Marshal(cancelPayload)
+
+		cancelW := httptest.NewRecorder()
+		grW := httptest.NewRecorder()
+
+		done := make(chan struct{}, 2)
+
+		go func() {
+			req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s/cancel", poID), bytes.NewReader(cancelBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-cancel-race-%d", time.Now().UnixNano()))
+			router.ServeHTTP(cancelW, req)
+			done <- struct{}{}
+		}()
+
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("idem-gr-race-%d", time.Now().UnixNano()))
+			router.ServeHTTP(grW, req)
+			done <- struct{}{}
+		}()
+
+		<-done
+		<-done
+
+		// Verify that exactly one operation won the lock race, and the other returned a conflict:
+		// Outcome A: Cancel won first -> Cancel 200 OK, GR 409 Conflict (INVALID_PO_STATUS)
+		// Outcome B: GR won first -> GR 201 Created, Cancel 409 Conflict (PO_CANCELLATION_CONFLICT)
+		if cancelW.Code == http.StatusOK {
+			assert.Equal(t, http.StatusConflict, grW.Code, "if Cancel won first, GR must be rejected with Conflict")
+		} else if grW.Code == http.StatusCreated {
+			assert.Equal(t, http.StatusConflict, cancelW.Code, "if GR won first, Cancel must be rejected with Conflict")
+		} else {
+			t.Fatalf("unexpected concurrent outcome: Cancel code %d, GR code %d", cancelW.Code, grW.Code)
+		}
+
+		// Verify the final PO state is consistent with whichever operation won
+		detailReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s", poID), nil)
+		detailW := httptest.NewRecorder()
+		router.ServeHTTP(detailW, detailReq)
+		require.Equal(t, http.StatusOK, detailW.Code)
+
+		var detailResp struct {
+			Data supplychain.PurchaseOrderDetail `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(detailW.Body.Bytes(), &detailResp))
+
+		if cancelW.Code == http.StatusOK {
+			assert.Equal(t, "CANCELLED", detailResp.Data.Status)
+			assert.Empty(t, detailResp.Data.GoodsReceipts)
+		} else {
+			assert.Equal(t, "PARTIALLY_RECEIVED", detailResp.Data.Status)
+			require.Len(t, detailResp.Data.GoodsReceipts, 1)
+		}
+	})
 }

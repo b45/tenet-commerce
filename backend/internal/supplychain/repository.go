@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -107,7 +108,8 @@ func (r *Repository) GetComplianceCertificateByID(ctx context.Context, db queryR
 // are serialized for a single purchase order.
 func (r *Repository) LockPurchaseOrder(ctx context.Context, tx pgx.Tx, poID uuid.UUID) (*PurchaseOrder, error) {
 	query := `
-		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at
+		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at,
+		       cancellation_reason, cancelled_by, cancelled_at
 		FROM purchase_orders
 		WHERE id = $1
 		FOR UPDATE
@@ -116,6 +118,7 @@ func (r *Repository) LockPurchaseOrder(ctx context.Context, tx pgx.Tx, poID uuid
 	err := tx.QueryRow(ctx, query, poID).Scan(
 		&po.ID, &po.PONumber, &po.SupplierID, &po.ComplianceCertID,
 		&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt,
+		&po.CancellationReason, &po.CancelledBy, &po.CancelledAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -262,13 +265,15 @@ func (r *Repository) CreatePurchaseOrder(ctx context.Context, tx pgx.Tx, po *Pur
 // GetPurchaseOrderByID fetches a PO
 func (r *Repository) GetPurchaseOrderByID(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) (*PurchaseOrder, error) {
 	query := `
-		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at
+		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at,
+		       cancellation_reason, cancelled_by, cancelled_at
 		FROM purchase_orders WHERE id = $1
 	`
 	po := &PurchaseOrder{}
 	err := conn.QueryRow(ctx, query, poID).Scan(
 		&po.ID, &po.PONumber, &po.SupplierID, &po.ComplianceCertID,
 		&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt,
+		&po.CancellationReason, &po.CancelledBy, &po.CancelledAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -599,6 +604,7 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 
 	query := `
 		SELECT po.id, po.po_number, po.supplier_id, s.company_name, po.compliance_cert_id, po.total_amount, po.status, po.issued_date, po.created_at,
+		       po.cancellation_reason, po.cancelled_by, po.cancelled_at,
 		       (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id) AS item_count
 		FROM purchase_orders po
 		JOIN suppliers s ON s.id = po.supplier_id
@@ -617,7 +623,8 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 		var po PurchaseOrderSummary
 		if err := rows.Scan(
 			&po.ID, &po.PONumber, &po.SupplierID, &po.SupplierName, &po.ComplianceCertID,
-			&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt, &po.ItemCount,
+			&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt,
+			&po.CancellationReason, &po.CancelledBy, &po.CancelledAt, &po.ItemCount,
 		); err != nil {
 			return nil, err
 		}
@@ -629,7 +636,8 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 // GetPurchaseOrderDetail returns comprehensive PO information including items with remaining balances and linked GRs
 func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) (*PurchaseOrderDetail, error) {
 	queryPO := `
-		SELECT po.id, po.po_number, po.supplier_id, s.company_name, po.compliance_cert_id, po.total_amount, po.status, po.issued_date, po.created_at
+		SELECT po.id, po.po_number, po.supplier_id, s.company_name, po.compliance_cert_id, po.total_amount, po.status, po.issued_date, po.created_at,
+		       po.cancellation_reason, po.cancelled_by, po.cancelled_at
 		FROM purchase_orders po
 		JOIN suppliers s ON s.id = po.supplier_id
 		WHERE po.id = $1
@@ -638,6 +646,7 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 	err := conn.QueryRow(ctx, queryPO, poID).Scan(
 		&pod.ID, &pod.PONumber, &pod.SupplierID, &pod.SupplierName,
 		&pod.ComplianceCertID, &pod.TotalAmount, &pod.Status, &pod.IssuedDate, &pod.CreatedAt,
+		&pod.CancellationReason, &pod.CancelledBy, &pod.CancelledAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -722,42 +731,65 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 	return &pod, err
 }
 
-// CancelPurchaseOrder atomically cancels an unfulfilled PO (status DRAFT or ISSUED with 0 items received)
-func (r *Repository) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) error {
+// CancelPurchaseOrder atomically cancels an unfulfilled PO (status DRAFT or ISSUED with 0 items accepted).
+// If the PO is already CANCELLED, this operation is idempotent and returns the existing cancelled PO.
+func (r *Repository) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID, actorID uuid.UUID, reason string, cancelledAt time.Time) (*PurchaseOrder, error) {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
 	po, err := r.LockPurchaseOrder(ctx, tx, poID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if po.Status != "DRAFT" && po.Status != "ISSUED" {
-		return errors.New("only DRAFT or ISSUED purchase orders can be cancelled")
+	// Idempotency: if already CANCELLED, return current record safely
+	if po.Status == "CANCELLED" {
+		return po, nil
 	}
 
 	receivedMap, err := r.GetReceivedQuantities(ctx, tx, poID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	totalReceived := 0
+	totalAccepted := 0
 	for _, qty := range receivedMap {
-		totalReceived += qty
+		totalAccepted += qty
 	}
-	if totalReceived > 0 {
-		return errors.New("cannot cancel purchase order with received goods")
+	if totalAccepted > 0 {
+		return nil, ErrPOCannotBeCancelledWithAcceptedGoods
 	}
 
-	_, err = tx.Exec(ctx, "UPDATE purchase_orders SET status = 'CANCELLED' WHERE id = $1", poID)
+	if po.Status != "DRAFT" && po.Status != "ISSUED" {
+		return nil, ErrPOCannotBeCancelled
+	}
+
+	queryUpdate := `
+		UPDATE purchase_orders
+		SET status = 'CANCELLED',
+		    cancellation_reason = $1,
+		    cancelled_by = $2,
+		    cancelled_at = $3
+		WHERE id = $4
+	`
+	_, err = tx.Exec(ctx, queryUpdate, reason, actorID, cancelledAt, poID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	po.Status = "CANCELLED"
+	po.CancellationReason = &reason
+	po.CancelledBy = &actorID
+	po.CancelledAt = &cancelledAt
+
+	return po, nil
 }
 
 // ListGoodsReceipts returns a paginated list of goods receipt summaries
