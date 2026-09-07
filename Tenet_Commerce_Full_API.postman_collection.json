@@ -2777,7 +2777,7 @@
                                 }
                             ]
                         },
-                        "description": "Returns full Goods Receipt details including inline QC records per line item (delivered_quantity, accepted_quantity, rejected_quantity, qc_outcome, qc_reason, inspected_by, inspected_at), ledger cross-reference, and immutable compliance_evaluation."
+                        "description": "Returns full Goods Receipt details including inline QC records per line item (delivered_quantity, accepted_quantity, rejected_quantity, qc_outcome, qc_reason, inspected_by, inspected_at), ledger cross-reference, and immutable compliance_evaluation. Accepted receipt lines posted after the inventory cutover include stock_movement_id (UUID); rejected-only and legacy lines without a movement omit this field. Accepted stock movements, receipt records, PO status, and ledger postings commit atomically."
                     },
                     "response": []
 

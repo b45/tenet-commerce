@@ -374,6 +374,9 @@ func (r *Repository) CreateGoodsReceipt(ctx context.Context, tx pgx.Tx, gr *Good
 				Reason:               reason,
 				OccurredAt:           occurredAt,
 			})
+			if errors.Is(err, inventory.ErrProductNotFound) {
+				return fmt.Errorf("%w: %s", ErrInventoryNotFound, item.ProductID)
+			}
 			if err != nil {
 				return fmt.Errorf("failed to post stock movement for goods receipt item %s: %w", item.ID, err)
 			}
@@ -925,7 +928,6 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 		grd.Items = append(grd.Items, item)
 	}
 	grd.TotalValuation = totalValuation
-
 
 	// Lookup linked ledger entry number
 	var ledgerEntryNumber string
