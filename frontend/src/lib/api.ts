@@ -88,6 +88,7 @@ export class NetworkError extends ApiError {
 
 export interface ApiFetchOptions extends RequestInit {
   silentRejection?: boolean;
+  retryOnAuth?: boolean;
 }
 
 /**
@@ -99,12 +100,13 @@ export async function apiFetch<T>(
   options: ApiFetchOptions = {}
 ): Promise<T> {
   const url = endpoint.startsWith("http") ? endpoint : endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const { silentRejection = false, retryOnAuth = true, ...requestOptions } = options;
 
   // 1. Trace ID generation and propagation
   const traceId = logger.renewTraceId();
 
-  const headers = new Headers(options.headers || {});
-  if (!headers.has("Content-Type") && options.body && typeof options.body === "string") {
+  const headers = new Headers(requestOptions.headers || {});
+  if (!headers.has("Content-Type") && requestOptions.body && typeof requestOptions.body === "string") {
     headers.set("Content-Type", "application/json");
   }
   headers.set("X-Tenet-Client", "Web-POS");
@@ -115,7 +117,7 @@ export async function apiFetch<T>(
 
   try {
     res = await fetch(url, {
-      ...options,
+      ...requestOptions,
       headers,
       credentials: "same-origin",
     });
@@ -127,6 +129,27 @@ export async function apiFetch<T>(
   const durationMs = Date.now() - startTime;
   // Resolve returned trace_id from Go backend or Next.js BFF response headers
   const serverTraceId = res.headers.get("X-Trace-ID") || traceId;
+
+  if (
+    res.status === 401 &&
+    retryOnAuth &&
+    !url.includes("/api/auth/login") &&
+    !url.includes("/api/auth/refresh") &&
+    !url.includes("/api/auth/logout")
+  ) {
+    try {
+      const refresh = await fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Trace-ID": traceId },
+        credentials: "same-origin",
+      });
+      if (refresh.ok) {
+        return apiFetch<T>(endpoint, { ...options, retryOnAuth: false });
+      }
+    } catch {
+      // Fall through to the original 401 so callers can redirect safely.
+    }
+  }
 
   let body: ApiResponse<T> | null = null;
   try {
@@ -151,7 +174,7 @@ export async function apiFetch<T>(
     else if (res.status === 409) errorToThrow = new ConflictError(errMsg, errCode, serverTraceId, details);
     else errorToThrow = new ApiError(errMsg, errCode, res.status, serverTraceId, details);
 
-    const isExpectedAuthProbe = (url.endsWith("/api/auth/me") && res.status === 401) || options.silentRejection;
+    const isExpectedAuthProbe = (url.endsWith("/api/auth/me") && res.status === 401) || silentRejection;
 
     if (!isExpectedAuthProbe) {
       logger.error(`API rejection on ${url}`, errorToThrow, {
