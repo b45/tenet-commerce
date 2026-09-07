@@ -608,7 +608,17 @@ Checkout posts one `OUT` movement per transaction line, and void posts one linke
 ### 3.11 Low Stock Alerts
 - **Endpoint:** `GET /api/v1/pos/inventory/low-stock`
 - **Auth:** Requires permission: `inventory:read`
-- **Response (200 OK):** Returns all products where `stock_quantity <= reorder_threshold` sorted by urgency.
+- **Response (200 OK):** Returns all products where `stock_quantity <= reorder_threshold` sorted by urgency (`(stock_quantity - reorder_threshold) ASC`).
+
+### 3.12 Stock Movement Card & Overview Read Models
+- **Stock Movement Card Endpoint:** `GET /api/v1/pos/inventory/card`
+  - **Auth:** Requires permission: `inventory:read`
+  - **Query Params:** `product_id` (Mandatory UUID), `start_date` (Optional RFC3339/YYYY-MM-DD), `end_date` (Optional RFC3339/YYYY-MM-DD), `limit` (Optional, default 50), `offset` (Optional, default 0).
+  - **Response (200 OK):** Returns product metadata, opening balance strictly prior to `start_date`, chronological windowed movements with running balances, closing balance, total windowed movement count, and authoritative `current_on_hand`.
+- **Stock Overview Endpoint:** `GET /api/v1/pos/inventory/overview`
+  - **Auth:** Requires permission: `inventory:read`
+  - **Response (200 OK):** High-level aggregate totals across active tenant inventory: `total_skus`, `total_units_on_hand`, `low_stock_skus`, `out_of_stock_skus`, default location (`MAIN_STORE`), and timestamp `as_of`.
+
 
 ---
 

@@ -750,3 +750,54 @@ func TestPOS_InventoryLowStockAlert(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"data"`)
 	assert.Contains(t, w.Body.String(), `"meta"`)
 }
+
+func TestPOS_InventoryStockCardAndOverview(t *testing.T) {
+	db, tenantRepo := setupTestDB(t)
+	defer db.Close()
+
+	posRepo := pos.NewRepository()
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	router.GET("/pos/inventory/overview", posHandler.GetStockOverview)
+	router.GET("/pos/inventory/card", posHandler.GetStockCard)
+
+	// 1. Test Overview Endpoint
+	wOverview := httptest.NewRecorder()
+	reqOverview, _ := http.NewRequest("GET", "/pos/inventory/overview", nil)
+	router.ServeHTTP(wOverview, reqOverview)
+
+	assert.Equal(t, http.StatusOK, wOverview.Code)
+	assert.Contains(t, wOverview.Body.String(), `"total_skus"`)
+	assert.Contains(t, wOverview.Body.String(), `"total_units_on_hand"`)
+
+	// 2. Test Stock Card Endpoint with a valid product
+	// Fetch a sample product ID from DB
+	conn, err := db.Pool.Acquire(context.Background())
+	require.NoError(t, err)
+	defer conn.Release()
+
+	var prodID string
+	err = conn.QueryRow(context.Background(), `SELECT id::text FROM tenant_al_barakah_mart.products LIMIT 1`).Scan(&prodID)
+	require.NoError(t, err)
+
+	wCard := httptest.NewRecorder()
+	reqCard, _ := http.NewRequest("GET", fmt.Sprintf("/pos/inventory/card?product_id=%s", prodID), nil)
+	router.ServeHTTP(wCard, reqCard)
+
+	assert.Equal(t, http.StatusOK, wCard.Code)
+	assert.Contains(t, wCard.Body.String(), `"product_id"`)
+	assert.Contains(t, wCard.Body.String(), `"opening_balance"`)
+	assert.Contains(t, wCard.Body.String(), `"closing_balance"`)
+	assert.Contains(t, wCard.Body.String(), `"movements"`)
+}
+

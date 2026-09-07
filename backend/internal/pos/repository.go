@@ -1472,3 +1472,182 @@ func (r *Repository) GetLowStockProducts(ctx context.Context, conn *pgxpool.Conn
 	}
 	return products, nil
 }
+
+// GetStockCard calculates opening balance, windowed stock movements with running balances, and closing balance for a product
+func (r *Repository) GetStockCard(ctx context.Context, conn *pgxpool.Conn, filter StockCardFilter) (*StockCardResponse, error) {
+	prodUUID, err := uuid.Parse(filter.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid product id: %w", err)
+	}
+
+	// 1. Fetch Product metadata and current stock
+	var prodName, prodSKU, location string
+	var currentOnHand int
+	queryProd := `
+		SELECT p.name, p.sku, COALESCE(i.stock_quantity, 0), COALESCE(i.warehouse_location, 'MAIN_STORE')
+		FROM products p
+		LEFT JOIN inventory i ON p.id = i.product_id
+		WHERE p.id = $1
+	`
+	if err := conn.QueryRow(ctx, queryProd, prodUUID).Scan(&prodName, &prodSKU, &currentOnHand, &location); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("product not found: %s", filter.ProductID)
+		}
+		return nil, fmt.Errorf("failed fetching product info for stock card: %w", err)
+	}
+
+	// 2. Calculate Opening Balance before StartDate (sum of all deltas strictly before StartDate)
+	openingBalance := 0
+	if filter.StartDate != nil {
+		queryOpening := `
+			SELECT COALESCE(SUM(quantity_delta), 0)
+			FROM stock_movements
+			WHERE product_id = $1 AND occurred_at < $2
+		`
+		if err := conn.QueryRow(ctx, queryOpening, prodUUID, *filter.StartDate).Scan(&openingBalance); err != nil {
+			return nil, fmt.Errorf("failed calculating opening balance: %w", err)
+		}
+	}
+
+	// 3. Count total movements in window
+	var whereClauses []string
+	var args []any
+	args = append(args, prodUUID)
+	whereClauses = append(whereClauses, fmt.Sprintf("product_id = $%d", len(args)))
+
+	if filter.StartDate != nil {
+		args = append(args, *filter.StartDate)
+		whereClauses = append(whereClauses, fmt.Sprintf("occurred_at >= $%d", len(args)))
+	}
+	if filter.EndDate != nil {
+		args = append(args, *filter.EndDate)
+		whereClauses = append(whereClauses, fmt.Sprintf("occurred_at <= $%d", len(args)))
+	}
+	whereSQL := strings.Join(whereClauses, " AND ")
+
+	var totalMovements int
+	queryCount := fmt.Sprintf("SELECT COUNT(*) FROM stock_movements WHERE %s", whereSQL)
+	if err := conn.QueryRow(ctx, queryCount, args...).Scan(&totalMovements); err != nil {
+		return nil, fmt.Errorf("failed counting stock movements: %w", err)
+	}
+
+	// 4. Fetch all movements in window in chronological order to compute exact running balance
+	queryMovements := fmt.Sprintf(`
+		SELECT 
+			id, product_id, warehouse_location, quantity_delta, movement_type,
+			source_document_type, source_document_id, source_document_line_id,
+			actor_id, reason, occurred_at, created_at
+		FROM stock_movements
+		WHERE %s
+		ORDER BY occurred_at ASC, created_at ASC
+	`, whereSQL)
+
+	rows, err := conn.Query(ctx, queryMovements, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed querying stock movements: %w", err)
+	}
+	defer rows.Close()
+
+	var allItems []StockCardItem
+	running := openingBalance
+
+	for rows.Next() {
+		var item StockCardItem
+		var movID, prodID uuid.UUID
+		var srcDocID, srcLineID, actorID *uuid.UUID
+
+		if err := rows.Scan(
+			&movID,
+			&prodID,
+			&item.WarehouseLocation,
+			&item.QuantityDelta,
+			&item.MovementType,
+			&item.SourceDocumentType,
+			&srcDocID,
+			&srcLineID,
+			&actorID,
+			&item.Reason,
+			&item.OccurredAt,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed scanning stock movement row: %w", err)
+		}
+
+		item.MovementID = movID.String()
+		item.ProductID = prodID.String()
+		if srcDocID != nil {
+			s := srcDocID.String()
+			item.SourceDocumentID = &s
+		}
+		if srcLineID != nil {
+			s := srcLineID.String()
+			item.SourceDocumentLineID = &s
+		}
+		if actorID != nil {
+			s := actorID.String()
+			item.ActorID = &s
+		}
+
+		running += item.QuantityDelta
+		item.RunningBalance = running
+		allItems = append(allItems, item)
+	}
+
+	closingBalance := running
+
+	// 5. Apply pagination slicing on the chronological items
+	paginatedItems := make([]StockCardItem, 0)
+	if filter.Offset < len(allItems) {
+		endIdx := filter.Offset + filter.Limit
+		if filter.Limit <= 0 || endIdx > len(allItems) {
+			endIdx = len(allItems)
+		}
+		paginatedItems = allItems[filter.Offset:endIdx]
+	}
+
+	return &StockCardResponse{
+		ProductID:         filter.ProductID,
+		ProductName:       prodName,
+		ProductSKU:        prodSKU,
+		WarehouseLocation: location,
+		OpeningBalance:    openingBalance,
+		ClosingBalance:    closingBalance,
+		CurrentOnHand:     currentOnHand,
+		Movements:         paginatedItems,
+		TotalMovements:    totalMovements,
+		Limit:             filter.Limit,
+		Offset:            filter.Offset,
+		StartDate:         filter.StartDate,
+		EndDate:           filter.EndDate,
+		AsOf:              time.Now(),
+	}, nil
+}
+
+// GetStockOverview calculates aggregated stock statistics across all active products
+func (r *Repository) GetStockOverview(ctx context.Context, conn *pgxpool.Conn) (*StockOverviewCard, error) {
+	query := `
+		SELECT 
+			COUNT(p.id) AS total_skus,
+			COALESCE(SUM(i.stock_quantity), 0) AS total_units,
+			COALESCE(SUM(CASE WHEN i.stock_quantity <= i.reorder_threshold AND i.stock_quantity > 0 THEN 1 ELSE 0 END), 0) AS low_stock_skus,
+			COALESCE(SUM(CASE WHEN i.stock_quantity <= 0 THEN 1 ELSE 0 END), 0) AS out_of_stock_skus
+		FROM products p
+		LEFT JOIN inventory i ON p.id = i.product_id
+		WHERE p.is_active = TRUE
+	`
+	var card StockOverviewCard
+	card.WarehouseLocation = "MAIN_STORE"
+	card.AsOf = time.Now()
+
+	if err := conn.QueryRow(ctx, query).Scan(
+		&card.TotalSKUs,
+		&card.TotalUnitsOnHand,
+		&card.LowStockSKUs,
+		&card.OutOfStockSKUs,
+	); err != nil {
+		return nil, fmt.Errorf("failed calculating stock overview: %w", err)
+	}
+
+	return &card, nil
+}
+
