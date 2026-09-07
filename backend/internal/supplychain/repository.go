@@ -670,7 +670,7 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 	}
 	defer rows.Close()
 
-	var pos []PurchaseOrderSummary
+	pos := make([]PurchaseOrderSummary, 0)
 	for rows.Next() {
 		var po PurchaseOrderSummary
 		if err := rows.Scan(
@@ -728,6 +728,7 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 	}
 	defer itemRows.Close()
 
+	pod.Items = make([]PurchaseOrderDetailLine, 0)
 	for itemRows.Next() {
 		var line PurchaseOrderDetailLine
 		if err := itemRows.Scan(
@@ -743,6 +744,9 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 		pod.Items = append(pod.Items, line)
 	}
 	itemRows.Close()
+
+	pod.GoodsReceipts = make([]GoodsReceiptSummary, 0)
+
 
 	// Fetch linked goods receipts
 	queryGRs := `
@@ -875,7 +879,7 @@ func (r *Repository) ListGoodsReceipts(ctx context.Context, conn *pgxpool.Conn, 
 	}
 	defer rows.Close()
 
-	var grs []GoodsReceiptSummary
+	grs := make([]GoodsReceiptSummary, 0)
 	for rows.Next() {
 		var gr GoodsReceiptSummary
 		if err := rows.Scan(
@@ -933,7 +937,9 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 	}
 	defer rows.Close()
 
+	grd.Items = make([]GoodsReceiptDetailItem, 0)
 	var totalValuation float64
+
 	for rows.Next() {
 		var item GoodsReceiptDetailItem
 		if err := rows.Scan(
