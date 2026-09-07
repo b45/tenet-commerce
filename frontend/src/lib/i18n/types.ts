@@ -439,6 +439,57 @@ export interface TranslationSchema {
       enterprise: string;
     };
   };
+  dashboard: {
+    title: string;
+    subtitle: string;
+    viewFilter: {
+      today: string;
+      allTime: string;
+    };
+    metrics: {
+      grossSales: string;
+      netSales: string;
+      todayOrders: string;
+      avgOrderValue: string;
+      activeCatalog: string;
+      lowStockAlerts: string;
+      halalCompliance: string;
+      ledgerIntegrity: string;
+    };
+    units: {
+      transactions: string;
+      skus: string;
+      alerts: string;
+      activeCertificates: string;
+      expiringCertificates: string;
+      balanced: string;
+      unbalanced: string;
+      journalEntriesToday: string;
+    };
+    sections: {
+      lowStockTitle: string;
+      lowStockDesc: string;
+      complianceTitle: string;
+      complianceDesc: string;
+      operationalTitle: string;
+      operationalDesc: string;
+    };
+    alerts: {
+      noLowStock: string;
+      noExpiringCerts: string;
+      daysRemaining: string;
+      expired: string;
+      expiringSoon: string;
+      currentStock: string;
+      threshold: string;
+      viewInventoryAction: string;
+      viewSuppliersAction: string;
+    };
+    emptyTenant: string;
+    unavailable: string;
+    loading: string;
+    errorTitle: string;
+  };
   dailySummary: {
     buttonLabel: string;
     modalTitle: string;
