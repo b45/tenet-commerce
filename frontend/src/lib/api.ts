@@ -168,6 +168,10 @@ export async function apiFetch<T>(
     const errMsg = body?.error?.message || res.statusText || "Terjadi kesalahan pada sistem";
     const details = body?.error?.details;
 
+    if (errCode === "MAINTENANCE_MODE" && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tenet:maintenance"));
+    }
+
     let errorToThrow: ApiError;
     if (res.status === 400) errorToThrow = new ValidationError(errMsg, serverTraceId, details, errCode);
     else if (res.status === 401 || res.status === 403) errorToThrow = new AuthError(errMsg, errCode, res.status, serverTraceId);
