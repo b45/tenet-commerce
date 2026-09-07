@@ -309,7 +309,10 @@ func TestDemoFixtures_GoldenJourney_DeterministicFlow(t *testing.T) {
 		FROM ledger_entry_lines l
 		JOIN ledger_entries e ON e.id = l.ledger_entry_id
 		WHERE e.source_document_type = 'GOODS_RECEIPT'
-	`).Scan(&totalDebits, &totalCredits)
+		  AND e.source_document_id IN (
+			SELECT id FROM goods_receipts WHERE purchase_order_id = $1
+		  )
+	`, poID).Scan(&totalDebits, &totalCredits)
 	require.NoError(t, err)
 	assert.Equal(t, float64(1000000), totalDebits, "Sum of Debits for GR receipts must be IDR 1,000,000")
 	assert.Equal(t, float64(1000000), totalCredits, "Sum of Credits for GR receipts must be IDR 1,000,000")
