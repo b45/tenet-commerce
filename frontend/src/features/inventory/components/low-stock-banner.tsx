@@ -8,12 +8,14 @@ interface LowStockBannerProps {
   count: number;
   onFilterLowStock: () => void;
   isFilterActive: boolean;
+  onOpenProcureAction?: () => void;
 }
 
 export function LowStockBanner({
   count,
   onFilterLowStock,
   isFilterActive,
+  onOpenProcureAction,
 }: LowStockBannerProps) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = React.useState(false);
@@ -42,6 +44,16 @@ export function LowStockBanner({
       </div>
 
       <div className="flex items-center gap-2">
+        {onOpenProcureAction && (
+          <button
+            type="button"
+            onClick={onOpenProcureAction}
+            className="flex items-center gap-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white px-3 py-1.5 text-xs font-semibold shadow-xs transition-colors"
+          >
+            <span>{t("inventory.lowStockBanner.reorderAction")}</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={onFilterLowStock}

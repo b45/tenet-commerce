@@ -12,12 +12,15 @@ import type {
   UpdateProductPayload,
   InventoryFilter,
   StockStatusFilter,
+  StockOverviewCard,
+  StockCardResponse,
 } from "../types";
 
 export function useInventory() {
   const [products, setProducts] = React.useState<InventoryProduct[]>([]);
   const [categories, setCategories] = React.useState<Category[]>([]);
   const [lowStockItems, setLowStockItems] = React.useState<InventoryProduct[]>([]);
+  const [stockOverview, setStockOverview] = React.useState<StockOverviewCard | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -33,10 +36,11 @@ export function useInventory() {
     setLoading(true);
     setError(null);
     try {
-      const [prodRes, catRes, lowRes] = await Promise.all([
+      const [prodRes, catRes, lowRes, overviewRes] = await Promise.all([
         apiClient.get<InventoryProduct[]>("/pos/products"),
         apiClient.get<Category[]>("/pos/categories"),
         apiClient.get<InventoryProduct[]>("/pos/inventory/low-stock"),
+        apiClient.get<StockOverviewCard>("/pos/inventory/overview"),
       ]);
 
       if (prodRes.success && prodRes.data) {
@@ -51,6 +55,10 @@ export function useInventory() {
 
       if (lowRes.success && lowRes.data) {
         setLowStockItems(lowRes.data);
+      }
+
+      if (overviewRes.success && overviewRes.data) {
+        setStockOverview(overviewRes.data);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load inventory data";
@@ -193,11 +201,37 @@ export function useInventory() {
     [fetchData]
   );
 
+  // Query: Stock Card for a specific SKU
+  const getStockCard = React.useCallback(
+    async (productId: string, startDate?: string, endDate?: string, limit = 50, offset = 0): Promise<{ success: boolean; data?: StockCardResponse; error?: string }> => {
+      try {
+        const queryParams = new URLSearchParams({
+          product_id: productId,
+          limit: String(limit),
+          offset: String(offset),
+        });
+        if (startDate) queryParams.set("start_date", startDate);
+        if (endDate) queryParams.set("end_date", endDate);
+
+        const res = await apiClient.get<StockCardResponse>(`/pos/inventory/card?${queryParams.toString()}`);
+        if (res.success && res.data) {
+          return { success: true, data: res.data };
+        }
+        return { success: false, error: res.error?.message || "Failed to fetch stock card" };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to fetch stock card";
+        return { success: false, error: msg };
+      }
+    },
+    []
+  );
+
   return {
     products,
     filteredProducts,
     categories,
     lowStockItems,
+    stockOverview,
     loading,
     error,
     filters,
@@ -209,5 +243,6 @@ export function useInventory() {
     createProduct,
     updateProduct,
     deleteProduct,
+    getStockCard,
   };
 }

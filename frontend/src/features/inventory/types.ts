@@ -95,3 +95,45 @@ export interface InventoryFilter {
   category_id: string;
   stock_status: StockStatusFilter;
 }
+
+export interface StockCardItem {
+  movement_id: string;
+  product_id: string;
+  warehouse_location: string;
+  quantity_delta: number;
+  running_balance: number;
+  movement_type: string;
+  source_document_type: string;
+  source_document_id?: string | null;
+  source_document_line_id?: string | null;
+  actor_id?: string | null;
+  reason?: string | null;
+  occurred_at: string;
+  created_at: string;
+}
+
+export interface StockCardResponse {
+  product_id: string;
+  product_name: string;
+  product_sku: string;
+  warehouse_location: string;
+  opening_balance: number;
+  closing_balance: number;
+  current_on_hand: number;
+  movements: StockCardItem[];
+  total_movements: number;
+  limit: number;
+  offset: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  as_of: string;
+}
+
+export interface StockOverviewCard {
+  total_skus: number;
+  total_units_on_hand: number;
+  low_stock_skus: number;
+  out_of_stock_skus: number;
+  warehouse_location: string;
+  as_of: string;
+}

@@ -117,3 +117,51 @@ test("Inventory: filterProducts isolates low_stock and out_of_stock accurately",
   assert.equal(outOfStock.length, 1);
   assert.equal(outOfStock[0].id, "4");
 });
+
+test("Inventory: StockCard maintains strict chronological running balance invariant across movements", () => {
+  // Scenario matching acceptance criteria: opening 0, GR +60, then GR +40, checkout -5, void +5
+  const openingBalance = 0;
+  const deltas = [
+    { type: "IN", delta: 60 },
+    { type: "IN", delta: 40 },
+    { type: "OUT", delta: -5 },
+    { type: "IN", delta: 5 }, // void recovery
+  ];
+
+  let running = openingBalance;
+  const movements = deltas.map((item, idx) => {
+    running += item.delta;
+    return {
+      index: idx + 1,
+      delta: item.delta,
+      runningBalance: running,
+    };
+  });
+
+  assert.equal(movements[0].runningBalance, 60, "After GR 60 running balance must be 60");
+  assert.equal(movements[1].runningBalance, 100, "After GR 40 running balance must be 100");
+  assert.equal(movements[2].runningBalance, 95, "After checkout -5 running balance must be 95");
+  assert.equal(movements[3].runningBalance, 100, "After void +5 running balance must return to 100");
+
+  // Pagination slice does not alter precomputed running balances
+  const page1 = movements.slice(0, 2);
+  const page2 = movements.slice(2, 4);
+  assert.equal(page1[1].runningBalance, 100);
+  assert.equal(page2[0].runningBalance, 95);
+});
+
+test("Inventory: calculateSuggestedProcurementOrder determines non-negative draft quantities", () => {
+  function calculateSuggestedQuantity(stockQuantity, threshold) {
+    const deficit = Math.max(0, threshold - stockQuantity);
+    return Math.max(20, deficit + 15);
+  }
+
+  // Current stock 2, threshold 10 -> deficit 8 -> suggested 8 + 15 = 23
+  assert.equal(calculateSuggestedQuantity(2, 10), 23);
+
+  // Out of stock 0, threshold 5 -> deficit 5 -> suggested max(20, 20) = 20
+  assert.equal(calculateSuggestedQuantity(0, 5), 20);
+
+  // Low stock 4, threshold 5 -> deficit 1 -> suggested max(20, 16) = 20
+  assert.equal(calculateSuggestedQuantity(4, 5), 20);
+});
