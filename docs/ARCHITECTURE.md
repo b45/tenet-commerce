@@ -3,7 +3,7 @@
 
 Proposed extension: [SaaS feature access and entitlement design](SAAS_FEATURE_ACCESS_DESIGN.md). This is a future design, not implemented subscription enforcement.
 
-> **Implementation boundary (2026-09-03):** the Phase 1–2 Go backend is the implemented system. Diagrams and sections that describe the Next.js offline client, AI auditor, Zakat engine, production CI/CD, durable idempotency, Redlock, or a tenant-migration runner are target designs for later phases unless explicitly identified as current runtime behavior. See [Implementation Status](IMPLEMENTATION_STATUS.md).
+> **Implementation boundary (2026-09-08):** the Go modular monolith, Next.js online POS client, tenant-scoped IndexedDB catalog/drafts, browser golden journey, and demo runtime readiness endpoints are implemented and verified. Offline replay, AI auditing, Zakat calculation, and production orchestration remain planned. See [Implementation Status](IMPLEMENTATION_STATUS.md).
 
 ---
 
@@ -17,7 +17,7 @@ The modular monolith paradigm was selected over distributed microservices for th
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                                    CLIENT PLATFORM                                      │
 │                  Next.js 15 App Router · React 19 · TypeScript · shadcn/ui              │
-│                     Service Worker (Background Sync) · IndexedDB Queue                  │
+│                         IndexedDB Catalog & Cart Drafts                                │
 └────────────────────────────────────────────┬────────────────────────────────────────────┘
                                              │ HTTPS / REST (Idempotency-Key)
 ┌────────────────────────────────────────────▼────────────────────────────────────────────┐
@@ -31,7 +31,7 @@ The modular monolith paradigm was selected over distributed microservices for th
 │   │                     │  │                     │  │                               │   │
 │   │ • Barcode / Catalog │  │ • Supplier Registry │  │ • Double-Entry Journal Engine │   │
 │   │ • Cart Processing   │  │ • Cert Hard-Block   │  │ • Chart of Accounts (COA)     │   │
-│   │ • Transaction Exec  │  │ • PO & Goods Receipt│  │ • Real-time Zakat Tijarah     │   │
+│   │ • Transaction Exec  │  │ • PO & Goods Receipt│  │ • Ledger & Trial Balance     │   │
 │   └──────────┬──────────┘  └──────────┬──────────┘  └───────────────▲───────────────┘   │
 │              │                        │                             │                   │
 │              └────────────────────────┴─────────────────────────────┘                   │
@@ -44,7 +44,7 @@ The modular monolith paradigm was selected over distributed microservices for th
             ┌────────────────▼────────────────┐    ┌─────────────────▼────────────────┐
             │         PostgreSQL 16           │    │              Redis 7             │
             │   • public schema (Tenants)     │    │  • Idempotency Keys (TTL: 24h)   │
-            │   • tenant_{uuid} schemas       │    │  • Redlock Distributed Locks     │
+            │   • tenant_{uuid} schemas       │    │  • Durable Idempotency Records  │
             └────────────────▲────────────────┘    └──────────────────────────────────┘
                              │
             ┌────────────────┴────────────────────────────────────────────────────────┐
@@ -94,8 +94,8 @@ The modular monolith paradigm was selected over distributed microservices for th
    - When the transaction commits or rolls back, PostgreSQL automatically reverts the local `search_path`.
    - Upon connection release, a defensive `RESET ALL` session reset is executed to guarantee zero cross-tenant leakage across pooled connections.
 
-3. **Automated Migration Runner:**
-   Database migrations are executed in parallel across all active tenant schemas using a transactional DDL migration tool (e.g., `golang-migrate` or `pressly/goose`):
+3. **Migration boundary:**
+   Tenant migration tooling exists for controlled schema evolution; public runtime claims are limited to the migrations and tenant connection reset behavior covered by the backend integration evidence. It is not an implicit per-request migration loop:
    ```sql
    -- Loop through all active schemas during migration cycle
    DO $$
@@ -119,7 +119,7 @@ The modular monolith paradigm was selected over distributed microservices for th
 To prevent duplicate charges, inventory overselling, or ghost transactions caused by network dropouts and client-side retries, all mutating operations (`POST /api/v1/transactions`, `POST /api/v1/purchase-orders`) require an `Idempotency-Key` HTTP header.
 
 ```
-Client                             API Gateway (Go)                         Redis 7
+Client                             API Gateway (Go)                    Redis + PostgreSQL
   │                                       │                                    │
   │─── POST /transactions ───────────────>│                                    │
   │    Header: Idempotency-Key: <UUID>    │                                    │
@@ -146,22 +146,11 @@ Client                             API Gateway (Go)                         Redi
   │<── HTTP 200/201 (Original Response)───│                                    │
 ```
 
-### 3.2 Dual-Layer Inventory Concurrency Protection
+### 3.2 PostgreSQL Inventory Concurrency Protection
 
 To guarantee zero overselling under heavy concurrent checkouts (e.g., flash sales):
 
-1. **Layer 1: Redis Distributed Lock (Fast Rejection):**
-   ```go
-   // Key: lock:inventory:<tenant_id>:<sku_id>
-   lockKey := fmt.Sprintf("lock:inventory:%s:%s", tenantID, item.SKU)
-   mutex := redsync.New(pool).NewMutex(lockKey, redsync.WithExpiry(5*time.Second))
-   if err := mutex.Lock(); err != nil {
-       return ErrConcurrentItemModification
-   }
-   defer mutex.Unlock()
-   ```
-
-2. **Layer 2: PostgreSQL Row-Level Lock (ACID Guarantee):**
+The implemented checkout path uses a PostgreSQL row-level lock inside the business transaction:
    ```sql
    -- Executed inside the database transaction
    SELECT stock_quantity 
@@ -188,7 +177,7 @@ Tenet Commerce supports Indonesian Standard QR Code (**QRIS**) payment flows:
 
 ---
 
-## 4. Target Design — Phase 3 Offline-First Synchronization
+## 4. Target Design — Phase 3 Offline Replay (Not Yet Implemented)
 
 The Next.js 15 POS client is built with an offline-first foundation to operate without disruption during network outages.
 
