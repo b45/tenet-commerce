@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:e2e": "playwright test",
     "test": "node --test src/lib/money.test.mjs src/features/pos/pos.test.mjs src/features/pos/pos-regression.test.mjs src/features/pos/checkout.test.mjs src/features/pos/touch-controls.test.mjs src/features/pos/daily-summary.test.mjs src/features/pos/offline-catalog.test.mjs src/features/supply-chain/supply-chain.test.mjs src/lib/i18n/i18n.test.mjs src/features/inventory/inventory.test.mjs src/components/auth/feature-gate.test.mjs src/features/ledger/ledger.test.mjs"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.1",
     "@types/node": "^20",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
