@@ -20,3 +20,15 @@ test.describe("TPC-029 browser language and responsive smoke", () => {
     await expect(page.getByRole("main")).toBeVisible();
   });
 });
+
+test.describe("TPC-029 real backend authentication", () => {
+  test("logs into the seeded demo tenant through the real API", async ({ page }) => {
+    await page.goto("/login");
+    await page.locator("#tenant_slug").fill("al-barakah-mart");
+    await page.locator("#email").fill("cashier1@albarakah.com");
+    await page.locator("#password").fill("Password123!");
+    await page.getByRole("button", { name: /login|masuk|تسجيل/i }).click();
+    await expect(page).toHaveURL(/\/pos/);
+    await expect(page.getByRole("main")).toBeVisible();
+  });
+});

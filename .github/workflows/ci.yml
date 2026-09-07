@@ -94,6 +94,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'backend/go.mod'
+
+      - name: Start demo PostgreSQL and Redis
+        working-directory: .
+        run: docker compose up -d postgres redis
+
+      - name: Start Go API with demo configuration
+        working-directory: backend
+        env:
+          APP_ENV: development
+          JWT_SECRET: ci-only-demo-secret-for-browser-e2e
+        run: nohup go run ./cmd/api > /tmp/tenet-api.log 2>&1 &
+
+      - name: Wait for Go API
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8081/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/tenet-api.log
+          exit 1
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
