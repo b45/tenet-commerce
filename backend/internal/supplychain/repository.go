@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/b45/tenet-commerce/backend/internal/inventory"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,10 +23,19 @@ type queryRower interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-type Repository struct{}
+type Repository struct {
+	inventoryRepo *inventory.Repository
+}
 
 func NewRepository() *Repository {
-	return &Repository{}
+	return NewRepositoryWithInventory(inventory.NewRepository())
+}
+
+func NewRepositoryWithInventory(invRepo *inventory.Repository) *Repository {
+	if invRepo == nil {
+		invRepo = inventory.NewRepository()
+	}
+	return &Repository{inventoryRepo: invRepo}
 }
 
 // GetTenantConfig fetches a specific config value for the tenant
@@ -333,24 +344,42 @@ func (r *Repository) CreateGoodsReceipt(ctx context.Context, tx pgx.Tx, gr *Good
 			return err
 		}
 
-		// 2. Increment Stock Atomically ONLY for accepted goods
+		// 2. Post Stock Movement Atomically ONLY for accepted goods
 		if item.AcceptedQuantity > 0 {
-			queryStock := `
-				UPDATE inventory
-				SET stock_quantity = stock_quantity + $1, updated_at = NOW()
-				WHERE product_id = $2
-			`
-			cmdTag, err := tx.Exec(ctx, queryStock, item.AcceptedQuantity, item.ProductID)
-			if err != nil {
-				return err
+			lineID := item.ID
+			grID := gr.ID
+			actorID := gr.ReceivedBy
+			occurredAt := gr.ReceivedDate
+			if occurredAt.IsZero() {
+				occurredAt = time.Now()
 			}
-			if cmdTag.RowsAffected() == 0 {
-				return fmt.Errorf("%w: %s", ErrInventoryNotFound, item.ProductID)
+
+			var reason *string
+			if item.QCReason != nil && strings.TrimSpace(*item.QCReason) != "" {
+				reason = item.QCReason
+			} else {
+				defaultReason := fmt.Sprintf("Goods receipt %s acceptance", gr.GRNumber)
+				reason = &defaultReason
+			}
+
+			_, err := r.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+				ProductID:            item.ProductID,
+				WarehouseLocation:    inventory.DefaultCoreLocation,
+				QuantityDelta:        item.AcceptedQuantity,
+				MovementType:         inventory.MovementTypeIn,
+				SourceDocumentType:   inventory.SourceDocGoodsReceipt,
+				SourceDocumentID:     &grID,
+				SourceDocumentLineID: &lineID,
+				ActorID:              &actorID,
+				Reason:               reason,
+				OccurredAt:           occurredAt,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to post stock movement for goods receipt item %s: %w", item.ID, err)
 			}
 		}
 	}
 	return nil
-
 }
 
 // ListSuppliers fetches suppliers with optional is_active filter and pagination
@@ -859,17 +888,19 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 		return nil, err
 	}
 
-	// Fetch items with unit cost, subtotal valuation, and inline QC records
+	// Fetch items with unit cost, subtotal valuation, inline QC records, and linked stock movement
 	queryItems := `
 		SELECT gri.id, gri.product_id, p.name, p.sku, gri.received_quantity,
 		       gri.delivered_quantity, gri.accepted_quantity, gri.rejected_quantity,
 		       gri.qc_outcome, gri.qc_reason, gri.inspected_by, gri.inspected_at,
 		       poi.unit_cost,
-		       (gri.accepted_quantity * poi.unit_cost) AS subtotal_valuation
+		       (gri.accepted_quantity * poi.unit_cost) AS subtotal_valuation,
+		       sm.id AS stock_movement_id
 		FROM goods_receipt_items gri
 		JOIN products p ON p.id = gri.product_id
 		JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
 		JOIN purchase_order_items poi ON poi.purchase_order_id = gr.purchase_order_id AND poi.product_id = gri.product_id
+		LEFT JOIN stock_movements sm ON sm.source_document_type = 'GOODS_RECEIPT' AND sm.source_document_line_id = gri.id
 		WHERE gri.goods_receipt_id = $1
 		ORDER BY gri.id
 	`
@@ -886,7 +917,7 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 			&item.ID, &item.ProductID, &item.ProductName, &item.ProductSKU, &item.ReceivedQuantity,
 			&item.DeliveredQuantity, &item.AcceptedQuantity, &item.RejectedQuantity,
 			&item.QCOutcome, &item.QCReason, &item.InspectedBy, &item.InspectedAt,
-			&item.UnitCost, &item.SubtotalValuation,
+			&item.UnitCost, &item.SubtotalValuation, &item.StockMovementID,
 		); err != nil {
 			return nil, err
 		}
