@@ -720,7 +720,7 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
   - `Idempotency-Key`: `<UUID>` (Required, unique per goods receipt operation)
   - `Content-Type`: `application/json`
   - `X-Tenant-ID`: `<tenant-slug>`
-- **Request Body:**
+- **Request Body (with Inline Quality Check):**
 ```json
 {
   "purchase_order_id": "30000000-0000-0000-0000-000000000001",
@@ -728,11 +728,16 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
   "items": [
     {
       "product_id": "10000000-0000-0000-0000-000000000001",
-      "received_quantity": 50
+      "delivered_quantity": 60,
+      "accepted_quantity": 55,
+      "rejected_quantity": 5,
+      "qc_reason": "Damaged packaging on 5 units"
     }
   ]
 }
 ```
+> *Note on legacy request compatibility:* Submitting `{"product_id": "...", "received_quantity": 50}` remains supported and adapts automatically as `PASS` (`delivered=50`, `accepted=50`, `rejected=0`).
+
 - **Response (201 Created):**
 ```json
 {
@@ -751,7 +756,14 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
         "id": "50000000-0000-0000-0000-000000000001",
         "goods_receipt_id": "40000000-0000-0000-0000-000000000001",
         "product_id": "10000000-0000-0000-0000-000000000001",
-        "received_quantity": 50
+        "received_quantity": 55,
+        "delivered_quantity": 60,
+        "accepted_quantity": 55,
+        "rejected_quantity": 5,
+        "qc_outcome": "PARTIAL_ACCEPT",
+        "qc_reason": "Damaged packaging on 5 units",
+        "inspected_by": "11111111-1111-1111-1111-111111111111",
+        "inspected_at": "2026-09-03T12:00:00Z"
       }
     ]
   }
@@ -759,18 +771,21 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 ```
 - **State Transition & Reconciliation Rules:**
   - PO status must be `ISSUED` or `PARTIALLY_RECEIVED`.
+  - Inline QC arithmetic is strictly enforced before database side effects: `delivered_quantity = accepted_quantity + rejected_quantity`. If `rejected_quantity > 0`, `qc_reason` is required.
+  - Delivered quantity must not exceed unreceived outstanding quantity on the PO.
+  - **Stock Increment:** ONLY `accepted_quantity` increments inventory stock. Rejected goods never enter inventory.
+  - **PO Outstanding:** ONLY `accepted_quantity` reduces outstanding quantity. If all lines have `accepted_cumulative == ordered`, PO status transitions to `RECEIVED`; if some units are accepted, it transitions to `PARTIALLY_RECEIVED`; if all delivered units are rejected (`accepted=0`), PO status remains unchanged.
+  - **Accounting Postings:** Inbound monetary valuation is derived solely from `accepted_quantity * unit_cost`. If `inboundValue > 0`, an automated balanced ledger journal is posted (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`). If all delivered units are rejected (`inboundValue == 0`), ledger journal posting is skipped.
   - Serialized row lock (`SELECT ... FOR UPDATE`) prevents concurrent double-receiving.
   - Inventory items are locked and updated deterministically ordered by `product_id` to eliminate deadlock risks.
   - If a received product does not exist in the tenant's inventory table, the operation is rejected and rolled back with zero state mutation.
-  - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments.
-  - Receipt quantities must not exceed unreceived outstanding quantities on the PO.
-  - If cumulative received quantities match ordered quantities across all PO lines, PO status transitions to `RECEIVED`; otherwise it transitions to `PARTIALLY_RECEIVED`.
+  - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments or double journal entries.
   - In strict compliance mode, re-validates that the PO's supplier Halal certificate is currently valid.
-  - Automatically posts a balanced double-entry ledger journal (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`).
 - **Error Responses:**
-  - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`)
+  - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`: empty receipt, duplicate product, arithmetic mismatch, missing qc_reason)
   - `409 Conflict` (`IDEMPOTENCY_KEY_CONFLICT`, `INVALID_PO_STATUS`)
-  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `INVENTORY_RECORD_NOT_FOUND`, `COMPLIANCE_ERROR`)
+  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`: delivered exceeds outstanding, `INVENTORY_RECORD_NOT_FOUND`, `COMPLIANCE_ERROR`)
+
 
 ### 4.4 List Suppliers
 - **Endpoint:** `GET /api/v1/supply-chain/suppliers`
@@ -861,7 +876,10 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 ### 4.14 Get Goods Receipt Detail
 - **Endpoint:** `GET /api/v1/supply-chain/goods-receipts/:id`
 - **Auth:** Requires permission: `supply_chain:manage`
-- **Response (200 OK):** Detail of goods receipt with product names, SKU, received quantities, total inbound valuation, and cross-referenced Sharia ledger entry number.
+- **Response (200 OK):** Comprehensive detail of goods receipt with:
+  - Header: PO number, supplier name, receiving officer, receipt date, notes, total inbound valuation, Sharia ledger entry number, and Halal compliance evaluation.
+  - Line Items: product name, SKU, unit cost, subtotal valuation, and full inline QC audit record (`delivered_quantity`, `accepted_quantity`, `rejected_quantity`, `qc_outcome` [PASS / PARTIAL_ACCEPT / REJECT / NOT_RECORDED_LEGACY], `qc_reason`, `inspected_by`, `inspected_at`).
+
 
 ### 4.15 Document-Level Product Traceability
 - **Endpoint:** `GET /api/v1/supply-chain/traceability/product/:product_id`

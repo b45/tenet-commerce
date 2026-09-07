@@ -183,7 +183,7 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 
 	gr, err := h.service.CreateGoodsReceipt(c.Request.Context(), conn, userID, idempotencyKey, &req)
 	if err != nil {
-		if errors.Is(err, ErrEmptyReceipt) || errors.Is(err, ErrZeroValueReceipt) || errors.Is(err, ErrDuplicateReceiptItem) {
+		if errors.Is(err, ErrEmptyReceipt) || errors.Is(err, ErrZeroValueReceipt) || errors.Is(err, ErrDuplicateReceiptItem) || errors.Is(err, ErrInvalidQCArithmetic) || errors.Is(err, ErrQCReasonRequired) {
 			log.Warn("Goods receipt validation rejected", "error", err)
 			response.AbortBadRequest(c, "INVALID_RECEIPT_ITEMS", err.Error())
 			return

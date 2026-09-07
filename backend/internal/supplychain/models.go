@@ -83,10 +83,17 @@ type GoodsReceipt struct {
 
 // GoodsReceiptItem represents a line item in a GR
 type GoodsReceiptItem struct {
-	ID               uuid.UUID `json:"id"`
-	GoodsReceiptID   uuid.UUID `json:"goods_receipt_id"`
-	ProductID        uuid.UUID `json:"product_id"`
-	ReceivedQuantity int       `json:"received_quantity"`
+	ID                uuid.UUID  `json:"id"`
+	GoodsReceiptID    uuid.UUID  `json:"goods_receipt_id"`
+	ProductID         uuid.UUID  `json:"product_id"`
+	ReceivedQuantity  int        `json:"received_quantity"`
+	DeliveredQuantity int        `json:"delivered_quantity"`
+	AcceptedQuantity  int        `json:"accepted_quantity"`
+	RejectedQuantity  int        `json:"rejected_quantity"`
+	QCOutcome         string     `json:"qc_outcome"`
+	QCReason          *string    `json:"qc_reason,omitempty"`
+	InspectedBy       *uuid.UUID `json:"inspected_by,omitempty"`
+	InspectedAt       *time.Time `json:"inspected_at,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -131,9 +138,15 @@ type CreateGoodsReceiptRequest struct {
 }
 
 type CreateGRItemRequest struct {
-	ProductID        string `json:"product_id" binding:"required,uuid"`
-	ReceivedQuantity int    `json:"received_quantity" binding:"required,min=1"`
+	ProductID         string  `json:"product_id" binding:"required,uuid"`
+	ReceivedQuantity  int     `json:"received_quantity,omitempty" binding:"omitempty,min=0"`
+	DeliveredQuantity *int    `json:"delivered_quantity,omitempty" binding:"omitempty,min=0"`
+	AcceptedQuantity  *int    `json:"accepted_quantity,omitempty" binding:"omitempty,min=0"`
+	RejectedQuantity  *int    `json:"rejected_quantity,omitempty" binding:"omitempty,min=0"`
+	QCReason          *string `json:"qc_reason,omitempty"`
 }
+
+
 
 // UpdateSupplierRequest represents payload for modifying supplier information
 type UpdateSupplierRequest struct {
@@ -219,14 +232,22 @@ type PurchaseOrderDetail struct {
 
 // GoodsReceiptDetailItem represents a line item in GoodsReceiptDetail
 type GoodsReceiptDetailItem struct {
-	ID                uuid.UUID `json:"id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	ProductName       string    `json:"product_name"`
-	ProductSKU        string    `json:"product_sku"`
-	ReceivedQuantity  int       `json:"received_quantity"`
-	UnitCost          float64   `json:"unit_cost"`
-	SubtotalValuation float64   `json:"subtotal_valuation"`
+	ID                uuid.UUID  `json:"id"`
+	ProductID         uuid.UUID  `json:"product_id"`
+	ProductName       string     `json:"product_name"`
+	ProductSKU        string     `json:"product_sku"`
+	ReceivedQuantity  int        `json:"received_quantity"`
+	DeliveredQuantity int        `json:"delivered_quantity"`
+	AcceptedQuantity  int        `json:"accepted_quantity"`
+	RejectedQuantity  int        `json:"rejected_quantity"`
+	QCOutcome         string     `json:"qc_outcome"`
+	QCReason          *string    `json:"qc_reason,omitempty"`
+	InspectedBy       *uuid.UUID `json:"inspected_by,omitempty"`
+	InspectedAt       *time.Time `json:"inspected_at,omitempty"`
+	UnitCost          float64    `json:"unit_cost"`
+	SubtotalValuation float64    `json:"subtotal_valuation"`
 }
+
 
 // GoodsReceiptDetail represents full GR details with line items and accounting cross-reference
 type GoodsReceiptDetail struct {

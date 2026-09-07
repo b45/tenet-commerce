@@ -355,8 +355,17 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipt_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     goods_receipt_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.goods_receipts(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE RESTRICT,
-    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
+    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0),
+    delivered_quantity INTEGER NOT NULL DEFAULT 0 CHECK (delivered_quantity >= 0),
+    accepted_quantity INTEGER NOT NULL DEFAULT 0 CHECK (accepted_quantity >= 0),
+    rejected_quantity INTEGER NOT NULL DEFAULT 0 CHECK (rejected_quantity >= 0),
+    qc_outcome VARCHAR(31) NOT NULL DEFAULT 'NOT_RECORDED_LEGACY' CHECK (qc_outcome IN ('PASS', 'PARTIAL_ACCEPT', 'REJECT', 'NOT_RECORDED_LEGACY')),
+    qc_reason TEXT,
+    inspected_by UUID,
+    inspected_at TIMESTAMPTZ
 );
+
+
 
 -- 5.6 Durable Idempotency Requests
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.idempotency_requests (
@@ -751,8 +760,17 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipt_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     goods_receipt_id UUID NOT NULL REFERENCES tenant_darussalam_store.goods_receipts(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE RESTRICT,
-    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
+    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0),
+    delivered_quantity INTEGER NOT NULL DEFAULT 0 CHECK (delivered_quantity >= 0),
+    accepted_quantity INTEGER NOT NULL DEFAULT 0 CHECK (accepted_quantity >= 0),
+    rejected_quantity INTEGER NOT NULL DEFAULT 0 CHECK (rejected_quantity >= 0),
+    qc_outcome VARCHAR(31) NOT NULL DEFAULT 'NOT_RECORDED_LEGACY' CHECK (qc_outcome IN ('PASS', 'PARTIAL_ACCEPT', 'REJECT', 'NOT_RECORDED_LEGACY')),
+    qc_reason TEXT,
+    inspected_by UUID,
+    inspected_at TIMESTAMPTZ
 );
+
+
 
 -- 6.5.1 Durable Idempotency Requests
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.idempotency_requests (
@@ -967,7 +985,21 @@ BEGIN
         $ddl$, tenant_schema);
         EXECUTE format('DROP TRIGGER IF EXISTS immutable_compliance_decision ON %I.compliance_decisions', tenant_schema);
         EXECUTE format('CREATE TRIGGER immutable_compliance_decision BEFORE UPDATE OR DELETE ON %I.compliance_decisions FOR EACH ROW EXECUTE FUNCTION %I.prevent_compliance_decision_mutation()', tenant_schema, tenant_schema);
+
+        -- TPC-011: Inline quality check fields on goods_receipt_items
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS delivered_quantity INTEGER NOT NULL DEFAULT 0 CHECK (delivered_quantity >= 0)', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS accepted_quantity INTEGER NOT NULL DEFAULT 0 CHECK (accepted_quantity >= 0)', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS rejected_quantity INTEGER NOT NULL DEFAULT 0 CHECK (rejected_quantity >= 0)', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS qc_outcome VARCHAR(31) NOT NULL DEFAULT ''NOT_RECORDED_LEGACY'' CHECK (qc_outcome IN (''PASS'', ''PARTIAL_ACCEPT'', ''REJECT'', ''NOT_RECORDED_LEGACY''))', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS qc_reason TEXT', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS inspected_by UUID', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS inspected_at TIMESTAMPTZ', tenant_schema);
+
+
+        -- Backfill existing legacy records: received_quantity -> accepted_quantity & delivered_quantity, without fabricating PASS
+        EXECUTE format('UPDATE %I.goods_receipt_items SET delivered_quantity = received_quantity, accepted_quantity = received_quantity WHERE qc_outcome = ''NOT_RECORDED_LEGACY'' AND delivered_quantity = 0 AND received_quantity > 0', tenant_schema);
     END LOOP;
 END;
 $upgrade$;
 COMMIT;
+

@@ -28,7 +28,10 @@ var (
 	ErrReceiptQuantityExceeds = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
 	ErrIdempotencyKeyConflict = errors.New("idempotency key is already associated with another purchase order")
 	ErrInvalidMonetaryAmount  = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
+	ErrInvalidQCArithmetic   = errors.New("delivered quantity must equal accepted plus rejected quantity")
+	ErrQCReasonRequired       = errors.New("qc_reason is required when rejected quantity is greater than zero")
 )
+
 
 type Service struct {
 	repo          *Repository
@@ -256,7 +259,7 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 		ReceivedDate:         time.Now(),
 		Notes:                req.Notes,
 	}
-	inboundValue, fullyReceived, err := reconcileReceiptItems(gr, req.Items, poItems, receivedQuantities)
+	inboundValue, fullyReceived, hasAccepted, err := reconcileReceiptItems(gr, req.Items, poItems, receivedQuantities, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -270,17 +273,21 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	}
 	slog.InfoContext(ctx, "gr_and_stock_update_completed", slog.Duration("duration_stock_increment_ms", time.Since(startInsert)))
 
-	status := "PARTIALLY_RECEIVED"
 	if fullyReceived {
-		status = "RECEIVED"
-	}
-	if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, status); err != nil {
-		return nil, err
+		if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, "RECEIVED"); err != nil {
+			return nil, err
+		}
+	} else if hasAccepted && po.Status == "ISSUED" {
+		if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, "PARTIALLY_RECEIVED"); err != nil {
+			return nil, err
+		}
 	}
 
-	if err := s.ledgerService.PostGoodsReceiptJournal(ctx, tx, gr.ID, gr.GRNumber, inboundValue); err != nil {
-		slog.ErrorContext(ctx, "failed_to_post_gr_journal", slog.Any("error", err))
-		return nil, err
+	if inboundValue > 0 {
+		if err := s.ledgerService.PostGoodsReceiptJournal(ctx, tx, gr.ID, gr.GRNumber, inboundValue); err != nil {
+			slog.ErrorContext(ctx, "failed_to_post_gr_journal", slog.Any("error", err))
+			return nil, err
+		}
 	}
 
 	startCommit := time.Now()
@@ -292,56 +299,122 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	return gr, nil
 }
 
-func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, poItems []PurchaseOrderItem, received map[uuid.UUID]int) (float64, bool, error) {
+func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, poItems []PurchaseOrderItem, received map[uuid.UUID]int, inspectedBy uuid.UUID) (float64, bool, bool, error) {
 	if len(requested) == 0 {
-		return 0, false, ErrEmptyReceipt
+		return 0, false, false, ErrEmptyReceipt
 	}
 
 	poByProduct := make(map[uuid.UUID]PurchaseOrderItem, len(poItems))
 	for _, poItem := range poItems {
 		if _, exists := poByProduct[poItem.ProductID]; exists {
-			return 0, false, fmt.Errorf("purchase order contains duplicate product %s", poItem.ProductID)
+			return 0, false, false, fmt.Errorf("purchase order contains duplicate product %s", poItem.ProductID)
 		}
 		poByProduct[poItem.ProductID] = poItem
 	}
 
-	requestedByProduct := make(map[uuid.UUID]int, len(requested))
+	requestedAcceptedByProduct := make(map[uuid.UUID]int, len(requested))
 	inboundMoney := money.IDR(0)
+	now := time.Now()
+	hasAccepted := false
+
 	for _, requestItem := range requested {
 		productID, err := uuid.Parse(requestItem.ProductID)
 		if err != nil {
-			return 0, false, fmt.Errorf("parse goods receipt product id: %w", err)
+			return 0, false, false, fmt.Errorf("parse goods receipt product id: %w", err)
 		}
-		if _, exists := requestedByProduct[productID]; exists {
-			return 0, false, ErrDuplicateReceiptItem
+		if _, exists := requestedAcceptedByProduct[productID]; exists {
+			return 0, false, false, ErrDuplicateReceiptItem
 		}
 		poItem, exists := poByProduct[productID]
 		if !exists {
-			return 0, false, ErrReceiptItemNotOnPO
-		}
-		if requestItem.ReceivedQuantity <= 0 || requestItem.ReceivedQuantity > poItem.Quantity-received[productID] {
-			return 0, false, ErrReceiptQuantityExceeds
+			return 0, false, false, ErrReceiptItemNotOnPO
 		}
 
-		unitCostMoney, err := money.FromExactFloat(poItem.UnitCost, money.CurrencyIDR)
-		if err != nil {
-			return 0, false, fmt.Errorf("invalid purchase order unit cost: %w", err)
-		}
-		itemInboundMoney, err := unitCostMoney.Mul(int64(requestItem.ReceivedQuantity))
-		if err != nil {
-			return 0, false, fmt.Errorf("failed calculating inbound valuation: %w", err)
-		}
-		inboundMoney, err = inboundMoney.Add(itemInboundMoney)
-		if err != nil {
-			return 0, false, fmt.Errorf("failed aggregating inbound valuation: %w", err)
+		// Resolve delivered, accepted, rejected quantities
+		var delivered, accepted, rejected int
+		var qcReason *string
+
+		if requestItem.DeliveredQuantity != nil || requestItem.AcceptedQuantity != nil || requestItem.RejectedQuantity != nil {
+			if requestItem.DeliveredQuantity != nil {
+				delivered = *requestItem.DeliveredQuantity
+			}
+			if requestItem.AcceptedQuantity != nil {
+				accepted = *requestItem.AcceptedQuantity
+			}
+			if requestItem.RejectedQuantity != nil {
+				rejected = *requestItem.RejectedQuantity
+			}
+			if requestItem.QCReason != nil {
+				trimmed := strings.TrimSpace(*requestItem.QCReason)
+				if trimmed != "" {
+					qcReason = &trimmed
+				}
+			}
+
+			// Invariant check: delivered > 0, accepted >= 0, rejected >= 0
+			if delivered <= 0 || accepted < 0 || rejected < 0 {
+				return 0, false, false, ErrInvalidQCArithmetic
+			}
+			if delivered != accepted+rejected {
+				return 0, false, false, ErrInvalidQCArithmetic
+			}
+			if rejected > 0 && (qcReason == nil || *qcReason == "") {
+				return 0, false, false, ErrQCReasonRequired
+			}
+		} else if requestItem.ReceivedQuantity > 0 {
+			// Legacy request adapter: received_quantity -> PASS (delivered = received, accepted = received, rejected = 0)
+			delivered = requestItem.ReceivedQuantity
+			accepted = requestItem.ReceivedQuantity
+			rejected = 0
+		} else {
+			return 0, false, false, ErrInvalidQCArithmetic
 		}
 
-		requestedByProduct[productID] = requestItem.ReceivedQuantity
+
+		outstanding := poItem.Quantity - received[productID]
+		if delivered > outstanding {
+			return 0, false, false, ErrReceiptQuantityExceeds
+		}
+
+		// Derive QC Outcome
+		var outcome string
+		if rejected == 0 {
+			outcome = "PASS"
+		} else if accepted == 0 {
+			outcome = "REJECT"
+		} else {
+			outcome = "PARTIAL_ACCEPT"
+		}
+
+		if accepted > 0 {
+			hasAccepted = true
+			unitCostMoney, err := money.FromExactFloat(poItem.UnitCost, money.CurrencyIDR)
+			if err != nil {
+				return 0, false, false, fmt.Errorf("invalid purchase order unit cost: %w", err)
+			}
+			itemInboundMoney, err := unitCostMoney.Mul(int64(accepted))
+			if err != nil {
+				return 0, false, false, fmt.Errorf("failed calculating inbound valuation: %w", err)
+			}
+			inboundMoney, err = inboundMoney.Add(itemInboundMoney)
+			if err != nil {
+				return 0, false, false, fmt.Errorf("failed aggregating inbound valuation: %w", err)
+			}
+		}
+
+		requestedAcceptedByProduct[productID] = accepted
 		gr.Items = append(gr.Items, GoodsReceiptItem{
-			ID:               uuid.New(),
-			GoodsReceiptID:   gr.ID,
-			ProductID:        productID,
-			ReceivedQuantity: requestItem.ReceivedQuantity,
+			ID:                uuid.New(),
+			GoodsReceiptID:    gr.ID,
+			ProductID:         productID,
+			ReceivedQuantity:  accepted, // Legacy column parity
+			DeliveredQuantity: delivered,
+			AcceptedQuantity:  accepted,
+			RejectedQuantity:  rejected,
+			QCOutcome:         outcome,
+			QCReason:          qcReason,
+			InspectedBy:       &inspectedBy,
+			InspectedAt:       &now,
 		})
 	}
 
@@ -351,18 +424,16 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 		return gr.Items[i].ProductID.String() < gr.Items[j].ProductID.String()
 	})
 
-	if !inboundMoney.IsPositive() {
-		return 0, false, ErrZeroValueReceipt
-	}
 	inboundValue := inboundMoney.ToFloat()
 
 	for productID, poItem := range poByProduct {
-		if received[productID]+requestedByProduct[productID] != poItem.Quantity {
-			return inboundValue, false, nil
+		if received[productID]+requestedAcceptedByProduct[productID] != poItem.Quantity {
+			return inboundValue, false, hasAccepted, nil
 		}
 	}
-	return inboundValue, true, nil
+	return inboundValue, true, hasAccepted, nil
 }
+
 
 // ListSuppliers returns a paginated list of suppliers with optional is_active filter
 func (s *Service) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isActive *bool, limit, offset int) ([]Supplier, error) {

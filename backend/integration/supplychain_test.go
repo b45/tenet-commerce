@@ -830,3 +830,294 @@ func TestSupplyChain_ReceivingReconciliation_MissingInventoryFailsAndRollsBack(t
 	require.NoError(t, err)
 	assert.Equal(t, 0, grCount, "goods receipt must not exist after rollback")
 }
+
+func TestSupplyChain_InlineQualityChecks(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// Step 1: Create Supplier with active Halal cert
+	supplierReq := supplychain.CreateSupplierRequest{
+		Code:        fmt.Sprintf("SUP-QC-%d", time.Now().UnixNano()),
+		CompanyName: "PT Agro Makmur QC Test",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertType:          "HALAL_MUI",
+			CertificateNumber: fmt.Sprintf("CERT-QC-%d", time.Now().UnixNano()),
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Produk Pangan Halal",
+			ValidFrom:         time.Now().AddDate(0, 0, -5).Format("2006-01-02"),
+			ExpiryDate:        time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
+		},
+	}
+	body, err := json.Marshal(supplierReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("sup-qc-%d", time.Now().UnixNano()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var supplierResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &supplierResp))
+	var createdSupplier supplychain.Supplier
+	require.NoError(t, json.Unmarshal(supplierResp.Data, &createdSupplier))
+	certID := createdSupplier.ComplianceCertificate.ID.String()
+
+	// Step 2: Create PO 100 units of Beef (10000000-0000-0000-0000-000000000001) at 50,000 IDR
+	productID := "10000000-0000-0000-0000-000000000001"
+	poReq := supplychain.CreatePurchaseOrderRequest{
+		SupplierID:       createdSupplier.ID.String(),
+		ComplianceCertID: &certID,
+		Items: []supplychain.CreatePOItemRequest{
+			{
+				ProductID: productID,
+				Quantity:  100,
+				UnitCost:  50000,
+			},
+		},
+	}
+	poBody, _ := json.Marshal(poReq)
+	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-qc-%d", time.Now().UnixNano()))
+	wPO := httptest.NewRecorder()
+	router.ServeHTTP(wPO, reqPO)
+	require.Equal(t, http.StatusCreated, wPO.Code)
+
+	var poResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wPO.Body.Bytes(), &poResp))
+	var createdPO supplychain.PurchaseOrder
+	require.NoError(t, json.Unmarshal(poResp.Data, &createdPO))
+	assert.Equal(t, "ISSUED", createdPO.Status)
+
+	initialStock := stockForSKU(t, db, "SKU-BEEF-01")
+
+	// Case 1: Inconsistent arithmetic (delivered 60, accepted 50, rejected 5 -> 50+5 != 60) -> 400 Bad Request
+	{
+		del := 60
+		acc := 50
+		rej := 5
+		reason := "Some defect"
+		badArithmeticReq := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: createdPO.ID.String(),
+			Notes:           "Invalid arithmetic attempt",
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID,
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+					QCReason:          &reason,
+				},
+			},
+		}
+		badBody, _ := json.Marshal(badArithmeticReq)
+		reqBad := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(badBody))
+		reqBad.Header.Set("Content-Type", "application/json")
+		reqBad.Header.Set("Idempotency-Key", fmt.Sprintf("gr-bad-arith-%d", time.Now().UnixNano()))
+		wBad := httptest.NewRecorder()
+		router.ServeHTTP(wBad, reqBad)
+		assert.Equal(t, http.StatusBadRequest, wBad.Code)
+		assert.Equal(t, initialStock, stockForSKU(t, db, "SKU-BEEF-01"), "stock must not change on rejected request")
+	}
+
+	// Case 2: Rejected > 0 without reason -> 400 Bad Request
+	{
+		del := 60
+		acc := 55
+		rej := 5
+		badReasonReq := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: createdPO.ID.String(),
+			Notes:           "Missing reason attempt",
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID,
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+				},
+			},
+		}
+		badReasonBody, _ := json.Marshal(badReasonReq)
+		reqBadReason := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(badReasonBody))
+		reqBadReason.Header.Set("Content-Type", "application/json")
+		reqBadReason.Header.Set("Idempotency-Key", fmt.Sprintf("gr-bad-reason-%d", time.Now().UnixNano()))
+		wBadReason := httptest.NewRecorder()
+		router.ServeHTTP(wBadReason, reqBadReason)
+		assert.Equal(t, http.StatusBadRequest, wBadReason.Code)
+	}
+
+	// Case 3: Mixed acceptance on PO 100: delivered 60, accepted 55, rejected 5
+	// Expected:
+	// - stock +55
+	// - remaining outstanding 45
+	// - PO status = PARTIALLY_RECEIVED
+	// - QC item: accepted=55, rejected=5, outcome=PARTIAL_ACCEPT, reason recorded
+	// - Ledger journal posted for exactly 55 * 50,000 = 2,750,000 IDR
+	var gr1ID string
+	{
+		del := 60
+		acc := 55
+		rej := 5
+		reason := "Packaging torn on 5 boxes"
+		grReq1 := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: createdPO.ID.String(),
+			Notes:           "Batch 1 delivery with inline QC",
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID,
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+					QCReason:          &reason,
+				},
+			},
+		}
+		gr1Body, _ := json.Marshal(grReq1)
+		reqGR1 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(gr1Body))
+		reqGR1.Header.Set("Content-Type", "application/json")
+		reqGR1.Header.Set("Idempotency-Key", fmt.Sprintf("gr-qc-1-%d", time.Now().UnixNano()))
+		wGR1 := httptest.NewRecorder()
+		router.ServeHTTP(wGR1, reqGR1)
+		require.Equal(t, http.StatusCreated, wGR1.Code)
+
+		var gr1Resp apiResponseEnvelope
+		require.NoError(t, json.Unmarshal(wGR1.Body.Bytes(), &gr1Resp))
+		var gr1 supplychain.GoodsReceipt
+		require.NoError(t, json.Unmarshal(gr1Resp.Data, &gr1))
+		gr1ID = gr1.ID.String()
+
+		require.Len(t, gr1.Items, 1)
+		assert.Equal(t, 60, gr1.Items[0].DeliveredQuantity)
+		assert.Equal(t, 55, gr1.Items[0].AcceptedQuantity)
+		assert.Equal(t, 5, gr1.Items[0].RejectedQuantity)
+		assert.Equal(t, "PARTIAL_ACCEPT", gr1.Items[0].QCOutcome)
+		require.NotNil(t, gr1.Items[0].QCReason)
+		assert.Equal(t, reason, *gr1.Items[0].QCReason)
+		require.NotNil(t, gr1.Items[0].InspectedBy)
+		assert.Equal(t, "11111111-1111-1111-1111-111111111111", gr1.Items[0].InspectedBy.String())
+
+		// Stock incremented by exactly 55
+		assert.Equal(t, initialStock+55, stockForSKU(t, db, "SKU-BEEF-01"))
+		assertPOStatus(t, db, createdPO.ID, "PARTIALLY_RECEIVED")
+		assertLedgerJournalExists(t, db, gr1.ID, 55*50000.0)
+
+		// Check PO detail reflects remaining 45
+		reqPODetail := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/purchase-orders/%s", createdPO.ID), nil)
+		wPODetail := httptest.NewRecorder()
+		router.ServeHTTP(wPODetail, reqPODetail)
+		require.Equal(t, http.StatusOK, wPODetail.Code)
+		var poDetailResp apiResponseEnvelope
+		require.NoError(t, json.Unmarshal(wPODetail.Body.Bytes(), &poDetailResp))
+		var poDetail supplychain.PurchaseOrderDetail
+		require.NoError(t, json.Unmarshal(poDetailResp.Data, &poDetail))
+		require.Len(t, poDetail.Items, 1)
+		assert.Equal(t, 55, poDetail.Items[0].ReceivedQuantity)
+		assert.Equal(t, 45, poDetail.Items[0].RemainingQuantity)
+	}
+
+	// Case 4: All-rejected inspection: delivered 20, accepted 0, rejected 20
+	// Expected:
+	// - zero stock increment
+	// - zero ledger journal entry (skipped)
+	// - PO remaining stays 45, status stays PARTIALLY_RECEIVED (never marked RECEIVED)
+	// - inspection history immutable and queryable
+	{
+		del := 20
+		acc := 0
+		rej := 20
+		reason := "Temperature abuse, thawed meat"
+		grReqAllReject := supplychain.CreateGoodsReceiptRequest{
+			PurchaseOrderID: createdPO.ID.String(),
+			Notes:           "Batch 2: Completely spoiled delivery",
+			Items: []supplychain.CreateGRItemRequest{
+				{
+					ProductID:         productID,
+					DeliveredQuantity: &del,
+					AcceptedQuantity:  &acc,
+					RejectedQuantity:  &rej,
+					QCReason:          &reason,
+				},
+			},
+		}
+		grAllRejectBody, _ := json.Marshal(grReqAllReject)
+		reqGRReject := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grAllRejectBody))
+		reqGRReject.Header.Set("Content-Type", "application/json")
+		reqGRReject.Header.Set("Idempotency-Key", fmt.Sprintf("gr-qc-all-reject-%d", time.Now().UnixNano()))
+		wGRReject := httptest.NewRecorder()
+		router.ServeHTTP(wGRReject, reqGRReject)
+		require.Equal(t, http.StatusCreated, wGRReject.Code)
+
+		var grRejectResp apiResponseEnvelope
+		require.NoError(t, json.Unmarshal(wGRReject.Body.Bytes(), &grRejectResp))
+		var grReject supplychain.GoodsReceipt
+		require.NoError(t, json.Unmarshal(grRejectResp.Data, &grReject))
+
+		require.Len(t, grReject.Items, 1)
+		assert.Equal(t, 20, grReject.Items[0].DeliveredQuantity)
+		assert.Equal(t, 0, grReject.Items[0].AcceptedQuantity)
+		assert.Equal(t, 20, grReject.Items[0].RejectedQuantity)
+		assert.Equal(t, "REJECT", grReject.Items[0].QCOutcome)
+		require.NotNil(t, grReject.Items[0].QCReason)
+		assert.Equal(t, reason, *grReject.Items[0].QCReason)
+
+		// Zero stock change!
+		assert.Equal(t, initialStock+55, stockForSKU(t, db, "SKU-BEEF-01"))
+		assertPOStatus(t, db, createdPO.ID, "PARTIALLY_RECEIVED")
+
+		// Verify no ledger journal was created for this all-rejected receipt
+		func() {
+			conn, err := db.Pool.Acquire(context.Background())
+			require.NoError(t, err)
+			defer conn.Release()
+			var entryCount int
+			err = conn.QueryRow(context.Background(), `
+				SELECT COUNT(*) FROM tenant_al_barakah_mart.ledger_entries
+				WHERE source_document_type = 'GOODS_RECEIPT' AND source_document_id = $1
+			`, grReject.ID).Scan(&entryCount)
+			require.NoError(t, err)
+			assert.Equal(t, 0, entryCount, "all-rejected receipt must have zero ledger journals")
+		}()
+
+		// Verify GetGoodsReceiptDetail returns full QC data
+
+		reqGRDetail := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/goods-receipts/%s", grReject.ID), nil)
+		wGRDetail := httptest.NewRecorder()
+		router.ServeHTTP(wGRDetail, reqGRDetail)
+		require.Equal(t, http.StatusOK, wGRDetail.Code)
+
+		var grDetailResp apiResponseEnvelope
+		require.NoError(t, json.Unmarshal(wGRDetail.Body.Bytes(), &grDetailResp))
+		var grDetail supplychain.GoodsReceiptDetail
+		require.NoError(t, json.Unmarshal(grDetailResp.Data, &grDetail))
+		require.Len(t, grDetail.Items, 1)
+		assert.Equal(t, 0, grDetail.Items[0].AcceptedQuantity)
+		assert.Equal(t, 20, grDetail.Items[0].RejectedQuantity)
+		assert.Equal(t, 20, grDetail.Items[0].DeliveredQuantity)
+		assert.Equal(t, "REJECT", grDetail.Items[0].QCOutcome)
+		assert.Equal(t, 0.0, grDetail.TotalValuation)
+		assert.Nil(t, grDetail.LedgerEntryNumber)
+	}
+
+	// Verify Detail of first mixed receipt
+	{
+		reqGR1Detail := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/goods-receipts/%s", gr1ID), nil)
+		wGR1Detail := httptest.NewRecorder()
+		router.ServeHTTP(wGR1Detail, reqGR1Detail)
+		require.Equal(t, http.StatusOK, wGR1Detail.Code)
+
+		var gr1DetailResp apiResponseEnvelope
+		require.NoError(t, json.Unmarshal(wGR1Detail.Body.Bytes(), &gr1DetailResp))
+		var gr1Detail supplychain.GoodsReceiptDetail
+		require.NoError(t, json.Unmarshal(gr1DetailResp.Data, &gr1Detail))
+		require.Len(t, gr1Detail.Items, 1)
+		assert.Equal(t, 55, gr1Detail.Items[0].AcceptedQuantity)
+		assert.Equal(t, 5, gr1Detail.Items[0].RejectedQuantity)
+		assert.Equal(t, 60, gr1Detail.Items[0].DeliveredQuantity)
+		assert.Equal(t, "PARTIAL_ACCEPT", gr1Detail.Items[0].QCOutcome)
+		assert.Equal(t, 55*50000.0, gr1Detail.TotalValuation)
+		assert.NotNil(t, gr1Detail.LedgerEntryNumber)
+	}
+}
+
