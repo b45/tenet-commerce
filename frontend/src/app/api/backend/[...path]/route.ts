@@ -16,7 +16,34 @@ function resolveClientIp(req: NextRequest): string {
   );
 }
 
+function hasTrustedMutationOrigin(request: NextRequest): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
+
+  const origin = request.headers.get("origin");
+  if (origin) return origin === request.nextUrl.origin;
+
+  const referer = request.headers.get("referer");
+  if (referer) {
+    try {
+      return new URL(referer).origin === request.nextUrl.origin;
+    } catch {
+      return false;
+    }
+  }
+
+  // Server-side callers may not send browser provenance headers. Authentication
+  // and backend authorization still apply to these requests.
+  return true;
+}
+
 async function proxyRequest(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  if (!hasTrustedMutationOrigin(request)) {
+    return NextResponse.json(
+      { success: false, error: { code: "CSRF_ORIGIN_REJECTED", message: "Permintaan lintas asal ditolak." } },
+      { status: 403 }
+    );
+  }
+
   const { path } = await context.params;
   const backendPath = path.join("/");
   const targetUrl = new URL(`${BACKEND_URL}/api/v1/${backendPath}`);
