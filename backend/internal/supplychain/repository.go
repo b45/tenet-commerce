@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,6 +37,25 @@ func NewRepositoryWithInventory(invRepo *inventory.Repository) *Repository {
 		invRepo = inventory.NewRepository()
 	}
 	return &Repository{inventoryRepo: invRepo}
+}
+
+// LockActiveProductsForPurchaseOrder serializes PO creation with product deactivation.
+func (r *Repository) LockActiveProductsForPurchaseOrder(ctx context.Context, tx pgx.Tx, productIDs []uuid.UUID) error {
+	ids := append([]uuid.UUID(nil), productIDs...)
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+	for _, productID := range ids {
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT is_active FROM products WHERE id = $1 FOR UPDATE`, productID).Scan(&active); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrProductNotAvailable
+			}
+			return fmt.Errorf("failed locking purchase order product: %w", err)
+		}
+		if !active {
+			return ErrProductNotAvailable
+		}
+	}
+	return nil
 }
 
 // GetTenantConfig fetches a specific config value for the tenant

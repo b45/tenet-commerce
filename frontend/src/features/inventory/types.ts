@@ -43,6 +43,7 @@ export interface StockAdjustmentPayload {
   product_id: string;
   adjustment_type: AdjustmentType;
   quantity: number;
+  expected_quantity?: number;
   reason: AdjustmentReason;
   notes?: string;
 }

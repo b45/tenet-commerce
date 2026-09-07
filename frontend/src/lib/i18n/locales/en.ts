@@ -310,7 +310,7 @@ export const en: TranslationSchema = {
       closeModal: "Close modal",
       successMessage: "Stock for {name} was successfully adjusted to {quantity}.",
       errors: {
-        quantityPositive: "Adjustment quantity must be greater than 0",
+        quantityPositive: "Enter 0 or more for a stock count, or more than 0 for an adjustment",
         adjustFailed: "Failed to adjust stock",
       },
     },

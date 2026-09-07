@@ -310,7 +310,7 @@ export const id: TranslationSchema = {
       closeModal: "Tutup modal",
       successMessage: "Stok produk {name} berhasil disesuaikan menjadi {quantity}.",
       errors: {
-        quantityPositive: "Jumlah penyesuaian harus lebih besar dari 0",
+        quantityPositive: "Masukkan 0 atau lebih untuk hitung stok, atau lebih dari 0 untuk penyesuaian",
         adjustFailed: "Gagal menyesuaikan stok",
       },
     },

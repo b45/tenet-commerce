@@ -509,6 +509,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Creates a purchase order only when every referenced product exists and remains active under a row lock. Missing, malformed, or inactive product IDs return 422 PRODUCT_NOT_AVAILABLE with no PO mutation.",
                         "method": "POST",
                         "header": [
                             {

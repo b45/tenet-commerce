@@ -87,7 +87,7 @@ export function StockAdjustModal({
     e.preventDefault();
     setErrorMessage(null);
 
-    if (quantity <= 0) {
+    if (quantity < 0 || (adjustType !== "SET" && quantity === 0)) {
       setErrorMessage(t("inventory.adjustModal.errors.quantityPositive"));
       return;
     }
@@ -98,6 +98,7 @@ export function StockAdjustModal({
         product_id: product.id,
         adjustment_type: adjustType,
         quantity: Number(quantity),
+        expected_quantity: adjustType === "SET" ? currentStock : undefined,
         reason,
         notes: notes.trim() || undefined,
       };
@@ -232,7 +233,7 @@ export function StockAdjustModal({
               </label>
               <input
                 type="number"
-                min="1"
+                min={adjustType === "SET" ? "0" : "1"}
                 required
                 value={quantity || ""}
                 onChange={(e) => setQuantity(Number(e.target.value))}

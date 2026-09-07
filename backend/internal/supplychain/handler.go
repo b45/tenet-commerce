@@ -124,6 +124,11 @@ func (h *Handler) CreatePurchaseOrder(c *gin.Context) {
 
 	po, err := h.service.CreatePurchaseOrder(c.Request.Context(), conn, &req)
 	if err != nil {
+		if errors.Is(err, ErrProductNotAvailable) {
+			response.UnprocessableEntity(c, "PRODUCT_NOT_AVAILABLE", err.Error())
+			c.Abort()
+			return
+		}
 		if errors.Is(err, ErrInvalidMonetaryAmount) {
 			log.Warn("Purchase order rejected due to invalid monetary amount", "error", err)
 			response.AbortBadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())

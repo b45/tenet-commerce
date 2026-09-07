@@ -530,7 +530,12 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 		return
 	}
 
-	product, err := h.service.CreateProduct(c.Request.Context(), conn, req)
+	userID := c.GetString("user_id")
+	if userID == "" {
+		response.Unauthorized(c, "UNAUTHORIZED", "User identity not found in token")
+		return
+	}
+	product, err := h.service.CreateProduct(c.Request.Context(), conn, userID, req)
 	if err != nil {
 		if errors.Is(err, ErrInvalidMonetaryAmount) {
 			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
@@ -584,6 +589,10 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 			response.NotFound(c, "PRODUCT_NOT_FOUND", "Product not found")
 			return
 		}
+		if errors.Is(err, ErrProductHasOutstandingPO) {
+			response.Conflict(c, "PRODUCT_HAS_OUTSTANDING_PO", "Product cannot be deactivated while purchase order quantity remains outstanding")
+			return
+		}
 		if errors.Is(err, ErrBarcodeAlreadyExists) {
 			response.Conflict(c, "BARCODE_ALREADY_EXISTS", "Product barcode already exists")
 			return
@@ -615,6 +624,10 @@ func (h *Handler) DeleteProduct(c *gin.Context) {
 	if err := h.service.DeleteProduct(c.Request.Context(), conn, id); err != nil {
 		if errors.Is(err, ErrProductNotFound) {
 			response.NotFound(c, "PRODUCT_NOT_FOUND", "Product not found")
+			return
+		}
+		if errors.Is(err, ErrProductHasOutstandingPO) {
+			response.Conflict(c, "PRODUCT_HAS_OUTSTANDING_PO", "Product cannot be deleted while purchase order quantity remains outstanding")
 			return
 		}
 		log.Error("Failed soft-deleting product", "id", id, "error", err)
@@ -827,6 +840,14 @@ func (h *Handler) AdjustStock(c *gin.Context) {
 		}
 		if errors.Is(err, ErrNegativeAdjustmentStock) {
 			response.BadRequest(c, "INSUFFICIENT_STOCK", "Insufficient stock for negative adjustment")
+			return
+		}
+		if errors.Is(err, ErrInvalidAdjustmentQuantity) {
+			response.BadRequest(c, "INVALID_ADJUSTMENT_QUANTITY", err.Error())
+			return
+		}
+		if errors.Is(err, ErrStaleStockCount) {
+			response.Conflict(c, "STALE_STOCK_COUNT", "Inventory changed after the stock count was started; refresh and recount")
 			return
 		}
 		log.Error("Failed adjusting stock", "product_id", req.ProductID, "error", err)

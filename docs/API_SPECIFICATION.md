@@ -524,18 +524,21 @@ Password for all seeded dev accounts: `Password123!`
       "compliance_tags": ["HALAL_MUI"]
     }
     ```
-  - **Response (201 Created):** Returns created `Product` object.
+  - **Response (201 Created):** Returns created `Product` object. A positive `initial_stock` is posted as an immutable `OPENING` movement referencing the new product and authenticated actor; zero creates no stock delta.
 
 - **Update Product:** `PUT /api/v1/pos/products/:id`
   - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Request Body:** Similar to create product (without SKU and initial stock).
   - **Response (200 OK):** Returns updated `Product` object.
+  - Product updates cannot change `stock_quantity`; use the adjustment endpoint for every stock change.
+  - Deactivation returns `409 PRODUCT_HAS_OUTSTANDING_PO` while an issued or partially received PO still has outstanding quantity for the product.
 
 - **Soft Delete Product:** `DELETE /api/v1/pos/products/:id`
   - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Response (200 OK):** `{"success": true, "data": {"message": "Product soft-deleted successfully", "id": "..."}}`
+  - **Conflict (409):** `PRODUCT_HAS_OUTSTANDING_PO` when an issued or partially received PO still has outstanding quantity. Soft deletion preserves transaction and movement history.
 
 ### 3.9 Category Management
 - **List Categories:** `GET /api/v1/pos/categories`
@@ -597,6 +600,10 @@ Password for all seeded dev accounts: `Password123!`
 }
 ```
 *(Automatically creates a balanced double-entry journal posting: Debit 5020 Inventory Shrinkage & Loss, Credit 1030 Merchandise Inventory).*
+
+Each nonzero adjustment posts one immutable `ADJUSTMENT` stock movement in the same transaction as its audit record and journal. For `SET`, `quantity` is the absolute counted stock (zero is allowed) and `expected_quantity` is required. The server locks the authoritative balance and returns `409 STALE_STOCK_COUNT` if it differs from `expected_quantity`; clients must refresh and recount. `ADD` and `SUBTRACT` require a positive quantity and omit `expected_quantity`.
+
+Checkout posts one `OUT` movement per transaction line, and void posts one linked `IN` reversal per original line. Their movements, inventory balance, business document, and balanced journal commit atomically; same-key retries do not create another movement.
 
 ### 3.11 Low Stock Alerts
 - **Endpoint:** `GET /api/v1/pos/inventory/low-stock`
@@ -692,6 +699,7 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 }
 ```
 - **Monetary validation rule:** `unit_cost` must be a non-negative, non-fractional integer IDR value not exceeding 1,000,000,000 IDR. Fractional amounts or overflow return `400 Bad Request` (`INVALID_MONETARY_AMOUNT`).
+- Every referenced product is locked with product deactivation and must remain active. Missing, malformed, or inactive product IDs return `422 PRODUCT_NOT_AVAILABLE`; no PO is created.
 - **Error Response if Certificate Expired (422 Unprocessable Entity):**
 ```json
 {

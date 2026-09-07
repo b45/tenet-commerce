@@ -2,10 +2,12 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/b45/tenet-commerce/backend/internal/inventory"
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/money"
@@ -177,18 +179,8 @@ func (s *Service) Checkout(
 		return nil, err
 	}
 
-	// 6. APM SPAN: Atomically decrement stock for each locked item
-	tDec := time.Now()
-	for sku, qty := range skuMap {
-		product := productMap[sku]
-		if err := s.repo.DecrementStock(ctx, tx, product.ID, qty); err != nil {
-			reqLogger.Error("Failed to decrement inventory stock", "sku", sku, "error", err)
-			return nil, fmt.Errorf("failed decrementing stock for %s: %w", sku, err)
-		}
-	}
-	decDuration := time.Since(tDec)
-
-	// 7. APM SPAN: Insert Master Transaction Record
+	// 6. Insert the transaction and its immutable lines before posting movements,
+	// so every stock delta can reference the exact business document and line.
 	txnNumber := s.repo.GenerateTransactionNumber()
 	masterTxn := &Transaction{
 		TransactionNumber: txnNumber,
@@ -214,9 +206,10 @@ func (s *Service) Checkout(
 	}
 	txnDuration := time.Since(tTxn)
 
-	// 8. APM SPAN: Bulk Insert Transaction Line Items
+	// 7. Bulk insert transaction line items with caller-generated IDs.
 	for i := range lineItems {
 		lineItems[i].TransactionID = masterTxn.ID
+		lineItems[i].ID = uuid.NewString()
 	}
 	tItems := time.Now()
 	if err := s.repo.CreateTransactionItems(ctx, tx, lineItems); err != nil {
@@ -225,9 +218,32 @@ func (s *Service) Checkout(
 	}
 	itemsDuration := time.Since(tItems)
 
+	// 8. Post one OUT movement for every sale line in the same transaction.
+	tDec := time.Now()
+	txnUUID := uuid.MustParse(masterTxn.ID)
+	actorUUID, err := uuid.Parse(cashierID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cashier identity: %w", err)
+	}
+	for _, item := range lineItems {
+		productUUID := uuid.MustParse(item.ProductID)
+		lineUUID := uuid.MustParse(item.ID)
+		reason := "POS sale " + masterTxn.TransactionNumber
+		if _, err := s.repo.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+			ProductID: productUUID, QuantityDelta: -item.Quantity, MovementType: inventory.MovementTypeOut,
+			SourceDocumentType: inventory.SourceDocPOSSale, SourceDocumentID: &txnUUID,
+			SourceDocumentLineID: &lineUUID, ActorID: &actorUUID, Reason: &reason,
+		}); err != nil {
+			if errors.Is(err, inventory.ErrInsufficientStock) {
+				return nil, fmt.Errorf("%w: %s", ErrInsufficientStock, item.SKU)
+			}
+			return nil, fmt.Errorf("failed posting sale movement for %s: %w", item.SKU, err)
+		}
+	}
+	decDuration := time.Since(tDec)
+
 	// 8.5. APM SPAN: Post automatic journal entry
 	tLedger := time.Now()
-	txnUUID, _ := uuid.Parse(masterTxn.ID)
 	if err := s.ledgerService.PostPOSSaleJournal(ctx, tx, txnUUID, masterTxn.TransactionNumber, masterTxn.TotalAmount, totalCOGSMoney.ToFloat(), masterTxn.PaymentMethod); err != nil {
 		reqLogger.Error("Failed to post POS sale journal entry", "error", err)
 		return nil, fmt.Errorf("failed posting ledger journal: %w", err)
@@ -355,8 +371,20 @@ func (s *Service) VoidTransaction(
 
 	// 5. Restock inventory and compute total COGS using exact-money precision
 	totalCOGSMoney := money.IDR(0)
+	txnUUID := uuid.MustParse(txn.ID)
+	actorUUID, err := uuid.Parse(cashierID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cashier identity: %w", err)
+	}
 	for _, item := range items {
-		if err := s.repo.IncrementStock(ctx, tx, item.ProductID, item.Quantity); err != nil {
+		productUUID := uuid.MustParse(item.ProductID)
+		lineUUID := uuid.MustParse(item.ID)
+		reason := req.Reason
+		if _, err := s.repo.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+			ProductID: productUUID, QuantityDelta: item.Quantity, MovementType: inventory.MovementTypeIn,
+			SourceDocumentType: inventory.SourceDocPOSVoid, SourceDocumentID: &txnUUID,
+			SourceDocumentLineID: &lineUUID, ActorID: &actorUUID, Reason: &reason,
+		}); err != nil {
 			reqLogger.Error("Failed restocking inventory during void", "product_id", item.ProductID, "error", err)
 			return nil, fmt.Errorf("failed restocking product %s: %w", item.SKU, err)
 		}
@@ -382,7 +410,6 @@ func (s *Service) VoidTransaction(
 	}
 
 	// 7. Post Sharia Ledger Reversal Journal Entry
-	txnUUID, _ := uuid.Parse(txn.ID)
 	if err := s.ledgerService.PostPOSVoidReversalJournal(ctx, tx, txnUUID, txn.TransactionNumber, txn.TotalAmount, totalCOGS, txn.PaymentMethod, req.Reason); err != nil {
 		reqLogger.Error("Failed posting POS void reversal journal", "error", err)
 		return nil, fmt.Errorf("failed posting ledger reversal: %w", err)
@@ -470,8 +497,12 @@ func (s *Service) GetProduct(ctx context.Context, conn *pgxpool.Conn, id string)
 }
 
 // CreateProduct adds a new product to the catalog with initial inventory
-func (s *Service) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req CreateProductRequest) (*Product, error) {
-	return s.repo.CreateProduct(ctx, conn, req)
+func (s *Service) CreateProduct(ctx context.Context, conn *pgxpool.Conn, userID string, req CreateProductRequest) (*Product, error) {
+	actorID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user identity: %w", err)
+	}
+	return s.repo.CreateProduct(ctx, conn, actorID, req)
 }
 
 // UpdateProduct updates product metadata
@@ -486,6 +517,9 @@ func (s *Service) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id stri
 
 // AdjustStock executes an atomic inventory adjustment and posts a balanced Sharia ledger shrinkage journal if applicable
 func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID string, req StockAdjustmentRequest) (*StockAdjustmentResponse, error) {
+	if req.AdjustmentType != "SET" && req.Quantity <= 0 {
+		return nil, ErrInvalidAdjustmentQuantity
+	}
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed starting adjustment transaction: %w", err)
@@ -497,12 +531,20 @@ func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID st
 		return nil, err
 	}
 
-	prevQty, newQty, deltaQty, err := s.repo.AdjustInventoryStock(ctx, tx, req.ProductID, req.AdjustmentType, req.Quantity)
+	productID, err := uuid.Parse(req.ProductID)
+	if err != nil {
+		return nil, ErrProductNotFound
+	}
+	actorID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user identity: %w", err)
+	}
+	adjID := uuid.New()
+	prevQty, newQty, deltaQty, err := s.repo.PostAdjustmentMovement(ctx, tx, adjID, productID, actorID, req.AdjustmentType, req.Quantity, req.ExpectedQuantity, req.Reason)
 	if err != nil {
 		return nil, err
 	}
 
-	adjID := uuid.New()
 	var ledgerEntryNum *string
 	var ledgerEntryIDStr *string
 
