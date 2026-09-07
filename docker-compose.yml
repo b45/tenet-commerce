@@ -40,6 +40,36 @@ services:
     networks:
       - tenet_network
 
+  api:
+    build:
+      context: ./backend
+    environment:
+      APP_ENV: development
+      APP_PORT: 8081
+      JWT_SECRET: super_secret_default_jwt_key_32_chars_long_minimum!
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: tenet_commerce
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - tenet_network
+
 volumes:
   postgres_data:
   redis_data:
