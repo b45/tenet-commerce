@@ -437,6 +437,7 @@ export const en: TranslationSchema = {
       noCertificate: "No Certificate",
       viewHistory: "Audit History",
       renewCert: "Renew Certificate",
+      createPO: "Create PO",
     },
     status: {
       valid: "Valid Certificate",

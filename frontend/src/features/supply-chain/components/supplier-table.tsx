@@ -144,6 +144,16 @@ export function SupplierTable({
                   {/* Action Buttons */}
                   <td className="px-5 py-4 text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {cert?.computed_status === "VALID" && (
+                        <a
+                          href={`/supply-chain/po?supplier_id=${supplier.id}`}
+                          title={t("supplyChain.table.createPO")}
+                          className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-semibold rounded-lg bg-[var(--color-action-primary)] text-white hover:opacity-90 transition-opacity"
+                        >
+                          <span>{t("supplyChain.table.createPO")}</span>
+                        </a>
+                      )}
+
                       <Button
                         type="button"
                         variant="ghost"
