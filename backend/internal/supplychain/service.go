@@ -28,8 +28,10 @@ var (
 	ErrReceiptQuantityExceeds = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
 	ErrIdempotencyKeyConflict = errors.New("idempotency key is already associated with another purchase order")
 	ErrInvalidMonetaryAmount  = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
-	ErrInvalidQCArithmetic   = errors.New("delivered quantity must equal accepted plus rejected quantity")
-	ErrQCReasonRequired       = errors.New("qc_reason is required when rejected quantity is greater than zero")
+	ErrInvalidQCArithmetic                 = errors.New("delivered quantity must equal accepted plus rejected quantity")
+	ErrQCReasonRequired                     = errors.New("qc_reason is required when rejected quantity is greater than zero")
+	ErrPOCannotBeCancelled                  = errors.New("only DRAFT or ISSUED purchase orders can be cancelled")
+	ErrPOCannotBeCancelledWithAcceptedGoods = errors.New("cannot cancel purchase order with received goods")
 )
 
 
@@ -526,9 +528,13 @@ func (s *Service) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.Conn
 	return s.repo.GetPurchaseOrderDetail(ctx, conn, poID)
 }
 
-// CancelPurchaseOrder atomically cancels an unfulfilled purchase order
-func (s *Service) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) error {
-	return s.repo.CancelPurchaseOrder(ctx, conn, poID)
+// CancelPurchaseOrder atomically cancels an unfulfilled purchase order.
+func (s *Service) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID, actorID uuid.UUID, reason string) (*PurchaseOrder, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "Cancelled by user"
+	}
+	return s.repo.CancelPurchaseOrder(ctx, conn, poID, actorID, reason, s.now())
 }
 
 // ListGoodsReceipts returns a paginated list of goods receipts

@@ -326,7 +326,10 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_orders (
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
     status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    cancellation_reason TEXT,
+    cancelled_by UUID,
+    cancelled_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_order_items (
@@ -998,8 +1001,16 @@ BEGIN
 
         -- Backfill existing legacy records: received_quantity -> accepted_quantity & delivered_quantity, without fabricating PASS
         EXECUTE format('UPDATE %I.goods_receipt_items SET delivered_quantity = received_quantity, accepted_quantity = received_quantity WHERE qc_outcome = ''NOT_RECORDED_LEGACY'' AND delivered_quantity = 0 AND received_quantity > 0', tenant_schema);
+
+        -- TPC-012: Serialization and cancellation audit fields on purchase_orders
+        EXECUTE format('ALTER TABLE %I.purchase_orders DROP CONSTRAINT IF EXISTS purchase_orders_status_check', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD CONSTRAINT purchase_orders_status_check CHECK (status IN (''DRAFT'', ''ISSUED'', ''PARTIALLY_RECEIVED'', ''RECEIVED'', ''CANCELLED''))', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancelled_by UUID', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ', tenant_schema);
     END LOOP;
 END;
 $upgrade$;
 COMMIT;
+
 
