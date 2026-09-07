@@ -416,7 +416,11 @@ func (h *Handler) ListPurchaseOrders(c *gin.Context) {
 		response.AbortInternalServerError(c, "PO_LIST_FAILED", err.Error())
 		return
 	}
-	response.OK(c, pos)
+	response.OKWithMeta(c, pos, response.Meta{
+		Total:  len(pos),
+		Limit:  limit,
+		Offset: offset,
+	})
 }
 
 // GetPurchaseOrderDetail handles GET /api/v1/supply-chain/purchase-orders/:id
@@ -511,7 +515,11 @@ func (h *Handler) ListGoodsReceipts(c *gin.Context) {
 		response.AbortInternalServerError(c, "GR_LIST_FAILED", err.Error())
 		return
 	}
-	response.OK(c, grs)
+	response.OKWithMeta(c, grs, response.Meta{
+		Total:  len(grs),
+		Limit:  limit,
+		Offset: offset,
+	})
 }
 
 // GetGoodsReceiptDetail handles GET /api/v1/supply-chain/goods-receipts/:id
