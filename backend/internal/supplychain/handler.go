@@ -205,6 +205,12 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 			response.AbortConflict(c, "INVALID_PO_STATUS", err.Error())
 			return
 		}
+		if errors.Is(err, ErrInventoryNotFound) {
+			log.Warn("Goods receipt rejected: product inventory record not found", "po_id", req.PurchaseOrderID, "error", err)
+			response.UnprocessableEntity(c, "INVENTORY_RECORD_NOT_FOUND", err.Error())
+			c.Abort()
+			return
+		}
 		if errors.Is(err, ErrIdempotencyKeyConflict) {
 			log.Warn("Goods receipt rejected: idempotency key conflict", "idempotency_key", idempotencyKey, "error", err)
 			response.AbortConflict(c, "IDEMPOTENCY_KEY_CONFLICT", err.Error())

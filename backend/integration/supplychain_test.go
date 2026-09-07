@@ -503,3 +503,330 @@ func assertLedgerJournalExists(t *testing.T, db *database.PostgresDB, grID uuid.
 	assert.Equal(t, expectedAmount, totalCredit)
 	assert.Equal(t, totalDebit, totalCredit, "general ledger journal MUST be strictly balanced")
 }
+
+func TestSupplyChain_ReceivingReconciliation_SequentialAndOverreceipt(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// Step 1: Create active supplier with valid cert
+	supplierReq := supplychain.CreateSupplierRequest{
+		Code:          fmt.Sprintf("SUP-RECON-%d", time.Now().UnixNano()),
+		CompanyName:   "PT Rekonsiliasi Distribusi",
+		ContactPerson: "Bambang",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertType:          "HALAL_MUI",
+			CertificateNumber: fmt.Sprintf("CERT-RECON-%d", time.Now().UnixNano()),
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Minyak Goreng Halal",
+			ValidFrom:         time.Now().AddDate(0, 0, -10).Format("2006-01-02"),
+			ExpiryDate:        time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
+		},
+	}
+	body, err := json.Marshal(supplierReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("sup-recon-key-%d", time.Now().UnixNano()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var supplierResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &supplierResp))
+	var createdSupplier supplychain.Supplier
+	require.NoError(t, json.Unmarshal(supplierResp.Data, &createdSupplier))
+	require.NotNil(t, createdSupplier.ComplianceCertificate)
+
+	certID := createdSupplier.ComplianceCertificate.ID.String()
+
+	// Step 2: Create PO with quantity 100 of SKU-OIL-01 (10000000-0000-0000-0000-000000000004)
+	productID := "10000000-0000-0000-0000-000000000004"
+	poReq := supplychain.CreatePurchaseOrderRequest{
+		SupplierID:       createdSupplier.ID.String(),
+		ComplianceCertID: &certID,
+		Items: []supplychain.CreatePOItemRequest{
+			{
+				ProductID: productID,
+				Quantity:  100,
+				UnitCost:  25000,
+			},
+		},
+	}
+	poBody, err := json.Marshal(poReq)
+	require.NoError(t, err)
+
+	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-recon-key-%d", time.Now().UnixNano()))
+	wPO := httptest.NewRecorder()
+	router.ServeHTTP(wPO, reqPO)
+	require.Equal(t, http.StatusCreated, wPO.Code)
+
+	var poResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wPO.Body.Bytes(), &poResp))
+	var createdPO supplychain.PurchaseOrder
+	require.NoError(t, json.Unmarshal(poResp.Data, &createdPO))
+	assert.Equal(t, "ISSUED", createdPO.Status)
+
+	initialStock := stockForSKU(t, db, "SKU-OIL-01")
+
+	// Step 3: Receive 60 units (remaining = 40)
+	grReq1 := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Batch 1: 60 units",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID, ReceivedQuantity: 60},
+		},
+	}
+	grBody1, _ := json.Marshal(grReq1)
+	reqGR1 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
+	reqGR1.Header.Set("Content-Type", "application/json")
+	reqGR1.Header.Set("Idempotency-Key", fmt.Sprintf("gr-seq-1-%d", time.Now().UnixNano()))
+	wGR1 := httptest.NewRecorder()
+	router.ServeHTTP(wGR1, reqGR1)
+	require.Equal(t, http.StatusCreated, wGR1.Code)
+
+	assert.Equal(t, initialStock+60, stockForSKU(t, db, "SKU-OIL-01"))
+	assertPOStatus(t, db, createdPO.ID, "PARTIALLY_RECEIVED")
+
+	// Step 4: Attempt to receive 41 units (remaining is only 40) -> Must fail with 422 RECEIPT_RECONCILIATION_FAILED
+	grReqOver := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Over-receipt attempt: 41 units",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID, ReceivedQuantity: 41},
+		},
+	}
+	grBodyOver, _ := json.Marshal(grReqOver)
+	reqGROver := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBodyOver))
+	reqGROver.Header.Set("Content-Type", "application/json")
+	reqGROver.Header.Set("Idempotency-Key", fmt.Sprintf("gr-seq-over-%d", time.Now().UnixNano()))
+	wGROver := httptest.NewRecorder()
+	router.ServeHTTP(wGROver, reqGROver)
+	assert.Equal(t, http.StatusUnprocessableEntity, wGROver.Code)
+	assert.Contains(t, wGROver.Body.String(), "RECEIPT_RECONCILIATION_FAILED")
+	// Verify stock unchanged
+	assert.Equal(t, initialStock+60, stockForSKU(t, db, "SKU-OIL-01"))
+	assertPOStatus(t, db, createdPO.ID, "PARTIALLY_RECEIVED")
+
+	// Step 5: Receive exactly remaining 40 units -> PO status must transition to RECEIVED
+	grReq2 := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Batch 2: remaining 40 units",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID, ReceivedQuantity: 40},
+		},
+	}
+	grBody2, _ := json.Marshal(grReq2)
+	reqGR2 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody2))
+	reqGR2.Header.Set("Content-Type", "application/json")
+	reqGR2.Header.Set("Idempotency-Key", fmt.Sprintf("gr-seq-2-%d", time.Now().UnixNano()))
+	wGR2 := httptest.NewRecorder()
+	router.ServeHTTP(wGR2, reqGR2)
+	require.Equal(t, http.StatusCreated, wGR2.Code)
+
+	assert.Equal(t, initialStock+100, stockForSKU(t, db, "SKU-OIL-01"))
+	assertPOStatus(t, db, createdPO.ID, "RECEIVED")
+}
+
+func TestSupplyChain_ReceivingReconciliation_MultiLineOrder(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// Step 1: Create supplier
+	supplierReq := supplychain.CreateSupplierRequest{
+		Code:          fmt.Sprintf("SUP-MULTI-%d", time.Now().UnixNano()),
+		CompanyName:   "PT Multi Pangan Segar",
+		ContactPerson: "Hendra",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertType:          "HALAL_MUI",
+			CertificateNumber: fmt.Sprintf("CERT-MULTI-%d", time.Now().UnixNano()),
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Daging dan Ayam Segar",
+			ValidFrom:         time.Now().AddDate(0, 0, -1).Format("2006-01-02"),
+			ExpiryDate:        time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
+		},
+	}
+	body, _ := json.Marshal(supplierReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("sup-multi-key-%d", time.Now().UnixNano()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var supplierResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &supplierResp))
+	var createdSupplier supplychain.Supplier
+	require.NoError(t, json.Unmarshal(supplierResp.Data, &createdSupplier))
+
+	certID := createdSupplier.ComplianceCertificate.ID.String()
+
+	// Step 2: PO with 2 lines: Beef (qty 10) and Chicken (qty 20)
+	beefID := "10000000-0000-0000-0000-000000000001"
+	chickenID := "10000000-0000-0000-0000-000000000002"
+
+	poReq := supplychain.CreatePurchaseOrderRequest{
+		SupplierID:       createdSupplier.ID.String(),
+		ComplianceCertID: &certID,
+		Items: []supplychain.CreatePOItemRequest{
+			{ProductID: beefID, Quantity: 10, UnitCost: 50000},
+			{ProductID: chickenID, Quantity: 20, UnitCost: 25000},
+		},
+	}
+	poBody, _ := json.Marshal(poReq)
+	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-multi-key-%d", time.Now().UnixNano()))
+	wPO := httptest.NewRecorder()
+	router.ServeHTTP(wPO, reqPO)
+	require.Equal(t, http.StatusCreated, wPO.Code)
+
+	var poResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wPO.Body.Bytes(), &poResp))
+	var createdPO supplychain.PurchaseOrder
+	require.NoError(t, json.Unmarshal(poResp.Data, &createdPO))
+
+	beefInitial := stockForSKU(t, db, "SKU-BEEF-01")
+	chickenInitial := stockForSKU(t, db, "SKU-CHICKEN-01")
+
+	// Step 3: Receive 100% of beef line, but 0% of chicken line
+	grReq1 := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Beef fully delivered",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: beefID, ReceivedQuantity: 10},
+		},
+	}
+	grBody1, _ := json.Marshal(grReq1)
+	reqGR1 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
+	reqGR1.Header.Set("Content-Type", "application/json")
+	reqGR1.Header.Set("Idempotency-Key", fmt.Sprintf("gr-multi-1-%d", time.Now().UnixNano()))
+	wGR1 := httptest.NewRecorder()
+	router.ServeHTTP(wGR1, reqGR1)
+	require.Equal(t, http.StatusCreated, wGR1.Code)
+
+	assert.Equal(t, beefInitial+10, stockForSKU(t, db, "SKU-BEEF-01"))
+	assert.Equal(t, chickenInitial, stockForSKU(t, db, "SKU-CHICKEN-01"))
+	// PO MUST remain PARTIALLY_RECEIVED because Chicken is not yet fulfilled
+	assertPOStatus(t, db, createdPO.ID, "PARTIALLY_RECEIVED")
+
+	// Step 4: Receive remaining chicken line (20 units) -> PO should now transition to RECEIVED
+	grReq2 := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Chicken fully delivered",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: chickenID, ReceivedQuantity: 20},
+		},
+	}
+	grBody2, _ := json.Marshal(grReq2)
+	reqGR2 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody2))
+	reqGR2.Header.Set("Content-Type", "application/json")
+	reqGR2.Header.Set("Idempotency-Key", fmt.Sprintf("gr-multi-2-%d", time.Now().UnixNano()))
+	wGR2 := httptest.NewRecorder()
+	router.ServeHTTP(wGR2, reqGR2)
+	require.Equal(t, http.StatusCreated, wGR2.Code)
+
+	assert.Equal(t, beefInitial+10, stockForSKU(t, db, "SKU-BEEF-01"))
+	assert.Equal(t, chickenInitial+20, stockForSKU(t, db, "SKU-CHICKEN-01"))
+	// Now all lines are 100% fulfilled
+	assertPOStatus(t, db, createdPO.ID, "RECEIVED")
+}
+
+func TestSupplyChain_ReceivingReconciliation_MissingInventoryFailsAndRollsBack(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// Step 1: Create a product WITHOUT an inventory row in tenant_al_barakah_mart
+	productID := uuid.New()
+	conn, err := db.Pool.Acquire(context.Background())
+	require.NoError(t, err)
+	_, err = conn.Exec(context.Background(), `
+		INSERT INTO tenant_al_barakah_mart.products (id, sku, name, unit_price, cost_price, is_active)
+		VALUES ($1, $2, 'Ghost Product Without Inventory', 10000, 8000, true)
+	`, productID, fmt.Sprintf("SKU-GHOST-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	conn.Release()
+
+	// Step 2: Create supplier and PO referencing this ghost product
+	supplierReq := supplychain.CreateSupplierRequest{
+		Code:          fmt.Sprintf("SUP-GHOST-%d", time.Now().UnixNano()),
+		CompanyName:   "PT Ghost Supply",
+		ContactPerson: "Casper",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertType:          "HALAL_MUI",
+			CertificateNumber: fmt.Sprintf("CERT-GHOST-%d", time.Now().UnixNano()),
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Ghost Supply Halal",
+			ValidFrom:         time.Now().AddDate(0, 0, -1).Format("2006-01-02"),
+			ExpiryDate:        time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
+		},
+	}
+	body, _ := json.Marshal(supplierReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("sup-ghost-key-%d", time.Now().UnixNano()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var supplierResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &supplierResp))
+	var createdSupplier supplychain.Supplier
+	require.NoError(t, json.Unmarshal(supplierResp.Data, &createdSupplier))
+
+	certID := createdSupplier.ComplianceCertificate.ID.String()
+
+	poReq := supplychain.CreatePurchaseOrderRequest{
+		SupplierID:       createdSupplier.ID.String(),
+		ComplianceCertID: &certID,
+		Items: []supplychain.CreatePOItemRequest{
+			{ProductID: productID.String(), Quantity: 15, UnitCost: 8000},
+		},
+	}
+	poBody, _ := json.Marshal(poReq)
+	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-ghost-key-%d", time.Now().UnixNano()))
+	wPO := httptest.NewRecorder()
+	router.ServeHTTP(wPO, reqPO)
+	require.Equal(t, http.StatusCreated, wPO.Code)
+
+	var poResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wPO.Body.Bytes(), &poResp))
+	var createdPO supplychain.PurchaseOrder
+	require.NoError(t, json.Unmarshal(poResp.Data, &createdPO))
+
+	// Step 3: Attempt Goods Receipt on ghost product -> Must fail with 422 INVENTORY_RECORD_NOT_FOUND
+	grReq := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Delivery of ghost item",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID.String(), ReceivedQuantity: 15},
+		},
+	}
+	grBody, _ := json.Marshal(grReq)
+	reqGR := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody))
+	reqGR.Header.Set("Content-Type", "application/json")
+	reqGR.Header.Set("Idempotency-Key", fmt.Sprintf("gr-ghost-key-%d", time.Now().UnixNano()))
+	wGR := httptest.NewRecorder()
+	router.ServeHTTP(wGR, reqGR)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, wGR.Code)
+	assert.Contains(t, wGR.Body.String(), "INVENTORY_RECORD_NOT_FOUND")
+
+	// Verify PO status remained ISSUED (clean atomic rollback)
+	assertPOStatus(t, db, createdPO.ID, "ISSUED")
+
+	// Verify no goods receipt was saved in database
+	conn2, err := db.Pool.Acquire(context.Background())
+	require.NoError(t, err)
+	defer conn2.Release()
+	var grCount int
+	err = conn2.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM tenant_al_barakah_mart.goods_receipts WHERE purchase_order_id = $1
+	`, createdPO.ID).Scan(&grCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, grCount, "goods receipt must not exist after rollback")
+}

@@ -2648,6 +2648,64 @@
                     "response": []
                 },
                 {
+                    "name": "Create Goods Receipt (Inbound Stock Restock)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "if(pm.response.code === 201 && jsonData.data && jsonData.data.id) {",
+                                    "    pm.collectionVariables.set(\"ab_gr_id\", jsonData.data.id);",
+                                    "}",
+                                    "pm.test(\"Status code is 201 or 422\", function () {",
+                                    "    pm.expect(pm.response.code).to.be.oneOf([201, 422]);",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"purchase_order_id\": \"{{ab_po_id}}\",\n    \"notes\": \"Delivery batch received in good condition\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"received_quantity\": 10\n        }\n    ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/goods-receipts",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "goods-receipts"
+                            ]
+                        },
+                        "description": "Receives ordered items into inventory with deterministic row locking and atomic stock increments. Validates compliance status, closes PO to RECEIVED when 100% fulfilled, posts balanced double-entry ledger journal, and rolls back cleanly if inventory records or compliance fail."
+                    },
+                    "response": []
+                },
+                {
                     "name": "List Goods Receipts",
                     "request": {
                         "method": "GET",
