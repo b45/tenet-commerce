@@ -504,5 +504,29 @@ export interface TranslationSchema {
     };
     unauthorizedTitle: string;
     unauthorizedDesc: string;
+    receiving: {
+      title: string;
+      remaining: string;
+      deliveredQty: string;
+      acceptedQty: string;
+      rejectedQty: string;
+      rejectionReason: string;
+      rejectionReasonPlaceholder: string;
+      notes: string;
+      notesPlaceholder: string;
+      cancel: string;
+      submit: string;
+      qcNotice: string;
+      successTitle: string;
+      grNumber: string;
+      done: string;
+      errors: {
+        deliveredPositive: string;
+        arithmeticMismatch: string;
+        exceedsRemaining: string;
+        qcReasonRequired: string;
+        failed: string;
+      };
+    };
   };
 }
