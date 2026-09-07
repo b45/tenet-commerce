@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -343,6 +344,12 @@ func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, po
 			ReceivedQuantity: requestItem.ReceivedQuantity,
 		})
 	}
+
+	// Sort items deterministically by Product ID to enforce a consistent row-lock order
+	// and eliminate deadlock risks across concurrent inventory updates.
+	sort.Slice(gr.Items, func(i, j int) bool {
+		return gr.Items[i].ProductID.String() < gr.Items[j].ProductID.String()
+	})
 
 	if !inboundMoney.IsPositive() {
 		return 0, false, ErrZeroValueReceipt

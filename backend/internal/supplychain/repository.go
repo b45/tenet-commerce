@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("record not found")
+	ErrNotFound          = errors.New("record not found")
+	ErrInventoryNotFound = errors.New("inventory record not found for product")
 )
 
 type queryRower interface {
@@ -318,9 +319,12 @@ func (r *Repository) CreateGoodsReceipt(ctx context.Context, tx pgx.Tx, gr *Good
 			SET stock_quantity = stock_quantity + $1, updated_at = NOW()
 			WHERE product_id = $2
 		`
-		_, err = tx.Exec(ctx, queryStock, item.ReceivedQuantity, item.ProductID)
+		cmdTag, err := tx.Exec(ctx, queryStock, item.ReceivedQuantity, item.ProductID)
 		if err != nil {
 			return err
+		}
+		if cmdTag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: %s", ErrInventoryNotFound, item.ProductID)
 		}
 	}
 	return nil

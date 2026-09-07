@@ -760,6 +760,8 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 - **State Transition & Reconciliation Rules:**
   - PO status must be `ISSUED` or `PARTIALLY_RECEIVED`.
   - Serialized row lock (`SELECT ... FOR UPDATE`) prevents concurrent double-receiving.
+  - Inventory items are locked and updated deterministically ordered by `product_id` to eliminate deadlock risks.
+  - If a received product does not exist in the tenant's inventory table, the operation is rejected and rolled back with zero state mutation.
   - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments.
   - Receipt quantities must not exceed unreceived outstanding quantities on the PO.
   - If cumulative received quantities match ordered quantities across all PO lines, PO status transitions to `RECEIVED`; otherwise it transitions to `PARTIALLY_RECEIVED`.
@@ -768,7 +770,7 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 - **Error Responses:**
   - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`)
   - `409 Conflict` (`IDEMPOTENCY_KEY_CONFLICT`, `INVALID_PO_STATUS`)
-  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `COMPLIANCE_ERROR`)
+  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `INVENTORY_RECORD_NOT_FOUND`, `COMPLIANCE_ERROR`)
 
 ### 4.4 List Suppliers
 - **Endpoint:** `GET /api/v1/supply-chain/suppliers`
