@@ -222,6 +222,49 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.inventory (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 5.3.1 Stock Movements Table (Append-Only Audit Trail)
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE RESTRICT,
+    warehouse_location VARCHAR(127) NOT NULL DEFAULT 'MAIN_STORE',
+    quantity_delta INTEGER NOT NULL,
+    movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN ('OPENING', 'IN', 'OUT', 'ADJUSTMENT')),
+    source_document_type VARCHAR(63) NOT NULL,
+    source_document_id UUID,
+    source_document_line_id UUID,
+    actor_id UUID,
+    reason TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_stock_movement_direction CHECK (
+        (movement_type = 'OPENING' AND quantity_delta >= 0) OR
+        (movement_type = 'IN' AND quantity_delta > 0) OR
+        (movement_type = 'OUT' AND quantity_delta < 0) OR
+        (movement_type = 'ADJUSTMENT' AND quantity_delta <> 0)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_movement_source_al_barakah ON tenant_al_barakah_mart.stock_movements (
+    source_document_type,
+    COALESCE(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(source_document_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product_occurred_al_barakah ON tenant_al_barakah_mart.stock_movements (product_id, occurred_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_source_al_barakah ON tenant_al_barakah_mart.stock_movements (source_document_type, source_document_id);
+
+CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.prevent_stock_movements_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Stock movement violation: Posted stock movements are strictly append-only and cannot be updated or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_stock_movements ON tenant_al_barakah_mart.stock_movements;
+CREATE TRIGGER trg_immutable_stock_movements
+BEFORE UPDATE OR DELETE ON tenant_al_barakah_mart.stock_movements
+FOR EACH ROW EXECUTE FUNCTION tenant_al_barakah_mart.prevent_stock_movements_mutation();
+
 -- 5.4 Transactions Table
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -630,6 +673,49 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.inventory (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 6.3.1 Stock Movements Table (Append-Only Audit Trail)
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE RESTRICT,
+    warehouse_location VARCHAR(127) NOT NULL DEFAULT 'MAIN_STORE',
+    quantity_delta INTEGER NOT NULL,
+    movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN ('OPENING', 'IN', 'OUT', 'ADJUSTMENT')),
+    source_document_type VARCHAR(63) NOT NULL,
+    source_document_id UUID,
+    source_document_line_id UUID,
+    actor_id UUID,
+    reason TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_stock_movement_direction CHECK (
+        (movement_type = 'OPENING' AND quantity_delta >= 0) OR
+        (movement_type = 'IN' AND quantity_delta > 0) OR
+        (movement_type = 'OUT' AND quantity_delta < 0) OR
+        (movement_type = 'ADJUSTMENT' AND quantity_delta <> 0)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_movement_source_darussalam ON tenant_darussalam_store.stock_movements (
+    source_document_type,
+    COALESCE(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(source_document_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product_occurred_darussalam ON tenant_darussalam_store.stock_movements (product_id, occurred_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_source_darussalam ON tenant_darussalam_store.stock_movements (source_document_type, source_document_id);
+
+CREATE OR REPLACE FUNCTION tenant_darussalam_store.prevent_stock_movements_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Stock movement violation: Posted stock movements are strictly append-only and cannot be updated or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_stock_movements ON tenant_darussalam_store.stock_movements;
+CREATE TRIGGER trg_immutable_stock_movements
+BEFORE UPDATE OR DELETE ON tenant_darussalam_store.stock_movements
+FOR EACH ROW EXECUTE FUNCTION tenant_darussalam_store.prevent_stock_movements_mutation();
+
 -- 6.4 Transactions Table
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1008,6 +1094,83 @@ BEGIN
         EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT', tenant_schema);
         EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancelled_by UUID', tenant_schema);
         EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ', tenant_schema);
+
+        -- TPC-014: Append-only stock movements and opening balance cutover
+        EXECUTE format('CREATE TABLE IF NOT EXISTS %I.stock_movements (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            product_id UUID NOT NULL REFERENCES %I.products(id) ON DELETE RESTRICT,
+            warehouse_location VARCHAR(127) NOT NULL DEFAULT ''MAIN_STORE'',
+            quantity_delta INTEGER NOT NULL,
+            movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN (''OPENING'', ''IN'', ''OUT'', ''ADJUSTMENT'')),
+            source_document_type VARCHAR(63) NOT NULL,
+            source_document_id UUID,
+            source_document_line_id UUID,
+            actor_id UUID,
+            reason TEXT,
+            occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT chk_stock_movement_direction CHECK (
+                (movement_type = ''OPENING'' AND quantity_delta >= 0) OR
+                (movement_type = ''IN'' AND quantity_delta > 0) OR
+                (movement_type = ''OUT'' AND quantity_delta < 0) OR
+                (movement_type = ''ADJUSTMENT'' AND quantity_delta <> 0)
+            )
+        )', tenant_schema, tenant_schema);
+
+        EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_movement_source_%s ON %I.stock_movements (
+            source_document_type,
+            COALESCE(source_document_id, ''00000000-0000-0000-0000-000000000000''::uuid),
+            COALESCE(source_document_line_id, ''00000000-0000-0000-0000-000000000000''::uuid)
+        )', tenant_schema, tenant_schema);
+
+        EXECUTE format('CREATE INDEX IF NOT EXISTS idx_stock_movements_product_occurred_%s ON %I.stock_movements (product_id, occurred_at DESC, created_at DESC)', tenant_schema, tenant_schema);
+        EXECUTE format('CREATE INDEX IF NOT EXISTS idx_stock_movements_source_%s ON %I.stock_movements (source_document_type, source_document_id)', tenant_schema, tenant_schema);
+
+        EXECUTE format($ddl$
+            CREATE OR REPLACE FUNCTION %I.prevent_stock_movements_mutation()
+            RETURNS TRIGGER AS $body$
+            BEGIN
+                RAISE EXCEPTION 'Stock movement violation: Posted stock movements are strictly append-only and cannot be updated or deleted.';
+            END;
+            $body$ LANGUAGE plpgsql
+        $ddl$, tenant_schema);
+
+        EXECUTE format('DROP TRIGGER IF EXISTS trg_immutable_stock_movements ON %I.stock_movements', tenant_schema);
+        EXECUTE format('CREATE TRIGGER trg_immutable_stock_movements BEFORE UPDATE OR DELETE ON %I.stock_movements FOR EACH ROW EXECUTE FUNCTION %I.prevent_stock_movements_mutation()', tenant_schema, tenant_schema);
+
+        -- Backfill OPENING balance cutoff without double counting or zero deltas
+        EXECUTE format('
+            INSERT INTO %I.stock_movements (
+                product_id,
+                warehouse_location,
+                quantity_delta,
+                movement_type,
+                source_document_type,
+                source_document_id,
+                source_document_line_id,
+                reason,
+                occurred_at,
+                created_at
+            )
+            SELECT
+                i.product_id,
+                COALESCE(i.warehouse_location, ''MAIN_STORE''),
+                i.stock_quantity,
+                ''OPENING'',
+                ''OPENING_BALANCE'',
+                i.product_id,
+                NULL,
+                ''Initial opening stock cutover'',
+                i.updated_at,
+                NOW()
+            FROM %I.inventory i
+            WHERE i.stock_quantity > 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM %I.stock_movements sm
+                  WHERE sm.product_id = i.product_id
+                    AND sm.movement_type = ''OPENING''
+              )
+        ', tenant_schema, tenant_schema, tenant_schema);
     END LOOP;
 END;
 $upgrade$;
