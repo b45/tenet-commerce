@@ -255,6 +255,7 @@ type GoodsReceiptDetailItem struct {
 	InspectedAt       *time.Time `json:"inspected_at,omitempty"`
 	UnitCost          float64    `json:"unit_cost"`
 	SubtotalValuation float64    `json:"subtotal_valuation"`
+	StockMovementID   *uuid.UUID `json:"stock_movement_id,omitempty"`
 }
 
 

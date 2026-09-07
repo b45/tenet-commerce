@@ -1118,6 +1118,227 @@ func TestSupplyChain_InlineQualityChecks(t *testing.T) {
 		assert.Equal(t, "PARTIAL_ACCEPT", gr1Detail.Items[0].QCOutcome)
 		assert.Equal(t, 55*50000.0, gr1Detail.TotalValuation)
 		assert.NotNil(t, gr1Detail.LedgerEntryNumber)
+		assert.NotNil(t, gr1Detail.Items[0].StockMovementID, "stock movement ID must be linked on accepted goods receipt detail item")
+	}
+}
+
+func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router := setupSupplyChainTestRouter(t, db)
+
+	// Step 1: Create Supplier with Valid Halal Certificate
+	supplierCode := fmt.Sprintf("SUP-SM-%d", time.Now().UnixNano())
+	supplierReq := supplychain.CreateSupplierRequest{
+		Code:          supplierCode,
+		CompanyName:   "PT Movement Halal",
+		ContactPerson: "Ahmad SM",
+		ContactEmail:  "sm@halal.test",
+		ContactPhone:  "081234567890",
+		ComplianceCertificate: &supplychain.CreateComplianceCertRequest{
+			CertificateNumber: fmt.Sprintf("CERT-HALAL-%d", time.Now().UnixNano()),
+			CertType:          "HALAL_MUI",
+			IssuingAuthority:  "BPJPH",
+			Scope:             "Daging Sapi Halal Segar",
+			ValidFrom:         time.Now().AddDate(0, 0, -5).Format("2006-01-02"),
+			ExpiryDate:        time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
+		},
+	}
+	sBody, err := json.Marshal(supplierReq)
+	require.NoError(t, err)
+
+	wSup := httptest.NewRecorder()
+	reqSup := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(sBody))
+	reqSup.Header.Set("Content-Type", "application/json")
+	reqSup.Header.Set("Idempotency-Key", fmt.Sprintf("sup-sm-%d", time.Now().UnixNano()))
+	router.ServeHTTP(wSup, reqSup)
+	require.Equal(t, http.StatusCreated, wSup.Code)
+
+	var sResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wSup.Body.Bytes(), &sResp))
+	var createdSupplier supplychain.Supplier
+	require.NoError(t, json.Unmarshal(sResp.Data, &createdSupplier))
+	require.NotNil(t, createdSupplier.ComplianceCertificate)
+	certID := createdSupplier.ComplianceCertificate.ID.String()
+
+	// Step 2: Create Purchase Order for 100 units of Beef (10000000-0000-0000-0000-000000000001)
+	productID := "10000000-0000-0000-0000-000000000001"
+	poReq := supplychain.CreatePurchaseOrderRequest{
+		SupplierID:       createdSupplier.ID.String(),
+		ComplianceCertID: &certID,
+		Items: []supplychain.CreatePOItemRequest{
+			{
+				ProductID: productID,
+				Quantity:  100,
+				UnitCost:  40000,
+			},
+		},
+	}
+	poBody, err := json.Marshal(poReq)
+	require.NoError(t, err)
+
+	wPO := httptest.NewRecorder()
+	reqPO := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(poBody))
+	reqPO.Header.Set("Content-Type", "application/json")
+	reqPO.Header.Set("Idempotency-Key", fmt.Sprintf("po-sm-%d", time.Now().UnixNano()))
+	router.ServeHTTP(wPO, reqPO)
+	require.Equal(t, http.StatusCreated, wPO.Code)
+
+	var poResp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wPO.Body.Bytes(), &poResp))
+	var createdPO supplychain.PurchaseOrder
+	require.NoError(t, json.Unmarshal(poResp.Data, &createdPO))
+	require.Equal(t, "ISSUED", createdPO.Status)
+
+	initialStock := stockForSKU(t, db, "SKU-BEEF-01")
+
+	// Step 3: Partial Receipt 1 (60 units accepted)
+	grKey1 := fmt.Sprintf("gr-sm-key-%d-1", time.Now().UnixNano())
+	grReq1 := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Batch 1: 60 units accepted",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID, ReceivedQuantity: 60},
+		},
+	}
+	grBody1, _ := json.Marshal(grReq1)
+	wGR1 := httptest.NewRecorder()
+	reqGR1 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
+	reqGR1.Header.Set("Content-Type", "application/json")
+	reqGR1.Header.Set("Idempotency-Key", grKey1)
+	router.ServeHTTP(wGR1, reqGR1)
+	require.Equal(t, http.StatusCreated, wGR1.Code)
+
+	var gr1Resp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wGR1.Body.Bytes(), &gr1Resp))
+	var gr1 supplychain.GoodsReceipt
+	require.NoError(t, json.Unmarshal(gr1Resp.Data, &gr1))
+	require.Len(t, gr1.Items, 1)
+
+	// Invariant assertion: Stock + 60
+	assert.Equal(t, initialStock+60, stockForSKU(t, db, "SKU-BEEF-01"))
+	assertPOStatus(t, db, createdPO.ID, "PARTIALLY_RECEIVED")
+
+	// Verify stock movement 1 in DB
+	func() {
+		conn, err := db.Pool.Acquire(context.Background())
+		require.NoError(t, err)
+		defer conn.Release()
+
+		var count int
+		var delta int
+		var movType, srcType, location string
+		var srcDocID, srcLineID uuid.UUID
+		err = conn.QueryRow(context.Background(), `
+			SELECT count(*) OVER(), quantity_delta, movement_type, source_document_type, warehouse_location, source_document_id, source_document_line_id
+			FROM tenant_al_barakah_mart.stock_movements
+			WHERE source_document_type = 'GOODS_RECEIPT' AND source_document_id = $1
+			LIMIT 1
+		`, gr1.ID).Scan(&count, &delta, &movType, &srcType, &location, &srcDocID, &srcLineID)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "exactly one stock movement must exist for GR1")
+		assert.Equal(t, 60, delta)
+		assert.Equal(t, "IN", movType)
+		assert.Equal(t, "GOODS_RECEIPT", srcType)
+		assert.Equal(t, "MAIN_STORE", location)
+		assert.Equal(t, gr1.ID, srcDocID)
+		assert.Equal(t, gr1.Items[0].ID, srcLineID)
+	}()
+
+	// Step 4: Idempotent replay of GR1 must NOT add another stock movement or duplicate stock
+	{
+		wGR1Replay := httptest.NewRecorder()
+		reqGR1Replay := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
+		reqGR1Replay.Header.Set("Content-Type", "application/json")
+		reqGR1Replay.Header.Set("Idempotency-Key", grKey1)
+		router.ServeHTTP(wGR1Replay, reqGR1Replay)
+		assert.Contains(t, []int{http.StatusOK, http.StatusCreated}, wGR1Replay.Code)
+
+		// Stock unchanged
+		assert.Equal(t, initialStock+60, stockForSKU(t, db, "SKU-BEEF-01"))
+
+		// Movement count unchanged
+		conn, err := db.Pool.Acquire(context.Background())
+		require.NoError(t, err)
+		defer conn.Release()
+		var count int
+		err = conn.QueryRow(context.Background(), `
+			SELECT COUNT(*) FROM tenant_al_barakah_mart.stock_movements
+			WHERE source_document_type = 'GOODS_RECEIPT' AND source_document_id = $1
+		`, gr1.ID).Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "replayed GR must not duplicate stock movements")
+	}
+
+	// Step 5: Partial Receipt 2 (remaining 40 units accepted)
+	grKey2 := fmt.Sprintf("gr-sm-key-%d-2", time.Now().UnixNano())
+	grReq2 := supplychain.CreateGoodsReceiptRequest{
+		PurchaseOrderID: createdPO.ID.String(),
+		Notes:           "Batch 2: remaining 40 units accepted",
+		Items: []supplychain.CreateGRItemRequest{
+			{ProductID: productID, ReceivedQuantity: 40},
+		},
+	}
+	grBody2, _ := json.Marshal(grReq2)
+	wGR2 := httptest.NewRecorder()
+	reqGR2 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody2))
+	reqGR2.Header.Set("Content-Type", "application/json")
+	reqGR2.Header.Set("Idempotency-Key", grKey2)
+	router.ServeHTTP(wGR2, reqGR2)
+	require.Equal(t, http.StatusCreated, wGR2.Code)
+
+	var gr2Resp apiResponseEnvelope
+	require.NoError(t, json.Unmarshal(wGR2.Body.Bytes(), &gr2Resp))
+	var gr2 supplychain.GoodsReceipt
+	require.NoError(t, json.Unmarshal(gr2Resp.Data, &gr2))
+
+	// Invariant: PO 100 with partial receipts (60 then 40) creates exactly two movements (+60, +40) and total on_hand increases by 100
+	assert.Equal(t, initialStock+100, stockForSKU(t, db, "SKU-BEEF-01"))
+	assertPOStatus(t, db, createdPO.ID, "RECEIVED")
+
+	func() {
+		conn, err := db.Pool.Acquire(context.Background())
+		require.NoError(t, err)
+		defer conn.Release()
+
+		var totalMovements int
+		var totalDelta int
+		err = conn.QueryRow(context.Background(), `
+			SELECT COUNT(*), COALESCE(SUM(quantity_delta), 0)
+			FROM tenant_al_barakah_mart.stock_movements
+			WHERE source_document_type = 'GOODS_RECEIPT' AND source_document_id IN ($1, $2)
+		`, gr1.ID, gr2.ID).Scan(&totalMovements, &totalDelta)
+		require.NoError(t, err)
+		assert.Equal(t, 2, totalMovements, "exactly two stock movements must exist across both GRs")
+		assert.Equal(t, 100, totalDelta, "sum of stock movement deltas must equal exactly 100")
+	}()
+
+	// Step 6: Verify GetGoodsReceiptDetail returns linked StockMovementID
+	{
+		wDetail := httptest.NewRecorder()
+		reqDetail := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/supply-chain/goods-receipts/%s", gr2.ID), nil)
+		router.ServeHTTP(wDetail, reqDetail)
+		require.Equal(t, http.StatusOK, wDetail.Code)
+
+		var detailResp apiResponseEnvelope
+		require.NoError(t, json.Unmarshal(wDetail.Body.Bytes(), &detailResp))
+		var detail supplychain.GoodsReceiptDetail
+		require.NoError(t, json.Unmarshal(detailResp.Data, &detail))
+		require.Len(t, detail.Items, 1)
+		require.NotNil(t, detail.Items[0].StockMovementID)
+
+		// Cross-check that the ID in detail matches the movement in stock_movements table
+		conn, err := db.Pool.Acquire(context.Background())
+		require.NoError(t, err)
+		defer conn.Release()
+
+		var matchedQuantity int
+		err = conn.QueryRow(context.Background(), `
+			SELECT quantity_delta
+			FROM tenant_al_barakah_mart.stock_movements
+			WHERE id = $1
+		`, *detail.Items[0].StockMovementID).Scan(&matchedQuantity)
+		require.NoError(t, err)
+		assert.Equal(t, 40, matchedQuantity)
 	}
 }
 
