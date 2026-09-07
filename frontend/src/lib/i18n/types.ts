@@ -642,6 +642,24 @@ export interface TranslationSchema {
         failed: string;
       };
     };
+    purchaseOrder: {
+      title: string;
+      create: string;
+      orderNumber: string;
+      supplier: string;
+      status: string;
+      total: string;
+      product: string;
+      quantity: string;
+      remaining: string;
+      unitCost: string;
+      select: string;
+      empty: string;
+      cancel: string;
+      cancelReason: string;
+      error: string;
+      created: string;
+    };
   };
   ledger: {
     title: string;
@@ -711,4 +729,3 @@ export interface TranslationSchema {
     unauthorizedDesc: string;
   };
 }
-
