@@ -437,6 +437,7 @@ export const ar: TranslationSchema = {
       noCertificate: "لا توجد شهادة",
       viewHistory: "سجل التدقيق",
       renewCert: "تجديد الشهادة",
+      createPO: "إنشاء أمر شراء",
     },
     status: {
       valid: "شهادة صالحة",

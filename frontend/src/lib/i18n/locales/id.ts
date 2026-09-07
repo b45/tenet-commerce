@@ -437,6 +437,7 @@ export const id: TranslationSchema = {
       noCertificate: "Belum Ada Sertifikat",
       viewHistory: "Riwayat Audit",
       renewCert: "Perbarui Sertifikat",
+      createPO: "Buat PO",
     },
     status: {
       valid: "Sertifikat Valid",

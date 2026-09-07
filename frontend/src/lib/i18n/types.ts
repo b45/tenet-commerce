@@ -451,6 +451,7 @@ export interface TranslationSchema {
       noCertificate: string;
       viewHistory: string;
       renewCert: string;
+      createPO: string;
     };
     status: {
       valid: string;
