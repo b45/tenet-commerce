@@ -773,7 +773,7 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
   - PO status must be `ISSUED` or `PARTIALLY_RECEIVED`.
   - Inline QC arithmetic is strictly enforced before database side effects: `delivered_quantity = accepted_quantity + rejected_quantity`. If `rejected_quantity > 0`, `qc_reason` is required.
   - Delivered quantity must not exceed unreceived outstanding quantity on the PO.
-  - **Stock Increment:** ONLY `accepted_quantity` increments inventory stock. Rejected goods never enter inventory.
+  - **Stock Increment & Traceability:** ONLY `accepted_quantity` increments inventory stock. Inbound increments are recorded atomically via `stock_movements` (`source_document_type = 'GOODS_RECEIPT'`, `source_document_id = gr.id`, `source_document_line_id = gri.id`), ensuring immutable auditability and traceability back to each receipt line item. Rejected goods never enter inventory.
   - **PO Outstanding:** ONLY `accepted_quantity` reduces outstanding quantity. If all lines have `accepted_cumulative == ordered`, PO status transitions to `RECEIVED`; if some units are accepted, it transitions to `PARTIALLY_RECEIVED`; if all delivered units are rejected (`accepted=0`), PO status remains unchanged.
   - **Accounting Postings:** Inbound monetary valuation is derived solely from `accepted_quantity * unit_cost`. If `inboundValue > 0`, an automated balanced ledger journal is posted (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`). If all delivered units are rejected (`inboundValue == 0`), ledger journal posting is skipped.
   - Serialized row lock (`SELECT ... FOR UPDATE`) prevents concurrent double-receiving.
