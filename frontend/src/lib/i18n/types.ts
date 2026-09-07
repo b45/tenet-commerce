@@ -643,4 +643,72 @@ export interface TranslationSchema {
       };
     };
   };
+  ledger: {
+    title: string;
+    subtitle: string;
+    tabs: {
+      entries: string;
+      accounts: string;
+      trialBalance: string;
+    };
+    entries: {
+      title: string;
+      entryNumber: string;
+      date: string;
+      sourceDoc: string;
+      memo: string;
+      status: string;
+      debit: string;
+      credit: string;
+      actions: string;
+      viewDetail: string;
+      emptyState: string;
+      balanced: string;
+      unbalanced: string;
+      postedStatus: string;
+      reversedStatus: string;
+    };
+    detail: {
+      title: string;
+      entryInfo: string;
+      linesTitle: string;
+      accountCode: string;
+      accountName: string;
+      debit: string;
+      credit: string;
+      total: string;
+      sourceDocument: string;
+      viewSource: string;
+      close: string;
+      reversedNotice: string;
+    };
+    accounts: {
+      title: string;
+      code: string;
+      name: string;
+      type: string;
+      zakatEligible: string;
+      status: string;
+      activeStatus: string;
+      inactiveStatus: string;
+      emptyState: string;
+    };
+    trialBalance: {
+      title: string;
+      asOfDate: string;
+      accountCode: string;
+      accountName: string;
+      accountType: string;
+      totalDebit: string;
+      totalCredit: string;
+      netBalance: string;
+      total: string;
+      isBalanced: string;
+      needsReconciliation: string;
+      emptyState: string;
+    };
+    unauthorizedTitle: string;
+    unauthorizedDesc: string;
+  };
 }
+
