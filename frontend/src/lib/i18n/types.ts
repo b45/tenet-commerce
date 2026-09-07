@@ -235,11 +235,33 @@ export interface TranslationSchema {
     refresh: string;
     unit: string;
     close: string;
+    overviewCard: {
+      title: string;
+      totalSkus: string;
+      totalUnits: string;
+      lowStock: string;
+      outOfStock: string;
+      location: string;
+      asOf: string;
+    };
+    procurementDraft: {
+      action: string;
+      title: string;
+      description: string;
+      supplierLabel: string;
+      productLabel: string;
+      thresholdNotice: string;
+      suggestedQty: string;
+      createPOButton: string;
+      close: string;
+      successMessage: string;
+    };
     lowStockBanner: {
       alertTitle: string;
       alertMessage: string;
       viewItems: string;
       dismiss: string;
+      reorderAction: string;
     };
     table: {
       sku: string;
@@ -258,9 +280,50 @@ export interface TranslationSchema {
       emptyDescription: string;
       editAction: string;
       adjustAction: string;
+      stockCardAction: string;
+      procureAction: string;
       deleteAction: string;
       loading: string;
       generalCategory: string;
+    };
+    stockCardModal: {
+      title: string;
+      subtitle: string;
+      openingBalance: string;
+      closingBalance: string;
+      currentStock: string;
+      totalMovements: string;
+      filterDate: string;
+      filterAllDates: string;
+      startDate: string;
+      endDate: string;
+      applyFilter: string;
+      resetFilter: string;
+      columns: {
+        dateTime: string;
+        type: string;
+        sourceDoc: string;
+        quantityDelta: string;
+        runningBalance: string;
+        actorOrReason: string;
+      };
+      movementTypes: {
+        opening: string;
+        inbound: string;
+        outbound: string;
+        adjustment: string;
+      };
+      sourceTypes: {
+        purchaseOrder: string;
+        goodsReceipt: string;
+        posTransaction: string;
+        stockOpname: string;
+        manual: string;
+      };
+      emptyMovements: string;
+      loading: string;
+      errorFetch: string;
+      close: string;
     };
     productModal: {
       createTitle: string;

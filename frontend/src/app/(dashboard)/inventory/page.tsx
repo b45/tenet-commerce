@@ -3,11 +3,14 @@
 import * as React from "react";
 import { useAuth } from "@/features/auth/hooks/use-auth";
 import { useInventory } from "@/features/inventory/hooks/use-inventory";
+import { StockOverviewBanner } from "@/features/inventory/components/stock-overview-banner";
 import { LowStockBanner } from "@/features/inventory/components/low-stock-banner";
 import { InventoryHeader } from "@/features/inventory/components/inventory-header";
 import { InventoryTable } from "@/features/inventory/components/inventory-table";
 import { ProductModal } from "@/features/inventory/components/product-modal";
 import { StockAdjustModal } from "@/features/inventory/components/stock-adjust-modal";
+import { StockCardModal } from "@/features/inventory/components/stock-card-modal";
+import { ProcurementDraftModal } from "@/features/inventory/components/procurement-draft-modal";
 import { ProductDeleteDialog } from "@/features/inventory/components/product-delete-dialog";
 import type { InventoryProduct } from "@/features/inventory/types";
 import { useTranslation } from "@/lib/i18n";
@@ -22,6 +25,7 @@ export default function InventoryPage() {
     filteredProducts,
     categories,
     lowStockItems,
+    stockOverview,
     loading,
     error,
     filters,
@@ -33,6 +37,7 @@ export default function InventoryPage() {
     createProduct,
     updateProduct,
     deleteProduct,
+    getStockCard,
   } = useInventory();
 
   // Modals state
@@ -41,6 +46,12 @@ export default function InventoryPage() {
 
   const [adjustModalOpen, setAdjustModalOpen] = React.useState(false);
   const [adjustingProduct, setAdjustingProduct] = React.useState<InventoryProduct | null>(null);
+
+  const [stockCardModalOpen, setStockCardModalOpen] = React.useState(false);
+  const [stockCardProduct, setStockCardProduct] = React.useState<InventoryProduct | null>(null);
+
+  const [procureModalOpen, setProcureModalOpen] = React.useState(false);
+  const [procureProduct, setProcureProduct] = React.useState<InventoryProduct | null>(null);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [deletingProduct, setDeletingProduct] = React.useState<InventoryProduct | null>(null);
@@ -69,6 +80,16 @@ export default function InventoryPage() {
   const handleOpenAdjustStock = (prod: InventoryProduct) => {
     setAdjustingProduct(prod);
     setAdjustModalOpen(true);
+  };
+
+  const handleOpenStockCard = (prod: InventoryProduct) => {
+    setStockCardProduct(prod);
+    setStockCardModalOpen(true);
+  };
+
+  const handleOpenProcureDraft = (prod: InventoryProduct) => {
+    setProcureProduct(prod);
+    setProcureModalOpen(true);
   };
 
   const handleOpenDeleteProduct = (prod: InventoryProduct) => {
@@ -100,6 +121,9 @@ export default function InventoryPage() {
         </div>
       )}
 
+      {/* Warehouse Inventory Overview Card */}
+      <StockOverviewBanner overview={stockOverview} isLoading={loading} />
+
       {/* Low Stock Alert Banner */}
       <LowStockBanner
         count={lowStockItems.length}
@@ -107,6 +131,9 @@ export default function InventoryPage() {
           setStockStatus(filters.stock_status === "low_stock" ? "all" : "low_stock")
         }
         isFilterActive={filters.stock_status === "low_stock"}
+        onOpenProcureAction={
+          lowStockItems.length > 0 ? () => handleOpenProcureDraft(lowStockItems[0]) : undefined
+        }
       />
 
       {/* Header & Controls */}
@@ -130,6 +157,8 @@ export default function InventoryPage() {
         onAdjustStock={handleOpenAdjustStock}
         onEditProduct={handleOpenEditProduct}
         onDeleteProduct={handleOpenDeleteProduct}
+        onOpenStockCard={handleOpenStockCard}
+        onOpenProcureDraft={handleOpenProcureDraft}
         canWrite={canWrite}
         isLoading={loading}
       />
@@ -172,6 +201,26 @@ export default function InventoryPage() {
             );
           }
           return res;
+        }}
+      />
+
+      {/* Stock Card Ledger Modal */}
+      <StockCardModal
+        isOpen={stockCardModalOpen}
+        onClose={() => setStockCardModalOpen(false)}
+        product={stockCardProduct}
+        onFetchStockCard={getStockCard}
+      />
+
+      {/* Low-Stock Procurement Reorder Draft Modal */}
+      <ProcurementDraftModal
+        isOpen={procureModalOpen}
+        onClose={() => setProcureModalOpen(false)}
+        product={procureProduct}
+        onConfirmDraft={(prod) => {
+          showFeedback(
+            t("inventory.procurementDraft.successMessage", { product: prod.name })
+          );
         }}
       />
 

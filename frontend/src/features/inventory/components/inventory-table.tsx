@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Edit2, Sliders, Trash2, ShieldCheck, AlertCircle, Package } from "lucide-react";
+import { Edit2, Sliders, Trash2, ShieldCheck, AlertCircle, Package, BookOpen, Truck } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
 import { formatIDR } from "@/lib/money";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +12,8 @@ interface InventoryTableProps {
   onAdjustStock: (product: InventoryProduct) => void;
   onEditProduct: (product: InventoryProduct) => void;
   onDeleteProduct: (product: InventoryProduct) => void;
+  onOpenStockCard: (product: InventoryProduct) => void;
+  onOpenProcureDraft: (product: InventoryProduct) => void;
   canWrite: boolean;
   isLoading: boolean;
 }
@@ -21,6 +23,8 @@ export function InventoryTable({
   onAdjustStock,
   onEditProduct,
   onDeleteProduct,
+  onOpenStockCard,
+  onOpenProcureDraft,
   canWrite,
   isLoading,
 }: InventoryTableProps) {
@@ -280,6 +284,30 @@ export function InventoryTable({
                   {/* Actions */}
                   <td className="px-5 py-3.5 text-right rtl:text-left">
                     <div className="flex items-center justify-end gap-1 rtl:justify-start">
+                      {/* View Stock Card Button */}
+                      <button
+                        type="button"
+                        onClick={() => onOpenStockCard(item)}
+                        title={t("inventory.table.stockCardAction")}
+                        aria-label={`${t("inventory.table.stockCardAction")} ${item.name}`}
+                        className="p-1.5 rounded-lg text-[#555D6E] hover:text-[#0066CC] hover:bg-[#F5F5F7] transition-colors"
+                      >
+                        <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+
+                      {/* Reorder / Procure Draft Button (especially visible for low stock or zero stock) */}
+                      {(isLowStock || isOutOfStock) && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenProcureDraft(item)}
+                          title={t("inventory.table.procureAction")}
+                          aria-label={`${t("inventory.table.procureAction")} ${item.name}`}
+                          className="p-1.5 rounded-lg text-amber-700 hover:text-amber-800 hover:bg-amber-50 transition-colors"
+                        >
+                          <Truck className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      )}
+
                       {/* Adjust Stock Button */}
                       <button
                         type="button"
@@ -290,6 +318,7 @@ export function InventoryTable({
                             ? t("inventory.table.adjustAction")
                             : t("inventory.permissions.readOnlyTooltip")
                         }
+                        aria-label={`${t("inventory.table.adjustAction")} ${item.name}`}
                         className="p-1.5 rounded-lg text-[#555D6E] hover:text-[#0066CC] hover:bg-[#F5F5F7] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Sliders className="h-3.5 w-3.5" aria-hidden="true" />
@@ -305,6 +334,7 @@ export function InventoryTable({
                             ? t("inventory.table.editAction")
                             : t("inventory.permissions.readOnlyTooltip")
                         }
+                        aria-label={`${t("inventory.table.editAction")} ${item.name}`}
                         className="p-1.5 rounded-lg text-[#555D6E] hover:text-[#0066CC] hover:bg-[#F5F5F7] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Edit2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -320,6 +350,7 @@ export function InventoryTable({
                             ? t("inventory.table.deleteAction")
                             : t("inventory.permissions.readOnlyTooltip")
                         }
+                        aria-label={`${t("inventory.table.deleteAction")} ${item.name}`}
                         className="p-1.5 rounded-lg text-[#555D6E] hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -384,7 +415,27 @@ export function InventoryTable({
               </div>
 
               {/* Mobile Actions */}
-              <div className="flex items-center justify-end gap-1 border-t border-black/[0.05] pt-2">
+              <div className="flex flex-wrap items-center justify-end gap-1 border-t border-black/[0.05] pt-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenStockCard(item)}
+                  className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-[#555D6E] hover:bg-[#F5F5F7] transition-colors"
+                >
+                  <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t("inventory.table.stockCardAction")}</span>
+                </button>
+
+                {(isLowStock || isOutOfStock) && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenProcureDraft(item)}
+                    className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors"
+                  >
+                    <Truck className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{t("inventory.table.procureAction")}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => onAdjustStock(item)}
@@ -407,6 +458,7 @@ export function InventoryTable({
                   type="button"
                   onClick={() => onDeleteProduct(item)}
                   disabled={!canWrite}
+                  aria-label={`${t("inventory.table.deleteAction")} ${item.name}`}
                   className="flex items-center gap-1 rounded-lg p-1 text-[#555D6E] hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-40"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
