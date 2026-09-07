@@ -910,7 +910,7 @@ it does not check `revoked_at`; retain the schema and roll forward instead.
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Response (200 OK):** Comprehensive detail of goods receipt with:
   - Header: PO number, supplier name, receiving officer, receipt date, notes, total inbound valuation, Sharia ledger entry number, and Halal compliance evaluation.
-  - Line Items: product name, SKU, unit cost, subtotal valuation, linked inventory stock movement ID (`stock_movement_id`), and full inline QC audit record (`delivered_quantity`, `accepted_quantity`, `rejected_quantity`, `qc_outcome` [PASS / PARTIAL_ACCEPT / REJECT / NOT_RECORDED_LEGACY], `qc_reason`, `inspected_by`, `inspected_at`).
+  - Line Items: product name, SKU, unit cost, subtotal valuation, linked inventory stock movement ID (`stock_movement_id`, optional UUID; omitted for rejected-only or legacy lines without a movement), and full inline QC audit record (`delivered_quantity`, `accepted_quantity`, `rejected_quantity`, `qc_outcome` [PASS / PARTIAL_ACCEPT / REJECT / NOT_RECORDED_LEGACY], `qc_reason`, `inspected_by`, `inspected_at`).
 
 
 ### 4.15 Document-Level Product Traceability

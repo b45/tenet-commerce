@@ -1098,6 +1098,12 @@ func TestSupplyChain_InlineQualityChecks(t *testing.T) {
 		assert.Equal(t, "REJECT", grDetail.Items[0].QCOutcome)
 		assert.Equal(t, 0.0, grDetail.TotalValuation)
 		assert.Nil(t, grDetail.LedgerEntryNumber)
+		assert.Nil(t, grDetail.Items[0].StockMovementID)
+		var movementCount int
+		err = db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM tenant_al_barakah_mart.stock_movements
+			WHERE source_document_type = 'GOODS_RECEIPT' AND source_document_id = $1`, grReject.ID).Scan(&movementCount)
+		require.NoError(t, err)
+		assert.Zero(t, movementCount, "rejected goods must not create any stock movement")
 	}
 
 	// Verify Detail of first mixed receipt
@@ -1200,7 +1206,60 @@ func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
 			{ProductID: productID, ReceivedQuantity: 60},
 		},
 	}
-	grBody1, _ := json.Marshal(grReq1)
+	grBody1, err := json.Marshal(grReq1)
+	require.NoError(t, err)
+
+	// Reject the actual movement insert and prove the whole receipt transaction rolls back.
+	ctx := context.Background()
+	snapshot := func() [4]int {
+		t.Helper()
+		var counts [4]int
+		err := db.Pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM tenant_al_barakah_mart.goods_receipts),
+			(SELECT count(*) FROM tenant_al_barakah_mart.goods_receipt_items),
+			(SELECT count(*) FROM tenant_al_barakah_mart.stock_movements),
+			(SELECT count(*) FROM tenant_al_barakah_mart.ledger_entries)`).
+			Scan(&counts[0], &counts[1], &counts[2], &counts[3])
+		require.NoError(t, err)
+		return counts
+	}
+	beforeFailure := snapshot()
+	_, err = db.Pool.Exec(ctx, `ALTER TABLE tenant_al_barakah_mart.stock_movements
+		ADD CONSTRAINT test_receipt_movement_failure CHECK
+		(NOT (source_document_type = 'GOODS_RECEIPT' AND quantity_delta = 60)) NOT VALID`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := db.Pool.Exec(ctx, `ALTER TABLE tenant_al_barakah_mart.stock_movements
+			DROP CONSTRAINT IF EXISTS test_receipt_movement_failure`)
+		require.NoError(t, err)
+	})
+	failed := httptest.NewRecorder()
+	failedReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
+	failedReq.Header.Set("Content-Type", "application/json")
+	failedReq.Header.Set("Idempotency-Key", grKey1)
+	router.ServeHTTP(failed, failedReq)
+	require.Equal(t, http.StatusInternalServerError, failed.Code, failed.Body.String())
+	assert.Equal(t, beforeFailure, snapshot(), "failed movement must leave no receipt, lines, movement, or journal")
+	assert.Equal(t, initialStock, stockForSKU(t, db, "SKU-BEEF-01"))
+	assertPOStatus(t, db, createdPO.ID, "ISSUED")
+	_, err = db.Pool.Exec(ctx, `ALTER TABLE tenant_al_barakah_mart.stock_movements DROP CONSTRAINT test_receipt_movement_failure`)
+	require.NoError(t, err)
+
+	// Commit through the service without delivering an HTTP response or writing its cache.
+	// The same-key HTTP request below must recover this committed receipt.
+	var committedID uuid.UUID
+	func() {
+		conn, err := db.Pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart")
+		require.NoError(t, err)
+		service := supplychain.NewService(supplychain.NewRepository(), ledger.NewService(ledger.NewRepository()))
+		committed, err := service.CreateGoodsReceipt(ctx, conn,
+			uuid.MustParse("11111111-1111-1111-1111-111111111111"), grKey1, &grReq1)
+		require.NoError(t, err)
+		committedID = committed.ID
+	}()
 	wGR1 := httptest.NewRecorder()
 	reqGR1 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
 	reqGR1.Header.Set("Content-Type", "application/json")
@@ -1213,6 +1272,8 @@ func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
 	var gr1 supplychain.GoodsReceipt
 	require.NoError(t, json.Unmarshal(gr1Resp.Data, &gr1))
 	require.Len(t, gr1.Items, 1)
+	assert.Equal(t, committedID, gr1.ID, "retry must recover the committed receipt")
+	assertLedgerJournalExists(t, db, gr1.ID, 60*40000)
 
 	// Invariant assertion: Stock + 60
 	assert.Equal(t, initialStock+60, stockForSKU(t, db, "SKU-BEEF-01"))
@@ -1245,7 +1306,7 @@ func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
 	}()
 
 	// Step 4: Idempotent replay of GR1 must NOT add another stock movement or duplicate stock
-	{
+	func() {
 		wGR1Replay := httptest.NewRecorder()
 		reqGR1Replay := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody1))
 		reqGR1Replay.Header.Set("Content-Type", "application/json")
@@ -1267,7 +1328,11 @@ func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
 		`, gr1.ID).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 1, count, "replayed GR must not duplicate stock movements")
-	}
+		err = conn.QueryRow(context.Background(), `SELECT count(*) FROM tenant_al_barakah_mart.ledger_entries
+			WHERE source_document_type = 'GOODS_RECEIPT' AND source_document_id = $1`, gr1.ID).Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "recovery and replay must not duplicate journals")
+	}()
 
 	// Step 5: Partial Receipt 2 (remaining 40 units accepted)
 	grKey2 := fmt.Sprintf("gr-sm-key-%d-2", time.Now().UnixNano())
@@ -1278,13 +1343,33 @@ func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
 			{ProductID: productID, ReceivedQuantity: 40},
 		},
 	}
-	grBody2, _ := json.Marshal(grReq2)
-	wGR2 := httptest.NewRecorder()
-	reqGR2 := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody2))
-	reqGR2.Header.Set("Content-Type", "application/json")
-	reqGR2.Header.Set("Idempotency-Key", grKey2)
-	router.ServeHTTP(wGR2, reqGR2)
-	require.Equal(t, http.StatusCreated, wGR2.Code)
+	grBody2, err := json.Marshal(grReq2)
+	require.NoError(t, err)
+	// Two independent commands race for the same remaining 40 units.
+	// Use a multi-connection pool so the PO lock, rather than the pool, serializes them.
+	concurrentRouter := setupSupplyChainTestRouter(t, newTestDatabase(t))
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, 2)
+	for i := range 2 {
+		go func() {
+			<-start
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/goods-receipts", bytes.NewReader(grBody2))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("%s-%d", grKey2, i))
+			w := httptest.NewRecorder()
+			concurrentRouter.ServeHTTP(w, req)
+			results <- w
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	wGR2, rejected := first, second
+	if first.Code != http.StatusCreated {
+		wGR2, rejected = second, first
+	}
+	require.Equal(t, http.StatusCreated, wGR2.Code, wGR2.Body.String())
+	require.Equal(t, http.StatusConflict, rejected.Code, rejected.Body.String())
+	assert.Contains(t, rejected.Body.String(), "INVALID_PO_STATUS")
 
 	var gr2Resp apiResponseEnvelope
 	require.NoError(t, json.Unmarshal(wGR2.Body.Bytes(), &gr2Resp))
@@ -1341,4 +1426,3 @@ func TestSupplyChain_GoodsReceipt_StockMovementIntegration(t *testing.T) {
 		assert.Equal(t, 40, matchedQuantity)
 	}
 }
-
