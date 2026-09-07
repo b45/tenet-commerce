@@ -201,7 +201,9 @@ func (r *Repository) GetGoodsReceiptByIdempotencyKey(ctx context.Context, tx pgx
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, goods_receipt_id, product_id, received_quantity
+		SELECT id, goods_receipt_id, product_id, received_quantity,
+		       delivered_quantity, accepted_quantity, rejected_quantity,
+		       qc_outcome, qc_reason, inspected_by, inspected_at
 		FROM goods_receipt_items
 		WHERE goods_receipt_id = $1
 		ORDER BY id
@@ -213,7 +215,11 @@ func (r *Repository) GetGoodsReceiptByIdempotencyKey(ctx context.Context, tx pgx
 
 	for rows.Next() {
 		var item GoodsReceiptItem
-		if err := rows.Scan(&item.ID, &item.GoodsReceiptID, &item.ProductID, &item.ReceivedQuantity); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.GoodsReceiptID, &item.ProductID, &item.ReceivedQuantity,
+			&item.DeliveredQuantity, &item.AcceptedQuantity, &item.RejectedQuantity,
+			&item.QCOutcome, &item.QCReason, &item.InspectedBy, &item.InspectedAt,
+		); err != nil {
 			return nil, err
 		}
 		gr.Items = append(gr.Items, item)
@@ -222,6 +228,7 @@ func (r *Repository) GetGoodsReceiptByIdempotencyKey(ctx context.Context, tx pgx
 		return nil, err
 	}
 	return gr, nil
+
 }
 
 // CreatePurchaseOrder inserts a PO and its items
@@ -303,31 +310,42 @@ func (r *Repository) CreateGoodsReceipt(ctx context.Context, tx pgx.Tx, gr *Good
 	}
 
 	for _, item := range gr.Items {
-		// 1. Insert GR Item
+		// 1. Insert GR Item with full QC audit trail
 		queryItem := `
-			INSERT INTO goods_receipt_items (id, goods_receipt_id, product_id, received_quantity)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO goods_receipt_items (
+				id, goods_receipt_id, product_id, received_quantity,
+				delivered_quantity, accepted_quantity, rejected_quantity,
+				qc_outcome, qc_reason, inspected_by, inspected_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		`
-		_, err := tx.Exec(ctx, queryItem, item.ID, item.GoodsReceiptID, item.ProductID, item.ReceivedQuantity)
+		_, err := tx.Exec(ctx, queryItem,
+			item.ID, item.GoodsReceiptID, item.ProductID, item.ReceivedQuantity,
+			item.DeliveredQuantity, item.AcceptedQuantity, item.RejectedQuantity,
+			item.QCOutcome, item.QCReason, item.InspectedBy, item.InspectedAt,
+		)
 		if err != nil {
 			return err
 		}
 
-		// 2. Increment Stock Atomically
-		queryStock := `
-			UPDATE inventory
-			SET stock_quantity = stock_quantity + $1, updated_at = NOW()
-			WHERE product_id = $2
-		`
-		cmdTag, err := tx.Exec(ctx, queryStock, item.ReceivedQuantity, item.ProductID)
-		if err != nil {
-			return err
-		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("%w: %s", ErrInventoryNotFound, item.ProductID)
+		// 2. Increment Stock Atomically ONLY for accepted goods
+		if item.AcceptedQuantity > 0 {
+			queryStock := `
+				UPDATE inventory
+				SET stock_quantity = stock_quantity + $1, updated_at = NOW()
+				WHERE product_id = $2
+			`
+			cmdTag, err := tx.Exec(ctx, queryStock, item.AcceptedQuantity, item.ProductID)
+			if err != nil {
+				return err
+			}
+			if cmdTag.RowsAffected() == 0 {
+				return fmt.Errorf("%w: %s", ErrInventoryNotFound, item.ProductID)
+			}
 		}
 	}
 	return nil
+
 }
 
 // ListSuppliers fetches suppliers with optional is_active filter and pagination
@@ -809,10 +827,13 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 		return nil, err
 	}
 
-	// Fetch items with unit cost and subtotal valuation
+	// Fetch items with unit cost, subtotal valuation, and inline QC records
 	queryItems := `
-		SELECT gri.id, gri.product_id, p.name, p.sku, gri.received_quantity, poi.unit_cost,
-		       (gri.received_quantity * poi.unit_cost) AS subtotal_valuation
+		SELECT gri.id, gri.product_id, p.name, p.sku, gri.received_quantity,
+		       gri.delivered_quantity, gri.accepted_quantity, gri.rejected_quantity,
+		       gri.qc_outcome, gri.qc_reason, gri.inspected_by, gri.inspected_at,
+		       poi.unit_cost,
+		       (gri.accepted_quantity * poi.unit_cost) AS subtotal_valuation
 		FROM goods_receipt_items gri
 		JOIN products p ON p.id = gri.product_id
 		JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
@@ -829,13 +850,19 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 	var totalValuation float64
 	for rows.Next() {
 		var item GoodsReceiptDetailItem
-		if err := rows.Scan(&item.ID, &item.ProductID, &item.ProductName, &item.ProductSKU, &item.ReceivedQuantity, &item.UnitCost, &item.SubtotalValuation); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.ProductID, &item.ProductName, &item.ProductSKU, &item.ReceivedQuantity,
+			&item.DeliveredQuantity, &item.AcceptedQuantity, &item.RejectedQuantity,
+			&item.QCOutcome, &item.QCReason, &item.InspectedBy, &item.InspectedAt,
+			&item.UnitCost, &item.SubtotalValuation,
+		); err != nil {
 			return nil, err
 		}
 		totalValuation += item.SubtotalValuation
 		grd.Items = append(grd.Items, item)
 	}
 	grd.TotalValuation = totalValuation
+
 
 	// Lookup linked ledger entry number
 	var ledgerEntryNumber string

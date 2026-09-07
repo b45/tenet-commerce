@@ -2687,7 +2687,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"purchase_order_id\": \"{{ab_po_id}}\",\n    \"notes\": \"Delivery batch received in good condition\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"received_quantity\": 10\n        }\n    ]\n}"
+                            "raw": "{\n    \"purchase_order_id\": \"{{ab_po_id}}\",\n    \"notes\": \"Delivery batch received and inspected with inline QC\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"delivered_quantity\": 10,\n            \"accepted_quantity\": 9,\n            \"rejected_quantity\": 1,\n            \"qc_reason\": \"Packaging seal broken on 1 unit\"\n        }\n    ]\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/api/v1/supply-chain/goods-receipts",
@@ -2701,9 +2701,10 @@
                                 "goods-receipts"
                             ]
                         },
-                        "description": "Receives ordered items into inventory with deterministic row locking and atomic stock increments. Validates compliance status, closes PO to RECEIVED when 100% fulfilled, posts balanced double-entry ledger journal, and rolls back cleanly if inventory records or compliance fail."
+                        "description": "Receives ordered items into inventory with inline quality check (delivered = accepted + rejected). Deterministic row locking and atomic stock increments for accepted quantity only. Validates compliance status, closes PO to RECEIVED when 100% fulfilled, posts balanced double-entry ledger journal for accepted valuation, and rolls back cleanly if inventory records or compliance fail."
                     },
                     "response": []
+
                 },
                 {
                     "name": "List Goods Receipts",
@@ -2767,9 +2768,10 @@
                                 }
                             ]
                         },
-                        "description": "Includes the original immutable compliance_evaluation for documents created after the certificate-validity upgrade. Older documents omit it; it is not recalculated from current certificate status."
+                        "description": "Returns full Goods Receipt details including inline QC records per line item (delivered_quantity, accepted_quantity, rejected_quantity, qc_outcome, qc_reason, inspected_by, inspected_at), ledger cross-reference, and immutable compliance_evaluation."
                     },
                     "response": []
+
                 },
                 {
                     "name": "Product Traceability Lineage",

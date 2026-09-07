@@ -1347,9 +1347,10 @@
                                 }
                             ]
                         },
-                        "description": "Includes the original immutable compliance_evaluation for documents created after the certificate-validity upgrade. Older documents omit it; it is not recalculated from current certificate status."
+                        "description": "Returns full Goods Receipt details including inline QC records per line item (delivered_quantity, accepted_quantity, rejected_quantity, qc_outcome, qc_reason, inspected_by, inspected_at), ledger cross-reference, and immutable compliance_evaluation."
                     },
                     "response": []
+
                 },
                 {
                     "name": "Product Traceability Lineage",
