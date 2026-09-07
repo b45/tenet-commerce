@@ -254,3 +254,24 @@ export async function clearCartDraft(tenantSlug: string): Promise<void> {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+/**
+ * Remove every offline record when the authenticated session ends.
+ * Keeping tenant-scoped records across users could expose the previous
+ * user's catalog or draft cart after logout or session expiry.
+ */
+export async function clearAllOfflineState(): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+
+  const db = await openPOSDatabase();
+  const tx = db.transaction(["catalog_products", "cart_drafts", "sync_meta"], "readwrite");
+  tx.objectStore("catalog_products").clear();
+  tx.objectStore("cart_drafts").clear();
+  tx.objectStore("sync_meta").clear();
+
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}

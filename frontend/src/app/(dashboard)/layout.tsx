@@ -8,6 +8,7 @@ import { authApi, type UserProfile } from "@/lib/api";
 import { CapabilitiesProvider } from "@/features/auth/hooks/use-capabilities";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
+import { clearAllOfflineState } from "@/lib/offline/db";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
       } catch {
         if (isMounted) {
+          await clearAllOfflineState();
           router.push("/login");
         }
       }
