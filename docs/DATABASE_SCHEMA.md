@@ -172,6 +172,37 @@ CREATE TABLE inventory (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Append-Only Stock Movements (Audit Trail & Stock Card)
+CREATE TABLE stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    warehouse_location VARCHAR(127) NOT NULL DEFAULT 'MAIN_STORE',
+    quantity_delta INTEGER NOT NULL,
+    movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN ('OPENING', 'IN', 'OUT', 'ADJUSTMENT')),
+    source_document_type VARCHAR(63) NOT NULL,
+    source_document_id UUID,
+    source_document_line_id UUID,
+    actor_id UUID,
+    reason TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_stock_movement_direction CHECK (
+        (movement_type = 'OPENING' AND quantity_delta >= 0) OR
+        (movement_type = 'IN' AND quantity_delta > 0) OR
+        (movement_type = 'OUT' AND quantity_delta < 0) OR
+        (movement_type = 'ADJUSTMENT' AND quantity_delta <> 0)
+    )
+);
+
+CREATE UNIQUE INDEX uq_stock_movement_source ON stock_movements (
+    source_document_type,
+    COALESCE(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(source_document_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+CREATE INDEX idx_stock_movements_product_occurred ON stock_movements (product_id, occurred_at DESC, created_at DESC);
+CREATE INDEX idx_stock_movements_source ON stock_movements (source_document_type, source_document_id);
+
 -- 4.2 Point of Sale & Transactions
 CREATE TABLE transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -358,6 +389,7 @@ CREATE INDEX idx_ledger_entries_reversed_by ON ledger_entries(reversed_by_entry_
 -- 1. trg_verify_ledger_balance (CONSTRAINT TRIGGER): Hard-enforces line_count >= 2, total_debit > 0, and total_debit == total_credit.
 -- 2. trg_immutable_ledger_entries (BEFORE UPDATE OR DELETE): Blocks all deletions; permits updates ONLY for transitioning status from POSTED to REVERSED with a valid reversed_by_entry_id.
 -- 3. trg_immutable_ledger_lines (BEFORE UPDATE OR DELETE): Blocks any update or deletion on posted entry lines.
+-- 4. trg_immutable_stock_movements (BEFORE UPDATE OR DELETE): Blocks all updates and deletions on posted stock movements (strictly append-only).
 
 -- 4.5 Zakat Tijarah Calculations
 CREATE TABLE zakat_calculations (
