@@ -5,6 +5,12 @@
 
 import { logger } from "./logger";
 
+async function clearOfflineStateAfterSessionEnd(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const { clearAllOfflineState } = await import("./offline/db");
+  await clearAllOfflineState();
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data: T;
@@ -199,9 +205,13 @@ export const authApi = {
 
   async logout(): Promise<void> {
     logger.clearUserContext();
-    await apiFetch<{ success: boolean }>("/api/auth/logout", {
-      method: "POST",
-    });
+    try {
+      await apiFetch<{ success: boolean }>("/api/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      await clearOfflineStateAfterSessionEnd();
+    }
   },
 };
 
