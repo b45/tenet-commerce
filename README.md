@@ -89,6 +89,19 @@ npm ci
 npm run dev
 ```
 
+### 4. Deterministic demo fixtures & database reset
+
+The database comes pre-seeded with reproducible demo fixtures for golden journey testing and demonstrations:
+- **Tenant A (`al-barakah-mart`)**: Demo product `SKU-DEMO-01` (unit price IDR 15,000, cost price IDR 10,000, threshold 10, initial stock 0), supplier `SUP-DEMO-VALID-01` with BPJPH Halal certificate `CERT-DEMO-HALAL-2099`, and supplier `SUP-DEMO-EXP-01` with expired certificate.
+- **Tenant B (`darussalam-store`)**: Isolated supplier `SUP-DS-DEMO-01` ensuring zero cross-tenant leakage.
+
+To reset the local demo database to a pristine initial state:
+```bash
+make db-reset
+```
+The reset script (`scripts/reset_dev_db.sh`) requires explicit opt-in confirmation (`CONFIRM_DEMO_RESET=true`) and strictly guards against resetting non-demo/arbitrary database instances.
+
+
 ## Verification
 
 ```bash
