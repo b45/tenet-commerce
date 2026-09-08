@@ -1,5 +1,21 @@
 # Tenet Commerce: Performance Benchmarking & High-Concurrency Load Test Report
 
+> **Evidence correction (2026-09-08):** The historical numbers below are retained as prior report material and are not treated as a current rerun. The reproducible current harness is `scripts/benchmark_phase2.sh`, which runs `TestBenchmarkEvidence` against fresh PostgreSQL 16 and Redis 7 Testcontainers and emits JSONL artifacts. It measures an in-process HTTP handler with injected integration identity; network, TLS and frontend latency are outside the measurement.
+
+## 0. Current reproducible fixture result
+
+Two independent runs on the candidate source used Apple M1 Pro, 16 GB RAM, Go 1.26.5, PostgreSQL 16.15, Redis 7, GOMAXPROCS 8 and a PostgreSQL tmpfs fixture. Each run created synthetic products and an opening stock movement in the `al_barakah_mart` tenant, then verified the other tenant snapshot, stock movement balance, journal balance and replay effects.
+
+| Scenario | Requests | Workers | p50 | p95 | p99 | Throughput | Status result |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Catalog read (run 2) | 100 | 4 | 4.91 ms | 25.65 ms | 34.66 ms | 492.31 req/s | 100 × 200 |
+| Checkout (run 2) | 100 | 4 | 38.29 ms | 106.34 ms | 177.49 ms | 83.98 req/s | 100 × 201 |
+| Contested final unit (run 2) | 16 | 8 | 17.10 ms | 45.63 ms | 45.63 ms | 286.83 req/s | 1 × 201; 15 expected 409 `INSUFFICIENT_STOCK` |
+
+Run 1 produced the same status and invariant outcomes; its catalog p50/p95/p99 were 4.91/25.65/34.66 ms and checkout p50/p95/p99 were 38.29/106.34/177.49 ms. The harness stores raw JSONL, source hashes, platform metadata and candidate identity in the output directory supplied as its first argument. These laptop measurements set no production capacity or SLA.
+
+The final-unit scenario is a correctness gate: exactly one request may consume stock one, while every remaining conflict must be the expected domain error. The test also confirms an identical replay does not add a second transaction effect and that the other tenant remains unchanged.
+
 > **Target System:** Tenet Commerce Go Transaction Engine & Multi-Tenant Sharia POS  
 > **Environment:** Apple Silicon (Apple M1 Pro, 8 Cores), Go 1.26+, PostgreSQL 16 (pgxpool 50 max conns), Redis 7 (Alpine)  
 > **Load Testing Tool:** Grafana k6 v2.1.0  
