@@ -38,7 +38,7 @@ Tenet Commerce processes Point-of-Sale checkouts, inventory valuations, goods re
 ### 3.2 System Bounds and Limits
 - **Minimum Transaction Amount**: `Rp 0` (or `Rp 1` for paid checkouts).
 - **Maximum Line Item Quantity**: `99,999` units per SKU.
-- **Maximum Transaction Amount (Cap)**: `Rp 1,000,000,000` (1 Billion IDR) per standard retail POS checkout. Mutations exceeding this cap require supervisor override or enterprise B2B invoice workflows.
+- **Maximum Transaction Amount (Cap)**: `Rp 1,000,000,000` (1 Billion IDR) per standard retail POS checkout. Inputs above this cap are rejected; a supervisor override is not implemented by these money utilities.
 - **Maximum Tender Amount**: `Rp 2,000,000,000` (2 Billion IDR).
 
 ### 3.3 Rounding Policy
@@ -55,8 +55,8 @@ Tenet Commerce processes Point-of-Sale checkouts, inventory valuations, goods re
 - **Inbound from Backend (Responses)**:
   - Canonical values represent integer Rupiah minor units.
   - Frontend parsing utility `parseMoneyFromAPI(val: unknown): number` normalizes input:
-    - If `number`: rounded via `Math.round(val)` if float.
-    - If `string`: stripped of non-digit characters except negative sign and parsed via `parseInt(clean, 10)`.
+    - If `number`: validated as an exact safe integer; invalid values are rejected.
+    - If `string`: parsed through the strict IDR parser; malformed grouping and nonzero fractional values are rejected.
 
 ### 3.5 Display Formatting (`lib/money.ts`)
 - Use `Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0, maximumFractionDigits: 0 })`.
