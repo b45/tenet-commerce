@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 🗄️ PostgreSQL (Schema-per-Tenant)
   postgres:
@@ -55,8 +53,8 @@ services:
       DATABASE_SSLMODE: disable
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      APP_MAINTENANCE_MODE: "false"
-      APP_MAINTENANCE_MESSAGE: "Temporarily unavailable for scheduled maintenance."
+      APP_MAINTENANCE_MODE: "${APP_MAINTENANCE_MODE:-false}"
+      APP_MAINTENANCE_MESSAGE: "${APP_MAINTENANCE_MESSAGE:-Temporarily unavailable for scheduled maintenance.}"
     ports:
       - "8081:8081"
     depends_on:
@@ -65,9 +63,29 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/ready"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/ready"]
       interval: 5s
       timeout: 3s
+      retries: 10
+    networks:
+      - tenet_network
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_API_URL: http://api:8081
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-http://localhost:3000}"
+      NEXT_PUBLIC_DEFAULT_TENANT_SLUG: "${NEXT_PUBLIC_DEFAULT_TENANT_SLUG:-b45-bakery}"
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/login"]
+      interval: 10s
+      timeout: 5s
       retries: 10
     networks:
       - tenet_network
