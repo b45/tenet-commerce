@@ -53,6 +53,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	storage := map[string]string{}
+	if os.Getenv("TENET_TEST_POSTGRES_TMPFS") == "1" {
+		storage["/var/lib/postgresql/data"] = "rw,size=512m"
+	}
 	postgresContainer, err := tcpostgres.Run(
 		ctx,
 		"postgres:16-alpine",
@@ -61,6 +65,7 @@ func TestMain(m *testing.M) {
 		tcpostgres.WithPassword(testDatabasePass),
 		tcpostgres.WithInitScripts(initScript),
 		tcpostgres.BasicWaitStrategies(),
+		testcontainers.WithTmpfs(storage),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "integration setup failed: PostgreSQL container: %v\n", err)
