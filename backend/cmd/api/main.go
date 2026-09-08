@@ -4,8 +4,12 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/entitlement"
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/internal/manager"
 	"github.com/b45/tenet-commerce/backend/internal/pos"
@@ -28,7 +32,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	ctx, cancelStartup := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelStartup()
 
 	// 1. Initialize PostgreSQL Database Connection Pool
 	db, err := database.NewPostgresDB(ctx)
@@ -50,7 +55,11 @@ func main() {
 	jwtService := pkgAuth.NewJWTService()
 	tenantRepo := tenant.NewRepository(db)
 	authRepo := internalAuth.NewRepository(db)
-	authHandler := internalAuth.NewHandler(authRepo, jwtService)
+	authHandler := internalAuth.NewHandler(authRepo, jwtService, rdb)
+
+	entitlementRepo := entitlement.NewRepository(db)
+	entitlementService := entitlement.NewService(entitlementRepo, rdb)
+	entitlementHandler := entitlement.NewHandler(entitlementService)
 
 	ledgerRepo := ledger.NewRepository()
 	ledgerService := ledger.NewService(ledgerRepo)
@@ -58,7 +67,7 @@ func main() {
 
 	posRepo := pos.NewRepository()
 	posService := pos.NewService(posRepo, ledgerService)
-	posHandler := pos.NewHandler(posService)
+	posHandler := pos.NewHandler(posService, entitlementService)
 
 	supplychainRepo := supplychain.NewRepository()
 	supplychainService := supplychain.NewService(supplychainRepo, ledgerService)
@@ -66,7 +75,7 @@ func main() {
 
 	managerRepo := manager.NewRepository()
 	managerService := manager.NewService(managerRepo)
-	managerHandler := manager.NewHandler(managerService)
+	managerHandler := manager.NewHandler(managerService, entitlementService)
 
 	// 4. Setup Modular Router (Domain-Driven Routing)
 	router := SetupRouter(RouterConfig{
@@ -75,6 +84,8 @@ func main() {
 		SupplyChainHandler: supplychainHandler,
 		LedgerHandler:      ledgerHandler,
 		ManagerHandler:     managerHandler,
+		EntitlementHandler: entitlementHandler,
+		EntitlementService: entitlementService,
 		TenantRepo:         tenantRepo,
 		JWTService:         jwtService,
 		RedisClient:        rdb,
@@ -93,8 +104,25 @@ func main() {
 		Handler: router,
 	}
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("Server failed to start", "error", err)
-		os.Exit(1)
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- server.ListenAndServe() }()
+
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-serverErr:
+		if err != nil && err != http.ErrServerClosed {
+			logger.Error("Server failed to start", "error", err)
+			os.Exit(1)
+		}
+	case <-signalCtx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		logger.Info("Shutting down API server", "reason", signalCtx.Err())
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error("API server shutdown incomplete", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("API server stopped cleanly")
 	}
 }

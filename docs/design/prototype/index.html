@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Tenet POS — prototype lokal, bukan transaksi nyata</title>
+  <link rel="stylesheet" href="prototype.css">
+  <script defer src="model.js"></script>
+  <script defer src="prototype.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Lewati header</a>
+  <aside class="demo-banner" aria-label="Peringatan prototype"><strong>PROTOTYPE • DATA CONTOH</strong><span>Tidak terhubung API. Jangan gunakan uang nyata. Reload mengulang demo.</span></aside>
+  <header class="context">
+    <div><strong class="brand">TENET / POS</strong><p>toko-contoh · Kasir Contoh</p></div>
+    <details class="lab">
+      <summary>Pengaturan uji desain</summary>
+      <div class="lab-content">
+        <label for="scenario">Hasil simulasi berikutnya</label>
+        <select id="scenario"><option value="success">Berhasil</option><option value="stock">Stok ditolak</option><option value="unknown">Respons terputus</option><option value="pending">Tetap diproses</option></select>
+        <label class="check"><input type="checkbox" id="offline"> Simulasi offline sebelum kirim</label>
+        <button id="stress" type="button">Muat 20 item / nama panjang</button>
+        <button id="reset" type="button">Reset seluruh demo</button>
+        <p>Kontrol laboratorium, bukan fitur kasir. Tidak ada login, penyimpanan, atau pembayaran sungguhan.</p>
+      </div>
+    </details>
+  </header>
+  <p id="connection" class="connection">Katalog contoh dimuat · simulasi online</p>
+  <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  <main id="main" tabindex="-1"></main>
+  <noscript>Aktifkan JavaScript untuk mencoba prototype lokal ini.</noscript>
+  <footer class="foot">Prototype v0.3 · HTML/CSS/JS lokal · Status simulasi bukan bukti transaksi.</footer>
+</body>
+</html>

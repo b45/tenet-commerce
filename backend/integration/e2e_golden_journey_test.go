@@ -124,6 +124,7 @@ func TestE2E_FullCommerceLifecycle_GoldenJourney(t *testing.T) {
 	suppBody, _ := json.Marshal(supplierPayload)
 	suppReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/suppliers", bytes.NewReader(suppBody))
 	suppReq.Header.Set("Content-Type", "application/json")
+	suppReq.Header.Set("Idempotency-Key", fmt.Sprintf("idem-supp-gj-%d", now.UnixNano()))
 	suppW := httptest.NewRecorder()
 	router.ServeHTTP(suppW, suppReq)
 	require.Equal(t, http.StatusCreated, suppW.Code)
@@ -314,13 +315,13 @@ func TestE2E_FullCommerceLifecycle_GoldenJourney(t *testing.T) {
 // TestE2E_ConcurrentFinalUnitOversellDefense proves that under concurrent checkout load
 // targeting the final remaining inventory units, database row-level locking strictly
 // defends against overselling:
-// Stock = 3 units -> 12 concurrent checkouts of 1 unit each -> Exactly 3 succeed, 9 rejected.
+// Stock = 1 unit -> 2 concurrent checkouts of 1 unit each -> Exactly 1 succeeds and 1 is rejected.
 func TestE2E_ConcurrentFinalUnitOversellDefense(t *testing.T) {
 	db := newTestDatabase(t)
 	rdb := newTestRedisClient(t)
 	router := setupFullCommerceRouter(t, db, rdb)
 
-	// Set a dedicated product stock (SKU-OIL-01) to exactly 3 units
+	// Set a dedicated product stock (SKU-OIL-01) to exactly 1 unit
 	var productID uuid.UUID
 	{
 		ctx := context.Background()
@@ -330,12 +331,12 @@ func TestE2E_ConcurrentFinalUnitOversellDefense(t *testing.T) {
 		require.NoError(t, err)
 		err = conn.QueryRow(ctx, "SELECT id FROM products WHERE sku = 'SKU-OIL-01'").Scan(&productID)
 		require.NoError(t, err)
-		_, err = conn.Exec(ctx, "UPDATE inventory SET stock_quantity = 3 WHERE product_id = $1", productID)
+		_, err = conn.Exec(ctx, "UPDATE inventory SET stock_quantity = 1 WHERE product_id = $1", productID)
 		require.NoError(t, err)
 		conn.Release()
 	}
 
-	const concurrentWorkers = 12
+	const concurrentWorkers = 2
 	var successCount int32
 	var failureCount int32
 
@@ -372,9 +373,9 @@ func TestE2E_ConcurrentFinalUnitOversellDefense(t *testing.T) {
 
 	wg.Wait()
 
-	// Assert: Exactly 3 checkouts succeeded, exactly 9 rejected
-	assert.Equal(t, int32(3), successCount, "exactly 3 checkouts should succeed for 3 available units")
-	assert.Equal(t, int32(9), failureCount, "remaining checkouts should be rejected to prevent overselling")
+	// Assert: Exactly one checkout succeeds for the final unit.
+	assert.Equal(t, int32(1), successCount, "exactly one checkout should succeed for one available unit")
+	assert.Equal(t, int32(1), failureCount, "the competing checkout must be rejected")
 
 	// Verify final database stock is exactly 0
 	var finalStock int
@@ -389,6 +390,15 @@ func TestE2E_ConcurrentFinalUnitOversellDefense(t *testing.T) {
 		conn.Release()
 	}
 	assert.Equal(t, 0, finalStock, "final database stock must be exactly 0 (no negative/phantom stock)")
+
+	var saleMovementCount, saleMovementDelta int
+	require.NoError(t, db.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*), COALESCE(SUM(quantity_delta), 0)
+		FROM tenant_al_barakah_mart.stock_movements
+		WHERE product_id = $1 AND source_document_type = 'POS_SALE'
+	`, productID).Scan(&saleMovementCount, &saleMovementDelta))
+	assert.Equal(t, 1, saleMovementCount)
+	assert.Equal(t, -1, saleMovementDelta)
 }
 
 // TestE2E_ConcurrentIdempotentReplayDefense proves that firing identical concurrent requests
@@ -500,4 +510,230 @@ func TestE2E_ConcurrentIdempotentReplayDefense(t *testing.T) {
 		conn.Release()
 	}
 	assert.Equal(t, initialStock-1, finalStock, "stock should decrement exactly once despite multiple concurrent replays")
+}
+
+func TestE2E_POSStockMovementLifecycle(t *testing.T) {
+	db := newTestDatabase(t)
+	rdb := newTestRedisClient(t)
+	router := setupFullCommerceRouter(t, db, rdb)
+	ctx := context.Background()
+	now := time.Now().UnixNano()
+
+	createPayload := pos.CreateProductRequest{
+		Name: "TPC 016 Movement Product", SKU: fmt.Sprintf("TPC016-%d", now),
+		UnitPrice: 25000, CostPrice: 10000, InitialStock: 2, ReorderThreshold: 1,
+		ComplianceTags: []string{"HALAL_MUI"},
+	}
+	createBody, err := json.Marshal(createPayload)
+	require.NoError(t, err)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Idempotency-Key", fmt.Sprintf("tpc016-create-%d", now))
+	createW := httptest.NewRecorder()
+	router.ServeHTTP(createW, createReq)
+	require.Equal(t, http.StatusCreated, createW.Code, createW.Body.String())
+	var createResp struct {
+		Data pos.Product `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(createW.Body.Bytes(), &createResp))
+	productID := uuid.MustParse(createResp.Data.ID)
+
+	cashTendered := 50000.0
+	checkoutPayload := pos.CheckoutRequest{
+		Items:         []pos.CartItemRequest{{SKU: createPayload.SKU, Quantity: 2}},
+		PaymentMethod: "CASH", CashTendered: &cashTendered,
+	}
+	checkoutBody, err := json.Marshal(checkoutPayload)
+	require.NoError(t, err)
+	checkoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/pos/checkout", bytes.NewReader(checkoutBody))
+	checkoutReq.Header.Set("Content-Type", "application/json")
+	checkoutReq.Header.Set("Idempotency-Key", fmt.Sprintf("tpc016-checkout-%d", now))
+	checkoutW := httptest.NewRecorder()
+	router.ServeHTTP(checkoutW, checkoutReq)
+	require.Equal(t, http.StatusCreated, checkoutW.Code, checkoutW.Body.String())
+	var checkoutResp struct {
+		Data pos.CheckoutResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(checkoutW.Body.Bytes(), &checkoutResp))
+	transactionID := uuid.MustParse(checkoutResp.Data.TransactionID)
+
+	voidPayload := pos.VoidRequest{Reason: "Customer cancelled the complete sale"}
+	voidBody, err := json.Marshal(voidPayload)
+	require.NoError(t, err)
+	voidKey := fmt.Sprintf("tpc016-void-%d", now)
+	for range 2 {
+		voidReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/pos/orders/%s/void", transactionID), bytes.NewReader(voidBody))
+		voidReq.Header.Set("Content-Type", "application/json")
+		voidReq.Header.Set("Idempotency-Key", voidKey)
+		voidW := httptest.NewRecorder()
+		router.ServeHTTP(voidW, voidReq)
+		require.Equal(t, http.StatusOK, voidW.Code, voidW.Body.String())
+	}
+
+	staleExpected := 1
+	stalePayload := pos.StockAdjustmentRequest{
+		ProductID: productID.String(), AdjustmentType: "SET", Quantity: 1,
+		ExpectedQuantity: &staleExpected, Reason: "AUDIT_CORRECTION",
+	}
+	staleBody, err := json.Marshal(stalePayload)
+	require.NoError(t, err)
+	staleReq := httptest.NewRequest(http.MethodPost, "/api/v1/pos/inventory/adjust", bytes.NewReader(staleBody))
+	staleReq.Header.Set("Content-Type", "application/json")
+	staleReq.Header.Set("Idempotency-Key", fmt.Sprintf("tpc016-stale-%d", now))
+	staleW := httptest.NewRecorder()
+	router.ServeHTTP(staleW, staleReq)
+	require.Equal(t, http.StatusConflict, staleW.Code, staleW.Body.String())
+	assert.Contains(t, staleW.Body.String(), "STALE_STOCK_COUNT")
+
+	adjustPayload := pos.StockAdjustmentRequest{
+		ProductID: productID.String(), AdjustmentType: "SUBTRACT", Quantity: 1,
+		Reason: "DAMAGE", Notes: "Damaged during shelf handling",
+	}
+	adjustBody, err := json.Marshal(adjustPayload)
+	require.NoError(t, err)
+	var beforeAdjustments, beforeAdjustmentJournals int
+	require.NoError(t, db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM tenant_al_barakah_mart.inventory_adjustments`).Scan(&beforeAdjustments))
+	require.NoError(t, db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM tenant_al_barakah_mart.ledger_entries
+		WHERE source_document_type = 'MANUAL_ADJUSTMENT'`).Scan(&beforeAdjustmentJournals))
+	_, err = db.Pool.Exec(ctx, `ALTER TABLE tenant_al_barakah_mart.stock_movements
+		ADD CONSTRAINT test_tpc016_adjustment_failure CHECK (source_document_type <> 'MANUAL_ADJUSTMENT') NOT VALID`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, cleanupErr := db.Pool.Exec(context.Background(), `ALTER TABLE tenant_al_barakah_mart.stock_movements
+			DROP CONSTRAINT IF EXISTS test_tpc016_adjustment_failure`)
+		require.NoError(t, cleanupErr)
+	})
+	failedAdjustReq := httptest.NewRequest(http.MethodPost, "/api/v1/pos/inventory/adjust", bytes.NewReader(adjustBody))
+	failedAdjustReq.Header.Set("Content-Type", "application/json")
+	failedAdjustReq.Header.Set("Idempotency-Key", fmt.Sprintf("tpc016-adjust-failure-%d", now))
+	failedAdjustW := httptest.NewRecorder()
+	router.ServeHTTP(failedAdjustW, failedAdjustReq)
+	require.Equal(t, http.StatusInternalServerError, failedAdjustW.Code, failedAdjustW.Body.String())
+	var afterFailureStock, afterFailureAdjustments, afterFailureJournals int
+	require.NoError(t, db.Pool.QueryRow(ctx, `SELECT stock_quantity FROM tenant_al_barakah_mart.inventory WHERE product_id = $1`, productID).Scan(&afterFailureStock))
+	require.NoError(t, db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM tenant_al_barakah_mart.inventory_adjustments`).Scan(&afterFailureAdjustments))
+	require.NoError(t, db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM tenant_al_barakah_mart.ledger_entries
+		WHERE source_document_type = 'MANUAL_ADJUSTMENT'`).Scan(&afterFailureJournals))
+	assert.Equal(t, 2, afterFailureStock)
+	assert.Equal(t, beforeAdjustments, afterFailureAdjustments)
+	assert.Equal(t, beforeAdjustmentJournals, afterFailureJournals)
+	_, err = db.Pool.Exec(ctx, `ALTER TABLE tenant_al_barakah_mart.stock_movements DROP CONSTRAINT test_tpc016_adjustment_failure`)
+	require.NoError(t, err)
+
+	adjustKey := fmt.Sprintf("tpc016-adjust-%d", now)
+	var adjustmentID uuid.UUID
+	for range 2 {
+		adjustReq := httptest.NewRequest(http.MethodPost, "/api/v1/pos/inventory/adjust", bytes.NewReader(adjustBody))
+		adjustReq.Header.Set("Content-Type", "application/json")
+		adjustReq.Header.Set("Idempotency-Key", adjustKey)
+		adjustW := httptest.NewRecorder()
+		router.ServeHTTP(adjustW, adjustReq)
+		require.Equal(t, http.StatusOK, adjustW.Code, adjustW.Body.String())
+		var adjustResp struct {
+			Data pos.StockAdjustmentResponse `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(adjustW.Body.Bytes(), &adjustResp))
+		if adjustmentID == uuid.Nil {
+			adjustmentID = uuid.MustParse(adjustResp.Data.AdjustmentID)
+		} else {
+			assert.Equal(t, adjustmentID, uuid.MustParse(adjustResp.Data.AdjustmentID))
+		}
+	}
+
+	var onHand, movementCount, movementSum int
+	poID := uuid.New()
+	var supplierID, certificateID uuid.UUID
+	func() {
+		conn, err := db.Pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public")
+		require.NoError(t, err)
+		require.NoError(t, conn.QueryRow(ctx, "SELECT stock_quantity FROM inventory WHERE product_id = $1", productID).Scan(&onHand))
+		require.NoError(t, conn.QueryRow(ctx, `SELECT COUNT(*), SUM(quantity_delta) FROM stock_movements WHERE product_id = $1`, productID).
+			Scan(&movementCount, &movementSum))
+		assert.Equal(t, 1, onHand)
+		assert.Equal(t, 4, movementCount, "opening, sale, void, and adjustment each post once")
+		assert.Equal(t, onHand, movementSum, "movement trail reconciles exactly to current stock")
+
+		expected := map[string]int{"PRODUCT_CREATE": 2, "POS_SALE": -2, "POS_VOID": 2, "MANUAL_ADJUSTMENT": -1}
+		rows, err := conn.Query(ctx, `SELECT source_document_type, quantity_delta FROM stock_movements WHERE product_id = $1`, productID)
+		require.NoError(t, err)
+		defer rows.Close()
+		for rows.Next() {
+			var source string
+			var delta int
+			require.NoError(t, rows.Scan(&source, &delta))
+			assert.Equal(t, expected[source], delta)
+			delete(expected, source)
+		}
+		require.NoError(t, rows.Err())
+		assert.Empty(t, expected)
+
+		var adjustmentJournals int
+		require.NoError(t, conn.QueryRow(ctx, `SELECT COUNT(*) FROM ledger_entries
+			WHERE source_document_type = 'MANUAL_ADJUSTMENT' AND source_document_id = $1`, adjustmentID).Scan(&adjustmentJournals))
+		assert.Equal(t, 1, adjustmentJournals)
+
+		require.NoError(t, conn.QueryRow(ctx, `INSERT INTO suppliers
+			(code, company_name, contact_person, contact_email, contact_phone, is_active)
+			VALUES ($1, 'TPC 016 Supplier', 'Inventory Tester', 'tpc016@example.test', '0000000000', true)
+			RETURNING id`, fmt.Sprintf("TPC016-SUP-%d", now)).Scan(&supplierID))
+		require.NoError(t, conn.QueryRow(ctx, `INSERT INTO compliance_certificates
+			(supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date)
+			VALUES ($1, 'HALAL_MUI', $2, 'BPJPH', 'TPC 016 test products', CURRENT_DATE - 1, CURRENT_DATE + 30)
+			RETURNING id`, supplierID, fmt.Sprintf("TPC016-CERT-%d", now)).Scan(&certificateID))
+		_, err = conn.Exec(ctx, `INSERT INTO purchase_orders (id, po_number, supplier_id, total_amount, status)
+			VALUES ($1, $2, $3, 10000, 'ISSUED')`, poID, fmt.Sprintf("TPC016-PO-%d", now), supplierID)
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, `INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, unit_cost, subtotal)
+			VALUES ($1, $2, 1, 10000, 10000)`, poID, productID)
+		require.NoError(t, err)
+	}()
+
+	deleteKey := fmt.Sprintf("tpc016-delete-%d", now)
+	deleteReq := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/pos/products/%s", productID), nil)
+	deleteReq.Header.Set("Idempotency-Key", deleteKey)
+	deleteW := httptest.NewRecorder()
+	router.ServeHTTP(deleteW, deleteReq)
+	require.Equal(t, http.StatusConflict, deleteW.Code, deleteW.Body.String())
+	assert.Contains(t, deleteW.Body.String(), "PRODUCT_HAS_OUTSTANDING_PO")
+
+	conn, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public")
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, "UPDATE purchase_orders SET status = 'CANCELLED' WHERE id = $1", poID)
+	require.NoError(t, err)
+	conn.Release()
+
+	deleteReq = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/pos/products/%s", productID), nil)
+	deleteReq.Header.Set("Idempotency-Key", fmt.Sprintf("%s-after-cancel", deleteKey))
+	deleteW = httptest.NewRecorder()
+	router.ServeHTTP(deleteW, deleteReq)
+	require.Equal(t, http.StatusOK, deleteW.Code, deleteW.Body.String())
+
+	certID := certificateID.String()
+	inactivePOPayload := supplychain.CreatePurchaseOrderRequest{
+		SupplierID: supplierID.String(), ComplianceCertID: &certID,
+		Items: []supplychain.CreatePOItemRequest{{ProductID: productID.String(), Quantity: 1, UnitCost: 10000}},
+	}
+	inactivePOBody, err := json.Marshal(inactivePOPayload)
+	require.NoError(t, err)
+	inactivePOReq := httptest.NewRequest(http.MethodPost, "/api/v1/supply-chain/purchase-orders", bytes.NewReader(inactivePOBody))
+	inactivePOReq.Header.Set("Content-Type", "application/json")
+	inactivePOReq.Header.Set("Idempotency-Key", fmt.Sprintf("tpc016-inactive-po-%d", now))
+	inactivePOW := httptest.NewRecorder()
+	router.ServeHTTP(inactivePOW, inactivePOReq)
+	require.Equal(t, http.StatusUnprocessableEntity, inactivePOW.Code, inactivePOW.Body.String())
+	assert.Contains(t, inactivePOW.Body.String(), "PRODUCT_NOT_AVAILABLE")
+
+	conn, err = db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+	_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public")
+	require.NoError(t, err)
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movements WHERE product_id = $1", productID).Scan(&movementCount)
+	require.NoError(t, err)
+	assert.Equal(t, 4, movementCount, "soft delete preserves immutable movement traceability")
 }

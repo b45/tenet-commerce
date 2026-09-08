@@ -1,0 +1,262 @@
+"use client";
+
+import * as React from "react";
+import { Banknote, AlertCircle, Loader2 } from "lucide-react";
+import { CURRENCY_IDR, formatIDR, parseIDR } from "@/lib/money";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
+import type { CheckoutStep } from "../types";
+
+export interface TenderModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  totalAmount: number;
+  cashTendered: number;
+  onCashTenderedChange: (amount: number) => void;
+  onSubmit: () => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+  step: CheckoutStep;
+  commandReference: string;
+}
+
+export function TenderModal({
+  isOpen,
+  onClose,
+  totalAmount,
+  cashTendered,
+  onCashTenderedChange,
+  onSubmit,
+  isSubmitting,
+  errorMessage,
+  step,
+  commandReference,
+}: TenderModalProps) {
+  const { t } = useTranslation();
+  const isLocked = isSubmitting || step === "unknown_error";
+  const canEdit = step === "review";
+  const [inputValue, setInputValue] = React.useState<string>(
+    cashTendered ? String(cashTendered) : ""
+  );
+  const wasOpen = React.useRef(false);
+
+  React.useEffect(() => {
+    if (isOpen && !wasOpen.current) {
+      setInputValue(cashTendered ? String(cashTendered) : "");
+    }
+    wasOpen.current = isOpen;
+  }, [isOpen, cashTendered]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setInputValue(raw);
+    onCashTenderedChange(parseIDR(raw) ?? Number.NaN);
+  };
+
+  const setPreset = (amount: number) => {
+    setInputValue(String(amount));
+    onCashTenderedChange(amount);
+  };
+
+  const isValidTender = parseIDR(cashTendered) !== null;
+  const changeAmount = isValidTender ? Math.max(0, cashTendered - totalAmount) : 0;
+  const shortageAmount = isValidTender ? Math.max(0, totalAmount - cashTendered) : totalAmount;
+  const isSufficient = isValidTender && cashTendered >= totalAmount;
+
+  // Preset cash options based on total
+  const quickPresets = React.useMemo(() => {
+    const presets: number[] = [];
+    if (totalAmount <= 50000) presets.push(50000);
+    if (totalAmount <= 100000) presets.push(100000);
+    if (totalAmount <= 200000 && !presets.includes(200000)) presets.push(200000);
+    if (totalAmount <= 500000 && !presets.includes(500000)) presets.push(500000);
+    return presets.slice(0, 3);
+  }, [totalAmount]);
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      dismissible={!isLocked}
+      hideCloseButton={isLocked}
+      title={t("tender.modalTitle")}
+      description={t("tender.modalDescription")}
+      maxWidth="md"
+    >
+      <div className="space-y-5">
+        {/* Error / Warning Alert */}
+        {errorMessage && (
+          <Alert
+            className="[overflow-wrap:anywhere] [&>div]:min-w-0"
+            variant={step === "unknown_error" ? "warning" : "destructive"}
+            title={
+              step === "unknown_error"
+                ? t("tender.unknownTitle")
+                : t("tender.rejectedTitle")
+            }
+          >
+            <div className="flex items-start gap-1.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="min-w-0">{errorMessage}</span>
+            </div>
+            {step === "unknown_error" && (
+              <p className="mt-2 text-sm font-semibold text-[var(--color-status-warning-text)]">
+                {t("tender.unknownHelp")}
+              </p>
+            )}
+          </Alert>
+        )}
+
+        {step === "unknown_error" && (
+          <details className="text-sm">
+            <summary className="min-h-12 cursor-pointer py-3">{t("tender.referenceTitle")}</summary>
+            <p className="mt-2 break-all font-mono">{commandReference}</p>
+            <p className="mt-2">{t("tender.referenceHelp")}</p>
+          </details>
+        )}
+
+        <div hidden={step === "unknown_error"} className="space-y-5">
+
+        {/* Bill Total Display */}
+        <div className="p-4 rounded-[16px] bg-[var(--color-surface-muted)] border border-[var(--color-border-hairline)] text-center">
+          <span className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
+            {t("tender.billTotal")}
+          </span>
+          <div className="break-all text-3xl font-bold font-mono text-[var(--color-text-primary)] mt-1 tracking-tight">
+            {formatIDR(totalAmount)}
+          </div>
+        </div>
+
+        {/* Cash Tendered Input */}
+        <div>
+          <label
+            htmlFor="cash_tendered"
+            className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
+          >
+            {t("tender.cashReceived")}
+          </label>
+
+          <div className="relative">
+            <div className="absolute start-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold font-mono text-[var(--color-text-muted)]">
+              {CURRENCY_IDR}
+            </div>
+            <input
+              id="cash_tendered"
+              type="text"
+              inputMode="numeric"
+              disabled={!canEdit}
+              value={inputValue}
+              aria-invalid={!isValidTender}
+              aria-describedby={!isValidTender ? "cash-tendered-error" : undefined}
+              onChange={handleInputChange}
+              placeholder={t("tender.cashPlaceholder")}
+              className={cn(
+                "w-full h-14 ps-12 pe-4 text-xl font-bold font-mono text-[var(--color-text-primary)]",
+                "bg-[var(--color-surface-base)] rounded-[16px] border border-[var(--color-border-subtle)]",
+                "focus:outline-none focus:ring-2 focus:ring-[var(--color-action-focus-ring)]",
+                !isSufficient && cashTendered > 0 && "border-[var(--color-status-danger-border)] focus:ring-red-200"
+              )}
+            />
+          </div>
+          {!isValidTender && (
+            <p id="cash-tendered-error" className="mt-2 text-sm text-[var(--color-status-danger-text)]">
+              {t("tender.invalidAmount")}
+            </p>
+          )}
+        </div>
+
+        {/* Quick Cash Presets */}
+        <div className="space-y-1.5">
+          <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
+            {t("tender.presets.label")}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!canEdit}
+              onClick={() => setPreset(totalAmount)}
+              className={cn(
+                "min-h-12 px-3 py-2 rounded-xl text-sm font-semibold transition-all select-none",
+                cashTendered === totalAmount
+                  ? "bg-[var(--color-action-primary)] text-white shadow-xs"
+                  : "bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] border border-[var(--color-border-hairline)] hover:bg-gray-200"
+              )}
+            >
+              {t("tender.presets.exact")} ({formatIDR(totalAmount)})
+            </button>
+
+            {quickPresets.map((amount) => (
+              <button
+                key={amount}
+                type="button"
+                disabled={!canEdit}
+                onClick={() => setPreset(amount)}
+                className={cn(
+                  "min-h-12 px-3 py-2 rounded-xl text-sm font-semibold font-mono transition-all select-none",
+                  cashTendered === amount
+                    ? "bg-[var(--color-action-primary)] text-white shadow-xs"
+                    : "bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] border border-[var(--color-border-hairline)] hover:bg-gray-200"
+                )}
+              >
+                {formatIDR(amount)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Real-time Change / Shortage Preview */}
+        <div className="p-4 rounded-[16px] border border-[var(--color-border-hairline)] bg-[var(--color-surface-base)] flex flex-wrap gap-2 items-center justify-between">
+          <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {isSufficient ? t("tender.change") : t("tender.shortage")}
+          </span>
+          <span
+            className={cn(
+              "break-all text-lg font-bold font-mono tracking-tight",
+              isSufficient
+                ? "text-[var(--color-status-success-text)]"
+                : "text-[var(--color-status-danger-text)]"
+            )}
+          >
+            {isSufficient ? formatIDR(changeAmount) : formatIDR(shortageAmount)}
+          </span>
+        </div>
+
+        {/* Actions */}
+        <div className="pt-2 flex flex-col gap-3 sm:flex-row">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isLocked}
+            onClick={onClose}
+            className="flex-1 rounded-[14px] h-auto min-h-12 py-3"
+          >
+            {t("common.actions.cancel")}
+          </Button>
+
+          <Button
+            type="button"
+            disabled={!isSufficient || !canEdit}
+            onClick={onSubmit}
+            className="flex-[2] rounded-[14px] h-auto min-h-12 py-3 font-semibold shadow-sm flex items-center justify-center gap-2"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{t("tender.processing")}</span>
+              </>
+            ) : (
+              <>
+                <Banknote className="w-4 h-4" />
+                <span>{t("tender.confirmCashSale")}</span>
+              </>
+            )}
+          </Button>
+        </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}

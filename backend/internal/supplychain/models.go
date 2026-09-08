@@ -16,12 +16,12 @@ type TenantConfig struct {
 
 // Supplier represents a supplier entity
 type Supplier struct {
-	ID            uuid.UUID `json:"id"`
-	Code          string    `json:"code"`
-	CompanyName   string    `json:"company_name"`
-	ContactPerson string    `json:"contact_person"`
-	ContactEmail  string    `json:"contact_email"`
-	ContactPhone  string    `json:"contact_phone"`
+	ID                    uuid.UUID              `json:"id"`
+	Code                  string                 `json:"code"`
+	CompanyName           string                 `json:"company_name"`
+	ContactPerson         string                 `json:"contact_person"`
+	ContactEmail          string                 `json:"contact_email"`
+	ContactPhone          string                 `json:"contact_phone"`
 	IsActive              bool                   `json:"is_active"`
 	CreatedAt             time.Time              `json:"created_at"`
 	ComplianceCertificate *ComplianceCertificate `json:"compliance_certificate,omitempty"`
@@ -29,61 +29,74 @@ type Supplier struct {
 
 // ComplianceCertificate represents a certificate tied to a supplier
 type ComplianceCertificate struct {
-	ID                 uuid.UUID `json:"id"`
-	SupplierID         uuid.UUID `json:"supplier_id"`
-	CertType           string    `json:"cert_type"`
-	CertificateNumber  string    `json:"certificate_number"`
-	IssuingAuthority   string    `json:"issuing_authority"`
-	Scope              string    `json:"scope"`
-	ValidFrom          time.Time `json:"valid_from"`
-	ExpiryDate         time.Time `json:"expiry_date"`
-	DocumentURL        *string   `json:"document_url"`
-	ComputedStatus     string    `json:"computed_status"` // Calculated on the fly (VALID, EXPIRING_SOON, EXPIRED)
-	CreatedAt          time.Time `json:"created_at"`
+	RevokedAt         *time.Time `json:"revoked_at,omitempty"`
+	ID                uuid.UUID  `json:"id"`
+	SupplierID        uuid.UUID  `json:"supplier_id"`
+	CertType          string     `json:"cert_type"`
+	CertificateNumber string     `json:"certificate_number"`
+	IssuingAuthority  string     `json:"issuing_authority"`
+	Scope             string     `json:"scope"`
+	ValidFrom         time.Time  `json:"valid_from"`
+	ExpiryDate        time.Time  `json:"expiry_date"`
+	DocumentURL       *string    `json:"document_url"`
+	ComputedStatus    string     `json:"computed_status"` // NOT_YET_VALID, VALID, EXPIRING_SOON, EXPIRED, or REVOKED
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 // PurchaseOrder represents a PO sent to a supplier
 type PurchaseOrder struct {
-	ID                 uuid.UUID           `json:"id"`
-	PONumber           string              `json:"po_number"`
-	SupplierID         uuid.UUID           `json:"supplier_id"`
-	ComplianceCertID   *uuid.UUID          `json:"compliance_cert_id"`
-	TotalAmount        float64             `json:"total_amount"`
-	Status             string              `json:"status"` // DRAFT, ISSUED, RECEIVED, CANCELLED
-	IssuedDate         time.Time           `json:"issued_date"`
-	CreatedAt          time.Time           `json:"created_at"`
-	Items              []PurchaseOrderItem `json:"items,omitempty"`
+	ComplianceEvaluation *ComplianceDecision `json:"compliance_evaluation,omitempty"`
+	ID                   uuid.UUID           `json:"id"`
+	PONumber             string              `json:"po_number"`
+	SupplierID           uuid.UUID           `json:"supplier_id"`
+	ComplianceCertID     *uuid.UUID          `json:"compliance_cert_id"`
+	TotalAmount          float64             `json:"total_amount"`
+	Status               string              `json:"status"` // DRAFT, ISSUED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED
+	IssuedDate           time.Time           `json:"issued_date"`
+	CreatedAt            time.Time           `json:"created_at"`
+	CancellationReason   *string             `json:"cancellation_reason,omitempty"`
+	CancelledBy          *uuid.UUID          `json:"cancelled_by,omitempty"`
+	CancelledAt          *time.Time          `json:"cancelled_at,omitempty"`
+	Items                []PurchaseOrderItem `json:"items,omitempty"`
 }
 
 // PurchaseOrderItem represents a line item in a PO
 type PurchaseOrderItem struct {
-	ID                uuid.UUID `json:"id"`
-	PurchaseOrderID   uuid.UUID `json:"purchase_order_id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	Quantity          int       `json:"quantity"`
-	UnitCost          float64   `json:"unit_cost"`
-	Subtotal          float64   `json:"subtotal"`
+	ID              uuid.UUID `json:"id"`
+	PurchaseOrderID uuid.UUID `json:"purchase_order_id"`
+	ProductID       uuid.UUID `json:"product_id"`
+	Quantity        int       `json:"quantity"`
+	UnitCost        float64   `json:"unit_cost"`
+	Subtotal        float64   `json:"subtotal"`
 }
 
 // GoodsReceipt represents a GR matching a PO
 type GoodsReceipt struct {
-	ID                uuid.UUID          `json:"id"`
-	GRNumber          string             `json:"gr_number"`
-	IdempotencyKey    string             `json:"idempotency_key"`
-	PurchaseOrderID   uuid.UUID          `json:"purchase_order_id"`
-	ReceivedBy        uuid.UUID          `json:"received_by"`
-	ReceivedDate      time.Time          `json:"received_date"`
-	Notes             string             `json:"notes"`
-	CreatedAt         time.Time          `json:"created_at"`
-	Items             []GoodsReceiptItem `json:"items,omitempty"`
+	ComplianceEvaluation *ComplianceDecision `json:"compliance_evaluation,omitempty"`
+	ID                   uuid.UUID           `json:"id"`
+	GRNumber             string              `json:"gr_number"`
+	IdempotencyKey       string              `json:"idempotency_key"`
+	PurchaseOrderID      uuid.UUID           `json:"purchase_order_id"`
+	ReceivedBy           uuid.UUID           `json:"received_by"`
+	ReceivedDate         time.Time           `json:"received_date"`
+	Notes                string              `json:"notes"`
+	CreatedAt            time.Time           `json:"created_at"`
+	Items                []GoodsReceiptItem  `json:"items,omitempty"`
 }
 
 // GoodsReceiptItem represents a line item in a GR
 type GoodsReceiptItem struct {
-	ID                uuid.UUID `json:"id"`
-	GoodsReceiptID    uuid.UUID `json:"goods_receipt_id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	ReceivedQuantity  int       `json:"received_quantity"`
+	ID                uuid.UUID  `json:"id"`
+	GoodsReceiptID    uuid.UUID  `json:"goods_receipt_id"`
+	ProductID         uuid.UUID  `json:"product_id"`
+	ReceivedQuantity  int        `json:"received_quantity"`
+	DeliveredQuantity int        `json:"delivered_quantity"`
+	AcceptedQuantity  int        `json:"accepted_quantity"`
+	RejectedQuantity  int        `json:"rejected_quantity"`
+	QCOutcome         string     `json:"qc_outcome"`
+	QCReason          *string    `json:"qc_reason,omitempty"`
+	InspectedBy       *uuid.UUID `json:"inspected_by,omitempty"`
+	InspectedAt       *time.Time `json:"inspected_at,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -91,12 +104,12 @@ type GoodsReceiptItem struct {
 // -----------------------------------------------------------------------------
 
 type CreateSupplierRequest struct {
-	Code                   string                           `json:"code" binding:"required"`
-	CompanyName            string                           `json:"company_name" binding:"required"`
-	ContactPerson          string                           `json:"contact_person"`
-	ContactEmail           string                           `json:"contact_email"`
-	ContactPhone           string                           `json:"contact_phone"`
-	ComplianceCertificate  *CreateComplianceCertRequest     `json:"compliance_certificate,omitempty"`
+	Code                  string                       `json:"code" binding:"required"`
+	CompanyName           string                       `json:"company_name" binding:"required"`
+	ContactPerson         string                       `json:"contact_person"`
+	ContactEmail          string                       `json:"contact_email"`
+	ContactPhone          string                       `json:"contact_phone"`
+	ComplianceCertificate *CreateComplianceCertRequest `json:"compliance_certificate,omitempty"`
 }
 
 type CreateComplianceCertRequest struct {
@@ -104,15 +117,15 @@ type CreateComplianceCertRequest struct {
 	CertificateNumber string  `json:"certificate_number" binding:"required"`
 	IssuingAuthority  string  `json:"issuing_authority" binding:"required"`
 	Scope             string  `json:"scope" binding:"required"`
-	ValidFrom         string  `json:"valid_from" binding:"required"` // Format YYYY-MM-DD
+	ValidFrom         string  `json:"valid_from" binding:"required"`  // Format YYYY-MM-DD
 	ExpiryDate        string  `json:"expiry_date" binding:"required"` // Format YYYY-MM-DD
 	DocumentURL       *string `json:"document_url"`
 }
 
 type CreatePurchaseOrderRequest struct {
-	SupplierID         string                     `json:"supplier_id" binding:"required,uuid"`
-	ComplianceCertID   *string                    `json:"compliance_cert_id" binding:"omitempty,uuid"`
-	Items              []CreatePOItemRequest      `json:"items" binding:"required,min=1,dive"`
+	SupplierID       string                `json:"supplier_id" binding:"required,uuid"`
+	ComplianceCertID *string               `json:"compliance_cert_id" binding:"omitempty,uuid"`
+	Items            []CreatePOItemRequest `json:"items" binding:"required,min=1,dive"`
 }
 
 type CreatePOItemRequest struct {
@@ -122,15 +135,21 @@ type CreatePOItemRequest struct {
 }
 
 type CreateGoodsReceiptRequest struct {
-	PurchaseOrderID string                     `json:"purchase_order_id" binding:"required,uuid"`
-	Notes           string                     `json:"notes"`
-	Items           []CreateGRItemRequest      `json:"items" binding:"required,min=1,dive"`
+	PurchaseOrderID string                `json:"purchase_order_id" binding:"required,uuid"`
+	Notes           string                `json:"notes"`
+	Items           []CreateGRItemRequest `json:"items" binding:"required,min=1,dive"`
 }
 
 type CreateGRItemRequest struct {
-	ProductID        string `json:"product_id" binding:"required,uuid"`
-	ReceivedQuantity int    `json:"received_quantity" binding:"required,min=1"`
+	ProductID         string  `json:"product_id" binding:"required,uuid"`
+	ReceivedQuantity  int     `json:"received_quantity,omitempty" binding:"omitempty,min=0"`
+	DeliveredQuantity *int    `json:"delivered_quantity,omitempty" binding:"omitempty,min=0"`
+	AcceptedQuantity  *int    `json:"accepted_quantity,omitempty" binding:"omitempty,min=0"`
+	RejectedQuantity  *int    `json:"rejected_quantity,omitempty" binding:"omitempty,min=0"`
+	QCReason          *string `json:"qc_reason,omitempty"`
 }
+
+
 
 // UpdateSupplierRequest represents payload for modifying supplier information
 type UpdateSupplierRequest struct {
@@ -164,11 +183,14 @@ type PurchaseOrderSummary struct {
 	SupplierID       uuid.UUID  `json:"supplier_id"`
 	SupplierName     string     `json:"supplier_name"`
 	ComplianceCertID *uuid.UUID `json:"compliance_cert_id,omitempty"`
-	TotalAmount      float64    `json:"total_amount"`
-	Status           string     `json:"status"`
-	IssuedDate       time.Time  `json:"issued_date"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ItemCount        int        `json:"item_count"`
+	TotalAmount        float64    `json:"total_amount"`
+	Status             string     `json:"status"`
+	IssuedDate         time.Time  `json:"issued_date"`
+	CreatedAt          time.Time  `json:"created_at"`
+	CancellationReason *string    `json:"cancellation_reason,omitempty"`
+	CancelledBy        *uuid.UUID `json:"cancelled_by,omitempty"`
+	CancelledAt        *time.Time `json:"cancelled_at,omitempty"`
+	ItemCount          int        `json:"item_count"`
 }
 
 // PurchaseOrderDetailLine represents an item line within a PO detail
@@ -200,46 +222,60 @@ type GoodsReceiptSummary struct {
 
 // PurchaseOrderDetail represents full PO details including lines, remaining balance, and receipts
 type PurchaseOrderDetail struct {
-	ID               uuid.UUID                 `json:"id"`
-	PONumber         string                    `json:"po_number"`
-	SupplierID       uuid.UUID                 `json:"supplier_id"`
-	SupplierName     string                    `json:"supplier_name"`
-	ComplianceCertID *uuid.UUID                `json:"compliance_cert_id,omitempty"`
-	TotalAmount      float64                   `json:"total_amount"`
-	Status           string                    `json:"status"`
-	IssuedDate       time.Time                 `json:"issued_date"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	Items            []PurchaseOrderDetailLine `json:"items"`
-	GoodsReceipts    []GoodsReceiptSummary     `json:"goods_receipts"`
+	ComplianceEvaluation *ComplianceDecision       `json:"compliance_evaluation,omitempty"`
+	ID                   uuid.UUID                 `json:"id"`
+	PONumber             string                    `json:"po_number"`
+	SupplierID           uuid.UUID                 `json:"supplier_id"`
+	SupplierName         string                    `json:"supplier_name"`
+	ComplianceCertID     *uuid.UUID                `json:"compliance_cert_id,omitempty"`
+	TotalAmount          float64                   `json:"total_amount"`
+	Status               string                    `json:"status"`
+	IssuedDate           time.Time                 `json:"issued_date"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	CancellationReason   *string                   `json:"cancellation_reason,omitempty"`
+	CancelledBy          *uuid.UUID                `json:"cancelled_by,omitempty"`
+	CancelledAt          *time.Time                `json:"cancelled_at,omitempty"`
+	Items                []PurchaseOrderDetailLine `json:"items"`
+	GoodsReceipts        []GoodsReceiptSummary     `json:"goods_receipts"`
 }
 
 // GoodsReceiptDetailItem represents a line item in GoodsReceiptDetail
 type GoodsReceiptDetailItem struct {
-	ID                uuid.UUID `json:"id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	ProductName       string    `json:"product_name"`
-	ProductSKU        string    `json:"product_sku"`
-	ReceivedQuantity  int       `json:"received_quantity"`
-	UnitCost          float64   `json:"unit_cost"`
-	SubtotalValuation float64   `json:"subtotal_valuation"`
+	ID                uuid.UUID  `json:"id"`
+	ProductID         uuid.UUID  `json:"product_id"`
+	ProductName       string     `json:"product_name"`
+	ProductSKU        string     `json:"product_sku"`
+	ReceivedQuantity  int        `json:"received_quantity"`
+	DeliveredQuantity int        `json:"delivered_quantity"`
+	AcceptedQuantity  int        `json:"accepted_quantity"`
+	RejectedQuantity  int        `json:"rejected_quantity"`
+	QCOutcome         string     `json:"qc_outcome"`
+	QCReason          *string    `json:"qc_reason,omitempty"`
+	InspectedBy       *uuid.UUID `json:"inspected_by,omitempty"`
+	InspectedAt       *time.Time `json:"inspected_at,omitempty"`
+	UnitCost          float64    `json:"unit_cost"`
+	SubtotalValuation float64    `json:"subtotal_valuation"`
+	StockMovementID   *uuid.UUID `json:"stock_movement_id,omitempty"`
 }
+
 
 // GoodsReceiptDetail represents full GR details with line items and accounting cross-reference
 type GoodsReceiptDetail struct {
-	ID                uuid.UUID                `json:"id"`
-	GRNumber          string                   `json:"gr_number"`
-	IdempotencyKey    string                   `json:"idempotency_key"`
-	PurchaseOrderID   uuid.UUID                `json:"purchase_order_id"`
-	PONumber          string                   `json:"po_number"`
-	SupplierID        uuid.UUID                `json:"supplier_id"`
-	SupplierName      string                   `json:"supplier_name"`
-	ReceivedBy        uuid.UUID                `json:"received_by"`
-	ReceivedDate      time.Time                `json:"received_date"`
-	Notes             string                   `json:"notes"`
-	CreatedAt         time.Time                `json:"created_at"`
-	TotalValuation    float64                  `json:"total_valuation"`
-	LedgerEntryNumber *string                  `json:"ledger_entry_number,omitempty"`
-	Items             []GoodsReceiptDetailItem `json:"items"`
+	ComplianceEvaluation *ComplianceDecision      `json:"compliance_evaluation,omitempty"`
+	ID                   uuid.UUID                `json:"id"`
+	GRNumber             string                   `json:"gr_number"`
+	IdempotencyKey       string                   `json:"idempotency_key"`
+	PurchaseOrderID      uuid.UUID                `json:"purchase_order_id"`
+	PONumber             string                   `json:"po_number"`
+	SupplierID           uuid.UUID                `json:"supplier_id"`
+	SupplierName         string                   `json:"supplier_name"`
+	ReceivedBy           uuid.UUID                `json:"received_by"`
+	ReceivedDate         time.Time                `json:"received_date"`
+	Notes                string                   `json:"notes"`
+	CreatedAt            time.Time                `json:"created_at"`
+	TotalValuation       float64                  `json:"total_valuation"`
+	LedgerEntryNumber    *string                  `json:"ledger_entry_number,omitempty"`
+	Items                []GoodsReceiptDetailItem `json:"items"`
 }
 
 // ProductTraceabilitySupplierInfo represents a supplier that provided the product

@@ -16,13 +16,9 @@ db-down: ## Stop local infrastructure containers
 	docker compose down
 
 .PHONY: db-reset
-db-reset: ## Reset local PostgreSQL database and re-apply seed data
-	docker compose down -v
-	docker compose up -d postgres redis
-	@echo "Waiting for postgres to be ready..."
-	@sleep 3
-	docker exec -i tenet_postgres psql -U postgres -d tenet_commerce < scripts/init_dev_db.sql
-	@echo "Database reset and seeded successfully!"
+db-reset: ## Reset local PostgreSQL database and re-apply seed data (opt-in demo guard)
+	@CONFIRM_DEMO_RESET=$${CONFIRM_DEMO_RESET:-true} ./scripts/reset_dev_db.sh
+
 
 # --- Backend Commands ---
 .PHONY: run
@@ -44,5 +40,26 @@ build: ## Build backend production binary
 .PHONY: tidy
 tidy: ## Tidy backend go modules
 	cd backend && go mod tidy
+
+# --- Frontend Commands ---
+.PHONY: fe-dev
+fe-dev: ## Run frontend Next.js dev server with live logs (default: port 3000, or `make fe-dev PORT=3001`)
+	cd frontend && npm run dev -- -p $(or $(PORT),3000)
+
+.PHONY: fe-clean
+fe-clean: ## Clean Next.js build cache (.next)
+	rm -rf frontend/.next
+
+.PHONY: fe-test
+fe-test: ## Run frontend unit and i18n parity test suites
+	cd frontend && npm test
+
+.PHONY: fe-lint
+fe-lint: ## Run frontend ESLint and TypeScript checks
+	cd frontend && npm run lint && npx tsc --noEmit
+
+.PHONY: fe-build
+fe-build: ## Build frontend production bundle
+	cd frontend && npm run build
 
 .DEFAULT_GOAL := help

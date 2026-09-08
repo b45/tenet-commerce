@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 var (
@@ -132,6 +133,7 @@ func (s *JWTService) GenerateTokenPair(userID, tenantID, tenantSlug, role string
 		Permissions: permissions,
 		TokenType:   "access",
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.NewString(),
 			Issuer:    "tenet-commerce-auth",
 			Subject:   userID,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -154,6 +156,7 @@ func (s *JWTService) GenerateTokenPair(userID, tenantID, tenantSlug, role string
 		Permissions: permissions,
 		TokenType:   "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.NewString(),
 			Issuer:    "tenet-commerce-auth",
 			Subject:   userID,
 			IssuedAt:  jwt.NewNumericDate(now),

@@ -4,24 +4,58 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
 
+	"github.com/b45/tenet-commerce/backend/internal/inventory"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/google/uuid"
 )
 
 var (
-	ErrNotFound = errors.New("record not found")
+	ErrNotFound          = errors.New("record not found")
+	ErrInventoryNotFound = errors.New("inventory record not found for product")
 )
 
 type queryRower interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-type Repository struct{}
+type Repository struct {
+	inventoryRepo *inventory.Repository
+}
 
 func NewRepository() *Repository {
-	return &Repository{}
+	return NewRepositoryWithInventory(inventory.NewRepository())
+}
+
+func NewRepositoryWithInventory(invRepo *inventory.Repository) *Repository {
+	if invRepo == nil {
+		invRepo = inventory.NewRepository()
+	}
+	return &Repository{inventoryRepo: invRepo}
+}
+
+// LockActiveProductsForPurchaseOrder serializes PO creation with product deactivation.
+func (r *Repository) LockActiveProductsForPurchaseOrder(ctx context.Context, tx pgx.Tx, productIDs []uuid.UUID) error {
+	ids := append([]uuid.UUID(nil), productIDs...)
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+	for _, productID := range ids {
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT is_active FROM products WHERE id = $1 FOR UPDATE`, productID).Scan(&active); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrProductNotAvailable
+			}
+			return fmt.Errorf("failed locking purchase order product: %w", err)
+		}
+		if !active {
+			return ErrProductNotAvailable
+		}
+	}
+	return nil
 }
 
 // GetTenantConfig fetches a specific config value for the tenant
@@ -73,22 +107,24 @@ func (r *Repository) CreateComplianceCertificate(ctx context.Context, tx pgx.Tx,
 // GetComplianceCertificateByID fetches a certificate and computes its status dynamically
 func (r *Repository) GetComplianceCertificateByID(ctx context.Context, db queryRower, certID uuid.UUID) (*ComplianceCertificate, error) {
 	query := `
-		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at,
+		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at, revoked_at,
 		CASE
-			WHEN valid_from > CURRENT_DATE THEN 'NOT_YET_VALID'
-			WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-			WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
+			WHEN revoked_at IS NOT NULL THEN 'REVOKED'
+			WHEN valid_from > (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'NOT_YET_VALID'
+			WHEN expiry_date < (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'EXPIRED'
+			WHEN expiry_date <= (clock_timestamp() AT TIME ZONE 'UTC')::date + INTERVAL '30 days' THEN 'EXPIRING_SOON'
 			ELSE 'VALID'
 		END AS computed_status
 		FROM compliance_certificates
 		WHERE id = $1
+		FOR UPDATE
 	`
-	
+
 	cert := &ComplianceCertificate{}
 	err := db.QueryRow(ctx, query, certID).Scan(
 		&cert.ID, &cert.SupplierID, &cert.CertType, &cert.CertificateNumber,
 		&cert.IssuingAuthority, &cert.Scope, &cert.ValidFrom, &cert.ExpiryDate,
-		&cert.DocumentURL, &cert.CreatedAt, &cert.ComputedStatus,
+		&cert.DocumentURL, &cert.CreatedAt, &cert.RevokedAt, &cert.ComputedStatus,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -103,7 +139,8 @@ func (r *Repository) GetComplianceCertificateByID(ctx context.Context, db queryR
 // are serialized for a single purchase order.
 func (r *Repository) LockPurchaseOrder(ctx context.Context, tx pgx.Tx, poID uuid.UUID) (*PurchaseOrder, error) {
 	query := `
-		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at
+		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at,
+		       cancellation_reason, cancelled_by, cancelled_at
 		FROM purchase_orders
 		WHERE id = $1
 		FOR UPDATE
@@ -112,6 +149,7 @@ func (r *Repository) LockPurchaseOrder(ctx context.Context, tx pgx.Tx, poID uuid
 	err := tx.QueryRow(ctx, query, poID).Scan(
 		&po.ID, &po.PONumber, &po.SupplierID, &po.ComplianceCertID,
 		&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt,
+		&po.CancellationReason, &po.CancelledBy, &po.CancelledAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -197,7 +235,9 @@ func (r *Repository) GetGoodsReceiptByIdempotencyKey(ctx context.Context, tx pgx
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, goods_receipt_id, product_id, received_quantity
+		SELECT id, goods_receipt_id, product_id, received_quantity,
+		       delivered_quantity, accepted_quantity, rejected_quantity,
+		       qc_outcome, qc_reason, inspected_by, inspected_at
 		FROM goods_receipt_items
 		WHERE goods_receipt_id = $1
 		ORDER BY id
@@ -209,7 +249,11 @@ func (r *Repository) GetGoodsReceiptByIdempotencyKey(ctx context.Context, tx pgx
 
 	for rows.Next() {
 		var item GoodsReceiptItem
-		if err := rows.Scan(&item.ID, &item.GoodsReceiptID, &item.ProductID, &item.ReceivedQuantity); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.GoodsReceiptID, &item.ProductID, &item.ReceivedQuantity,
+			&item.DeliveredQuantity, &item.AcceptedQuantity, &item.RejectedQuantity,
+			&item.QCOutcome, &item.QCReason, &item.InspectedBy, &item.InspectedAt,
+		); err != nil {
 			return nil, err
 		}
 		gr.Items = append(gr.Items, item)
@@ -218,6 +262,7 @@ func (r *Repository) GetGoodsReceiptByIdempotencyKey(ctx context.Context, tx pgx
 		return nil, err
 	}
 	return gr, nil
+
 }
 
 // CreatePurchaseOrder inserts a PO and its items
@@ -251,13 +296,15 @@ func (r *Repository) CreatePurchaseOrder(ctx context.Context, tx pgx.Tx, po *Pur
 // GetPurchaseOrderByID fetches a PO
 func (r *Repository) GetPurchaseOrderByID(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) (*PurchaseOrder, error) {
 	query := `
-		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at
+		SELECT id, po_number, supplier_id, compliance_cert_id, total_amount, status, issued_date, created_at,
+		       cancellation_reason, cancelled_by, cancelled_at
 		FROM purchase_orders WHERE id = $1
 	`
 	po := &PurchaseOrder{}
 	err := conn.QueryRow(ctx, query, poID).Scan(
 		&po.ID, &po.PONumber, &po.SupplierID, &po.ComplianceCertID,
 		&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt,
+		&po.CancellationReason, &po.CancelledBy, &po.CancelledAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -299,25 +346,60 @@ func (r *Repository) CreateGoodsReceipt(ctx context.Context, tx pgx.Tx, gr *Good
 	}
 
 	for _, item := range gr.Items {
-		// 1. Insert GR Item
+		// 1. Insert GR Item with full QC audit trail
 		queryItem := `
-			INSERT INTO goods_receipt_items (id, goods_receipt_id, product_id, received_quantity)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO goods_receipt_items (
+				id, goods_receipt_id, product_id, received_quantity,
+				delivered_quantity, accepted_quantity, rejected_quantity,
+				qc_outcome, qc_reason, inspected_by, inspected_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		`
-		_, err := tx.Exec(ctx, queryItem, item.ID, item.GoodsReceiptID, item.ProductID, item.ReceivedQuantity)
+		_, err := tx.Exec(ctx, queryItem,
+			item.ID, item.GoodsReceiptID, item.ProductID, item.ReceivedQuantity,
+			item.DeliveredQuantity, item.AcceptedQuantity, item.RejectedQuantity,
+			item.QCOutcome, item.QCReason, item.InspectedBy, item.InspectedAt,
+		)
 		if err != nil {
 			return err
 		}
 
-		// 2. Increment Stock Atomically
-		queryStock := `
-			UPDATE inventory
-			SET stock_quantity = stock_quantity + $1, updated_at = NOW()
-			WHERE product_id = $2
-		`
-		_, err = tx.Exec(ctx, queryStock, item.ReceivedQuantity, item.ProductID)
-		if err != nil {
-			return err
+		// 2. Post Stock Movement Atomically ONLY for accepted goods
+		if item.AcceptedQuantity > 0 {
+			lineID := item.ID
+			grID := gr.ID
+			actorID := gr.ReceivedBy
+			occurredAt := gr.ReceivedDate
+			if occurredAt.IsZero() {
+				occurredAt = time.Now()
+			}
+
+			var reason *string
+			if item.QCReason != nil && strings.TrimSpace(*item.QCReason) != "" {
+				reason = item.QCReason
+			} else {
+				defaultReason := fmt.Sprintf("Goods receipt %s acceptance", gr.GRNumber)
+				reason = &defaultReason
+			}
+
+			_, err := r.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+				ProductID:            item.ProductID,
+				WarehouseLocation:    inventory.DefaultCoreLocation,
+				QuantityDelta:        item.AcceptedQuantity,
+				MovementType:         inventory.MovementTypeIn,
+				SourceDocumentType:   inventory.SourceDocGoodsReceipt,
+				SourceDocumentID:     &grID,
+				SourceDocumentLineID: &lineID,
+				ActorID:              &actorID,
+				Reason:               reason,
+				OccurredAt:           occurredAt,
+			})
+			if errors.Is(err, inventory.ErrProductNotFound) {
+				return fmt.Errorf("%w: %s", ErrInventoryNotFound, item.ProductID)
+			}
+			if err != nil {
+				return fmt.Errorf("failed to post stock movement for goods receipt item %s: %w", item.ID, err)
+			}
 		}
 	}
 	return nil
@@ -358,11 +440,12 @@ func (r *Repository) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isAc
 	// Attach active certificate if available
 	for i := range suppliers {
 		certQuery := `
-			SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at,
+			SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at, revoked_at,
 			CASE
-				WHEN valid_from > CURRENT_DATE THEN 'NOT_YET_VALID'
-				WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-				WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
+				WHEN revoked_at IS NOT NULL THEN 'REVOKED'
+				WHEN valid_from > (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'NOT_YET_VALID'
+				WHEN expiry_date < (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'EXPIRED'
+				WHEN expiry_date <= (clock_timestamp() AT TIME ZONE 'UTC')::date + INTERVAL '30 days' THEN 'EXPIRING_SOON'
 				ELSE 'VALID'
 			END AS computed_status
 			FROM compliance_certificates
@@ -374,7 +457,7 @@ func (r *Repository) ListSuppliers(ctx context.Context, conn *pgxpool.Conn, isAc
 		err := conn.QueryRow(ctx, certQuery, suppliers[i].ID).Scan(
 			&cert.ID, &cert.SupplierID, &cert.CertType, &cert.CertificateNumber,
 			&cert.IssuingAuthority, &cert.Scope, &cert.ValidFrom, &cert.ExpiryDate,
-			&cert.DocumentURL, &cert.CreatedAt, &cert.ComputedStatus,
+			&cert.DocumentURL, &cert.CreatedAt, &cert.RevokedAt, &cert.ComputedStatus,
 		)
 		if err == nil {
 			suppliers[i].ComplianceCertificate = &cert
@@ -415,10 +498,30 @@ func (r *Repository) GetSupplierWithCertificates(ctx context.Context, conn *pgxp
 	return &sd, nil
 }
 
-// UpdateSupplier updates supplier contact information or active status
+// UpdateSupplier updates supplier contact information or active status with row-level locking
 func (r *Repository) UpdateSupplier(ctx context.Context, conn *pgxpool.Conn, id uuid.UUID, req *UpdateSupplierRequest) (*Supplier, error) {
-	supplier, err := r.GetSupplierByID(ctx, conn, id)
+	tx, err := conn.Begin(ctx)
 	if err != nil {
+		return nil, fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock supplier row for update
+	queryLock := `
+		SELECT id, code, company_name, contact_person, contact_email, contact_phone, is_active, created_at
+		FROM suppliers
+		WHERE id = $1
+		FOR UPDATE
+	`
+	var supplier Supplier
+	err = tx.QueryRow(ctx, queryLock, id).Scan(
+		&supplier.ID, &supplier.Code, &supplier.CompanyName, &supplier.ContactPerson,
+		&supplier.ContactEmail, &supplier.ContactPhone, &supplier.IsActive, &supplier.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 
@@ -443,12 +546,16 @@ func (r *Repository) UpdateSupplier(ctx context.Context, conn *pgxpool.Conn, id 
 		SET company_name = $1, contact_person = $2, contact_email = $3, contact_phone = $4, is_active = $5
 		WHERE id = $6
 	`
-	_, err = conn.Exec(ctx, query, supplier.CompanyName, supplier.ContactPerson, supplier.ContactEmail, supplier.ContactPhone, supplier.IsActive, id)
+	_, err = tx.Exec(ctx, query, supplier.CompanyName, supplier.ContactPerson, supplier.ContactEmail, supplier.ContactPhone, supplier.IsActive, id)
 	if err != nil {
 		return nil, err
 	}
 
-	return supplier, nil
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing supplier update: %w", err)
+	}
+
+	return &supplier, nil
 }
 
 // GetSupplierByID fetches basic supplier by ID
@@ -475,11 +582,12 @@ func (r *Repository) GetSupplierByID(ctx context.Context, db queryRower, id uuid
 // GetCertificatesBySupplierID returns all certificates for a supplier ordered by expiry descending
 func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxpool.Conn, supplierID uuid.UUID) ([]ComplianceCertificate, error) {
 	query := `
-		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at,
+		SELECT id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url, created_at, revoked_at,
 		CASE
-			WHEN valid_from > CURRENT_DATE THEN 'NOT_YET_VALID'
-			WHEN expiry_date < CURRENT_DATE THEN 'EXPIRED'
-			WHEN expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'EXPIRING_SOON'
+			WHEN revoked_at IS NOT NULL THEN 'REVOKED'
+			WHEN valid_from > (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'NOT_YET_VALID'
+			WHEN expiry_date < (clock_timestamp() AT TIME ZONE 'UTC')::date THEN 'EXPIRED'
+			WHEN expiry_date <= (clock_timestamp() AT TIME ZONE 'UTC')::date + INTERVAL '30 days' THEN 'EXPIRING_SOON'
 			ELSE 'VALID'
 		END AS computed_status
 		FROM compliance_certificates
@@ -498,7 +606,7 @@ func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxp
 		if err := rows.Scan(
 			&c.ID, &c.SupplierID, &c.CertType, &c.CertificateNumber,
 			&c.IssuingAuthority, &c.Scope, &c.ValidFrom, &c.ExpiryDate,
-			&c.DocumentURL, &c.CreatedAt, &c.ComputedStatus,
+			&c.DocumentURL, &c.CreatedAt, &c.RevokedAt, &c.ComputedStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -507,11 +615,25 @@ func (r *Repository) GetCertificatesBySupplierID(ctx context.Context, conn *pgxp
 	return certs, nil
 }
 
-// RevokeCertificate marks a certificate as expired immediately
+// RevokeCertificate preserves the original validity dates and records revocation under a row lock.
 func (r *Repository) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, certID uuid.UUID) error {
-	cmd, err := conn.Exec(ctx, `
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM compliance_certificates WHERE id = $1 FOR UPDATE`, certID).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	cmd, err := tx.Exec(ctx, `
 		UPDATE compliance_certificates
-		SET expiry_date = CURRENT_DATE - INTERVAL '1 day'
+		SET revoked_at = COALESCE(revoked_at, clock_timestamp())
 		WHERE id = $1
 	`, certID)
 	if err != nil {
@@ -520,7 +642,7 @@ func (r *Repository) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, 
 	if cmd.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ListPurchaseOrders returns a paginated list of PO summaries with optional status filter
@@ -534,6 +656,7 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 
 	query := `
 		SELECT po.id, po.po_number, po.supplier_id, s.company_name, po.compliance_cert_id, po.total_amount, po.status, po.issued_date, po.created_at,
+		       po.cancellation_reason, po.cancelled_by, po.cancelled_at,
 		       (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id) AS item_count
 		FROM purchase_orders po
 		JOIN suppliers s ON s.id = po.supplier_id
@@ -547,12 +670,13 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 	}
 	defer rows.Close()
 
-	var pos []PurchaseOrderSummary
+	pos := make([]PurchaseOrderSummary, 0)
 	for rows.Next() {
 		var po PurchaseOrderSummary
 		if err := rows.Scan(
 			&po.ID, &po.PONumber, &po.SupplierID, &po.SupplierName, &po.ComplianceCertID,
-			&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt, &po.ItemCount,
+			&po.TotalAmount, &po.Status, &po.IssuedDate, &po.CreatedAt,
+			&po.CancellationReason, &po.CancelledBy, &po.CancelledAt, &po.ItemCount,
 		); err != nil {
 			return nil, err
 		}
@@ -564,7 +688,8 @@ func (r *Repository) ListPurchaseOrders(ctx context.Context, conn *pgxpool.Conn,
 // GetPurchaseOrderDetail returns comprehensive PO information including items with remaining balances and linked GRs
 func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) (*PurchaseOrderDetail, error) {
 	queryPO := `
-		SELECT po.id, po.po_number, po.supplier_id, s.company_name, po.compliance_cert_id, po.total_amount, po.status, po.issued_date, po.created_at
+		SELECT po.id, po.po_number, po.supplier_id, s.company_name, po.compliance_cert_id, po.total_amount, po.status, po.issued_date, po.created_at,
+		       po.cancellation_reason, po.cancelled_by, po.cancelled_at
 		FROM purchase_orders po
 		JOIN suppliers s ON s.id = po.supplier_id
 		WHERE po.id = $1
@@ -573,6 +698,7 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 	err := conn.QueryRow(ctx, queryPO, poID).Scan(
 		&pod.ID, &pod.PONumber, &pod.SupplierID, &pod.SupplierName,
 		&pod.ComplianceCertID, &pod.TotalAmount, &pod.Status, &pod.IssuedDate, &pod.CreatedAt,
+		&pod.CancellationReason, &pod.CancelledBy, &pod.CancelledAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -602,6 +728,7 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 	}
 	defer itemRows.Close()
 
+	pod.Items = make([]PurchaseOrderDetailLine, 0)
 	for itemRows.Next() {
 		var line PurchaseOrderDetailLine
 		if err := itemRows.Scan(
@@ -617,6 +744,9 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 		pod.Items = append(pod.Items, line)
 	}
 	itemRows.Close()
+
+	pod.GoodsReceipts = make([]GoodsReceiptSummary, 0)
+
 
 	// Fetch linked goods receipts
 	queryGRs := `
@@ -652,45 +782,70 @@ func (r *Repository) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.C
 		pod.GoodsReceipts = append(pod.GoodsReceipts, gr)
 	}
 
-	return &pod, nil
+	grRows.Close()
+	pod.ComplianceEvaluation, err = r.getComplianceDecision(ctx, conn, "PO", poID)
+	return &pod, err
 }
 
-// CancelPurchaseOrder atomically cancels an unfulfilled PO (status DRAFT or ISSUED with 0 items received)
-func (r *Repository) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) error {
+// CancelPurchaseOrder atomically cancels an unfulfilled PO (status DRAFT or ISSUED with 0 items accepted).
+// If the PO is already CANCELLED, this operation is idempotent and returns the existing cancelled PO.
+func (r *Repository) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID, actorID uuid.UUID, reason string, cancelledAt time.Time) (*PurchaseOrder, error) {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
 	po, err := r.LockPurchaseOrder(ctx, tx, poID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if po.Status != "DRAFT" && po.Status != "ISSUED" {
-		return errors.New("only DRAFT or ISSUED purchase orders can be cancelled")
+	// Idempotency: if already CANCELLED, return current record safely
+	if po.Status == "CANCELLED" {
+		return po, nil
 	}
 
 	receivedMap, err := r.GetReceivedQuantities(ctx, tx, poID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	totalReceived := 0
+	totalAccepted := 0
 	for _, qty := range receivedMap {
-		totalReceived += qty
+		totalAccepted += qty
 	}
-	if totalReceived > 0 {
-		return errors.New("cannot cancel purchase order with received goods")
+	if totalAccepted > 0 {
+		return nil, ErrPOCannotBeCancelledWithAcceptedGoods
 	}
 
-	_, err = tx.Exec(ctx, "UPDATE purchase_orders SET status = 'CANCELLED' WHERE id = $1", poID)
+	if po.Status != "DRAFT" && po.Status != "ISSUED" {
+		return nil, ErrPOCannotBeCancelled
+	}
+
+	queryUpdate := `
+		UPDATE purchase_orders
+		SET status = 'CANCELLED',
+		    cancellation_reason = $1,
+		    cancelled_by = $2,
+		    cancelled_at = $3
+		WHERE id = $4
+	`
+	_, err = tx.Exec(ctx, queryUpdate, reason, actorID, cancelledAt, poID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	po.Status = "CANCELLED"
+	po.CancellationReason = &reason
+	po.CancelledBy = &actorID
+	po.CancelledAt = &cancelledAt
+
+	return po, nil
 }
 
 // ListGoodsReceipts returns a paginated list of goods receipt summaries
@@ -724,7 +879,7 @@ func (r *Repository) ListGoodsReceipts(ctx context.Context, conn *pgxpool.Conn, 
 	}
 	defer rows.Close()
 
-	var grs []GoodsReceiptSummary
+	grs := make([]GoodsReceiptSummary, 0)
 	for rows.Next() {
 		var gr GoodsReceiptSummary
 		if err := rows.Scan(
@@ -760,14 +915,19 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 		return nil, err
 	}
 
-	// Fetch items with unit cost and subtotal valuation
+	// Fetch items with unit cost, subtotal valuation, inline QC records, and linked stock movement
 	queryItems := `
-		SELECT gri.id, gri.product_id, p.name, p.sku, gri.received_quantity, poi.unit_cost,
-		       (gri.received_quantity * poi.unit_cost) AS subtotal_valuation
+		SELECT gri.id, gri.product_id, p.name, p.sku, gri.received_quantity,
+		       gri.delivered_quantity, gri.accepted_quantity, gri.rejected_quantity,
+		       gri.qc_outcome, gri.qc_reason, gri.inspected_by, gri.inspected_at,
+		       poi.unit_cost,
+		       (gri.accepted_quantity * poi.unit_cost) AS subtotal_valuation,
+		       sm.id AS stock_movement_id
 		FROM goods_receipt_items gri
 		JOIN products p ON p.id = gri.product_id
 		JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
 		JOIN purchase_order_items poi ON poi.purchase_order_id = gr.purchase_order_id AND poi.product_id = gri.product_id
+		LEFT JOIN stock_movements sm ON sm.source_document_type = 'GOODS_RECEIPT' AND sm.source_document_line_id = gri.id
 		WHERE gri.goods_receipt_id = $1
 		ORDER BY gri.id
 	`
@@ -777,10 +937,17 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 	}
 	defer rows.Close()
 
+	grd.Items = make([]GoodsReceiptDetailItem, 0)
 	var totalValuation float64
+
 	for rows.Next() {
 		var item GoodsReceiptDetailItem
-		if err := rows.Scan(&item.ID, &item.ProductID, &item.ProductName, &item.ProductSKU, &item.ReceivedQuantity, &item.UnitCost, &item.SubtotalValuation); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.ProductID, &item.ProductName, &item.ProductSKU, &item.ReceivedQuantity,
+			&item.DeliveredQuantity, &item.AcceptedQuantity, &item.RejectedQuantity,
+			&item.QCOutcome, &item.QCReason, &item.InspectedBy, &item.InspectedAt,
+			&item.UnitCost, &item.SubtotalValuation, &item.StockMovementID,
+		); err != nil {
 			return nil, err
 		}
 		totalValuation += item.SubtotalValuation
@@ -800,7 +967,8 @@ func (r *Repository) GetGoodsReceiptDetail(ctx context.Context, conn *pgxpool.Co
 		grd.LedgerEntryNumber = &ledgerEntryNumber
 	}
 
-	return &grd, nil
+	grd.ComplianceEvaluation, err = r.getComplianceDecision(ctx, conn, "GR", grID)
+	return &grd, err
 }
 
 // GetProductTraceability reconstructs the document provenance of a product from Halal cert -> PO -> GR -> stock

@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 )
 
@@ -48,3 +50,18 @@ type LoginResponse struct {
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
+
+// LogoutRequest defines optional parameters when logging out (e.g. refresh token to revoke)
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// BlacklistKeyPrefix defines the Redis key prefix for revoked tokens
+const BlacklistKeyPrefix = "auth:blacklist:"
+
+// HashToken calculates the SHA-256 hex digest of a token string for safe storage/lookup in Redis
+func HashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+

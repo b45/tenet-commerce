@@ -56,6 +56,109 @@ VALUES
     ('77777777-7777-7777-7777-777777777777', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'superadmin@darussalam.com', '$2a$10$ccdY3IxyNJFUGpEzYG4F3OwGsEXNZa4NX1F4/G.FP.QCty.grj29y', 'Super Administrator (Darussalam)', 'SUPER_ADMIN', TRUE)
 ON CONFLICT (email) DO NOTHING;
 
+-- 3.2 Create SaaS Feature Access & Entitlement Tables in public schema
+CREATE TABLE IF NOT EXISTS public.plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(63) NOT NULL UNIQUE,          -- 'starter', 'growth', 'enterprise'
+    name VARCHAR(255) NOT NULL,
+    version INT NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.plan_features (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plan_id UUID NOT NULL REFERENCES public.plans(id) ON DELETE CASCADE,
+    feature_key VARCHAR(127) NOT NULL,
+    grant_type VARCHAR(31) NOT NULL DEFAULT 'BOOLEAN' CHECK (grant_type IN ('BOOLEAN', 'QUOTA')),
+    quota_limit INT NULL,                      -- NULL represents unlimited capacity
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_plan_feature UNIQUE (plan_id, feature_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_features_plan_key ON public.plan_features(plan_id, feature_key);
+
+CREATE TABLE IF NOT EXISTS public.tenant_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL UNIQUE REFERENCES public.tenants(id) ON DELETE RESTRICT,
+    plan_id UUID NOT NULL REFERENCES public.plans(id) ON DELETE RESTRICT,
+    status VARCHAR(31) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELED')),
+    current_period_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    current_period_end TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '365 days'),
+    canceled_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_subscriptions_tenant ON public.tenant_subscriptions(tenant_id);
+
+CREATE TABLE IF NOT EXISTS public.subscription_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    actor_id UUID NULL REFERENCES public.users(id) ON DELETE SET NULL,
+    action VARCHAR(63) NOT NULL,
+    before_state JSONB NULL,
+    after_state JSONB NOT NULL,
+    reason TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Seed Baseline Subscription Plans
+INSERT INTO public.plans (id, code, name, version, is_active)
+VALUES
+    ('10000000-0000-0000-0000-000000000001', 'starter', 'Starter Retail Tier', 1, TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'growth', 'Growth Business Tier', 1, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'enterprise', 'Enterprise Sharia Tier', 1, TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+-- Seed Plan Features
+-- Starter Tier Features
+INSERT INTO public.plan_features (plan_id, feature_key, grant_type, quota_limit, is_enabled)
+VALUES
+    ('10000000-0000-0000-0000-000000000001', 'pos.checkout', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000001', 'pos.daily_summary', 'BOOLEAN', NULL, FALSE),
+    ('10000000-0000-0000-0000-000000000001', 'inventory.basic', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000001', 'inventory.stock_opname', 'BOOLEAN', NULL, FALSE),
+    ('10000000-0000-0000-0000-000000000001', 'catalog.max_products', 'QUOTA', 100, TRUE)
+ON CONFLICT (plan_id, feature_key) DO NOTHING;
+
+-- Growth Tier Features
+INSERT INTO public.plan_features (plan_id, feature_key, grant_type, quota_limit, is_enabled)
+VALUES
+    ('10000000-0000-0000-0000-000000000002', 'pos.checkout', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'pos.daily_summary', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'inventory.basic', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'inventory.stock_opname', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'supply_chain.basic', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'catalog.max_products', 'QUOTA', 1000, TRUE)
+ON CONFLICT (plan_id, feature_key) DO NOTHING;
+
+-- Enterprise Tier Features
+INSERT INTO public.plan_features (plan_id, feature_key, grant_type, quota_limit, is_enabled)
+VALUES
+    ('10000000-0000-0000-0000-000000000003', 'pos.checkout', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'pos.daily_summary', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'pos.offline_mode', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'inventory.basic', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'inventory.stock_opname', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'inventory.multi_location', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'supply_chain.strict_halal', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'ledger.reporting', 'BOOLEAN', NULL, TRUE),
+    ('10000000-0000-0000-0000-000000000003', 'catalog.max_products', 'QUOTA', NULL, TRUE)
+ON CONFLICT (plan_id, feature_key) DO NOTHING;
+
+-- Seed Initial Subscriptions for Test Tenants
+INSERT INTO public.tenant_subscriptions (id, tenant_id, plan_id, status)
+VALUES
+    ('20000000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '10000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000002', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', '10000000-0000-0000-0000-000000000001', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000003', 'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', '10000000-0000-0000-0000-000000000001', 'CANCELED')
+ON CONFLICT (tenant_id) DO UPDATE
+SET plan_id = EXCLUDED.plan_id, status = EXCLUDED.status, updated_at = NOW();
+
 -- 4. Clean & Re-create Isolated Tenant Schemas for Dev
 CREATE SCHEMA IF NOT EXISTS tenant_al_barakah_mart;
 CREATE SCHEMA IF NOT EXISTS tenant_darussalam_store;
@@ -118,6 +221,49 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.inventory (
     warehouse_location VARCHAR(127) DEFAULT 'MAIN_STORE',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 5.3.1 Stock Movements Table (Append-Only Audit Trail)
+CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE RESTRICT,
+    warehouse_location VARCHAR(127) NOT NULL DEFAULT 'MAIN_STORE',
+    quantity_delta INTEGER NOT NULL,
+    movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN ('OPENING', 'IN', 'OUT', 'ADJUSTMENT')),
+    source_document_type VARCHAR(63) NOT NULL,
+    source_document_id UUID,
+    source_document_line_id UUID,
+    actor_id UUID,
+    reason TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_stock_movement_direction CHECK (
+        (movement_type = 'OPENING' AND quantity_delta >= 0) OR
+        (movement_type = 'IN' AND quantity_delta > 0) OR
+        (movement_type = 'OUT' AND quantity_delta < 0) OR
+        (movement_type = 'ADJUSTMENT' AND quantity_delta <> 0)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_movement_source_al_barakah ON tenant_al_barakah_mart.stock_movements (
+    source_document_type,
+    COALESCE(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(source_document_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product_occurred_al_barakah ON tenant_al_barakah_mart.stock_movements (product_id, occurred_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_source_al_barakah ON tenant_al_barakah_mart.stock_movements (source_document_type, source_document_id);
+
+CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.prevent_stock_movements_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Stock movement violation: Posted stock movements are strictly append-only and cannot be updated or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_stock_movements ON tenant_al_barakah_mart.stock_movements;
+CREATE TRIGGER trg_immutable_stock_movements
+BEFORE UPDATE OR DELETE ON tenant_al_barakah_mart.stock_movements
+FOR EACH ROW EXECUTE FUNCTION tenant_al_barakah_mart.prevent_stock_movements_mutation();
 
 -- 5.4 Transactions Table
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.transactions (
@@ -223,7 +369,10 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_orders (
     total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
     status VARCHAR(31) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED')),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    cancellation_reason TEXT,
+    cancelled_by UUID,
+    cancelled_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.purchase_order_items (
@@ -246,12 +395,23 @@ CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE tenant_al_barakah_mart.goods_receipts ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255) UNIQUE;
+
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.goods_receipt_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     goods_receipt_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.goods_receipts(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES tenant_al_barakah_mart.products(id) ON DELETE RESTRICT,
-    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
+    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0),
+    delivered_quantity INTEGER NOT NULL DEFAULT 0 CHECK (delivered_quantity >= 0),
+    accepted_quantity INTEGER NOT NULL DEFAULT 0 CHECK (accepted_quantity >= 0),
+    rejected_quantity INTEGER NOT NULL DEFAULT 0 CHECK (rejected_quantity >= 0),
+    qc_outcome VARCHAR(31) NOT NULL DEFAULT 'NOT_RECORDED_LEGACY' CHECK (qc_outcome IN ('PASS', 'PARTIAL_ACCEPT', 'REJECT', 'NOT_RECORDED_LEGACY')),
+    qc_reason TEXT,
+    inspected_by UUID,
+    inspected_at TIMESTAMPTZ
 );
+
+
 
 -- 5.6 Durable Idempotency Requests
 CREATE TABLE IF NOT EXISTS tenant_al_barakah_mart.idempotency_requests (
@@ -320,6 +480,9 @@ CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_al_barakah_mart ON te
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_al_barakah_mart ON tenant_al_barakah_mart.ledger_entries(entry_date);
 CREATE INDEX IF NOT EXISTS idx_abm_ledger_entries_status ON tenant_al_barakah_mart.ledger_entries(status);
 CREATE INDEX IF NOT EXISTS idx_abm_ledger_entries_reversed_by ON tenant_al_barakah_mart.ledger_entries(reversed_by_entry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_abm_ledger_entries_reversal_source 
+    ON tenant_al_barakah_mart.ledger_entries(source_document_id) 
+    WHERE source_document_type = 'REVERSAL';
 
 -- Ledger Balance Invariant Trigger (Enforces >=2 lines, >0 amount, and sum(debit) == sum(credit))
 CREATE OR REPLACE FUNCTION tenant_al_barakah_mart.verify_ledger_entry_balance()
@@ -439,7 +602,8 @@ VALUES
     ('10000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-BG01', '8992001000030', 'Bolu Gulung Pandan Keju', 'Bolu gulung aroma pandan asli suji dengan taburan parutan keju melimpah', 45000.00, 28000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000020', 'SKU-BREAD-RS01', '8992001000040', 'Roti Sisir Butter Premium', 'Roti sisir mentega jadul lembut, manis gurih nagih', 18000.00, 11000.00, '["HALAL_MUI"]', TRUE),
     ('10000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000030', 'SKU-PASTRY-CA01', '8992001000050', 'Croissant Almond Halal', 'Croissant renyah berlapis dengan isian almond paste dan topping almond panggang', 25000.00, 15000.00, '["HALAL_MUI"]', TRUE),
-    ('10000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000040', 'SKU-SNACK-LL01', '8992001000060', 'Lapis Legit Prunes Slice', 'Lapis legit rempah klasik dengan potongan buah prunes pilihan', 28000.00, 18000.00, '["HALAL_MUI"]', TRUE)
+    ('10000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000040', 'SKU-SNACK-LL01', '8992001000060', 'Lapis Legit Prunes Slice', 'Lapis legit rempah klasik dengan potongan buah prunes pilihan', 28000.00, 18000.00, '["HALAL_MUI"]', TRUE),
+    ('10000000-0000-0000-0000-000000000099', 'c0000000-0000-0000-0000-000000000003', 'SKU-DEMO-01', '8999001000099', 'Sirup Gula Tebu Al-Barakah (Demo SKU)', 'Produk demo deterministik untuk pengujian golden journey dan showcase', 15000.00, 10000.00, '["HALAL_MUI"]', TRUE)
 ON CONFLICT (sku) DO UPDATE SET 
     name = EXCLUDED.name,
     unit_price = EXCLUDED.unit_price,
@@ -450,7 +614,27 @@ ON CONFLICT (sku) DO UPDATE SET
 -- 5.8 Seed Inventory Stock for tenant_al_barakah_mart
 INSERT INTO tenant_al_barakah_mart.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
 SELECT id, 50, 10, 'MAIN_STORE' FROM tenant_al_barakah_mart.products
+WHERE sku <> 'SKU-DEMO-01'
 ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- Explicit opening inventory for deterministic demo fixture (opening stock 0, threshold 10)
+INSERT INTO tenant_al_barakah_mart.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
+SELECT id, 0, 10, 'MAIN_STORE' FROM tenant_al_barakah_mart.products
+WHERE sku = 'SKU-DEMO-01'
+ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- 5.9 Seed Deterministic Demo Supplier and Halal Compliance Certificate
+INSERT INTO tenant_al_barakah_mart.suppliers (id, code, company_name, contact_person, contact_email, contact_phone, is_active)
+VALUES 
+    ('a1000000-0000-0000-0000-000000000001', 'SUP-DEMO-VALID-01', 'PT Berkah Pangan Madani (Demo Supplier)', 'Haji Ridwan', 'ridwan@berkahpangan.co.id', '08123456780', TRUE),
+    ('a1000000-0000-0000-0000-000000000002', 'SUP-DEMO-EXP-01', 'CV Segar Abadi Jaya (Expired Cert Demo)', 'Pak Hendra', 'hendra@segarabadi.co.id', '08123456781', TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO tenant_al_barakah_mart.compliance_certificates (id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url)
+VALUES
+    ('c1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'HALAL_MUI', 'CERT-DEMO-HALAL-2099', 'BPJPH', 'Sugar, Syrup & Agro Processing', '2024-01-01', '2099-12-31', 'https://halal.go.id/cert/CERT-DEMO-HALAL-2099'),
+    ('c1000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000002', 'HALAL_MUI', 'CERT-DEMO-HALAL-EXPIRED', 'BPJPH', 'Poultry & Meat Processing', '2020-01-01', '2021-12-31', 'https://halal.go.id/cert/CERT-DEMO-HALAL-EXPIRED')
+ON CONFLICT (certificate_number) DO NOTHING;
 
 -- ==============================================================================
 -- 6. SCHEMA SETUP: tenant_darussalam_store
@@ -509,6 +693,49 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.inventory (
     warehouse_location VARCHAR(127) DEFAULT 'MAIN_STORE',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 6.3.1 Stock Movements Table (Append-Only Audit Trail)
+CREATE TABLE IF NOT EXISTS tenant_darussalam_store.stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE RESTRICT,
+    warehouse_location VARCHAR(127) NOT NULL DEFAULT 'MAIN_STORE',
+    quantity_delta INTEGER NOT NULL,
+    movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN ('OPENING', 'IN', 'OUT', 'ADJUSTMENT')),
+    source_document_type VARCHAR(63) NOT NULL,
+    source_document_id UUID,
+    source_document_line_id UUID,
+    actor_id UUID,
+    reason TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_stock_movement_direction CHECK (
+        (movement_type = 'OPENING' AND quantity_delta >= 0) OR
+        (movement_type = 'IN' AND quantity_delta > 0) OR
+        (movement_type = 'OUT' AND quantity_delta < 0) OR
+        (movement_type = 'ADJUSTMENT' AND quantity_delta <> 0)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_movement_source_darussalam ON tenant_darussalam_store.stock_movements (
+    source_document_type,
+    COALESCE(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(source_document_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product_occurred_darussalam ON tenant_darussalam_store.stock_movements (product_id, occurred_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_source_darussalam ON tenant_darussalam_store.stock_movements (source_document_type, source_document_id);
+
+CREATE OR REPLACE FUNCTION tenant_darussalam_store.prevent_stock_movements_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Stock movement violation: Posted stock movements are strictly append-only and cannot be updated or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_immutable_stock_movements ON tenant_darussalam_store.stock_movements;
+CREATE TRIGGER trg_immutable_stock_movements
+BEFORE UPDATE OR DELETE ON tenant_darussalam_store.stock_movements
+FOR EACH ROW EXECUTE FUNCTION tenant_darussalam_store.prevent_stock_movements_mutation();
 
 -- 6.4 Transactions Table
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.transactions (
@@ -637,12 +864,23 @@ CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE tenant_darussalam_store.goods_receipts ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255) UNIQUE;
+
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.goods_receipt_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     goods_receipt_id UUID NOT NULL REFERENCES tenant_darussalam_store.goods_receipts(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES tenant_darussalam_store.products(id) ON DELETE RESTRICT,
-    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0)
+    received_quantity INTEGER NOT NULL CHECK (received_quantity >= 0),
+    delivered_quantity INTEGER NOT NULL DEFAULT 0 CHECK (delivered_quantity >= 0),
+    accepted_quantity INTEGER NOT NULL DEFAULT 0 CHECK (accepted_quantity >= 0),
+    rejected_quantity INTEGER NOT NULL DEFAULT 0 CHECK (rejected_quantity >= 0),
+    qc_outcome VARCHAR(31) NOT NULL DEFAULT 'NOT_RECORDED_LEGACY' CHECK (qc_outcome IN ('PASS', 'PARTIAL_ACCEPT', 'REJECT', 'NOT_RECORDED_LEGACY')),
+    qc_reason TEXT,
+    inspected_by UUID,
+    inspected_at TIMESTAMPTZ
 );
+
+
 
 -- 6.5.1 Durable Idempotency Requests
 CREATE TABLE IF NOT EXISTS tenant_darussalam_store.idempotency_requests (
@@ -682,6 +920,17 @@ ON CONFLICT (sku) DO UPDATE SET
 INSERT INTO tenant_darussalam_store.inventory (product_id, stock_quantity, reorder_threshold, warehouse_location)
 SELECT id, 30, 5, 'MAIN_STORE' FROM tenant_darussalam_store.products
 ON CONFLICT (product_id) DO UPDATE SET stock_quantity = EXCLUDED.stock_quantity;
+
+-- 6.7.1 Seed Deterministic Demo Supplier and Halal Compliance Certificate for tenant_darussalam_store
+INSERT INTO tenant_darussalam_store.suppliers (id, code, company_name, contact_person, contact_email, contact_phone, is_active)
+VALUES 
+    ('b1000000-0000-0000-0000-000000000001', 'SUP-DS-DEMO-01', 'CV Nabawi Import Mandiri (Tenant B Demo Supplier)', 'Ahmad Nabawi', 'ahmad@nabawi.co.id', '08129876543', TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO tenant_darussalam_store.compliance_certificates (id, supplier_id, cert_type, certificate_number, issuing_authority, scope, valid_from, expiry_date, document_url)
+VALUES
+    ('c2000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'HALAL_MUI', 'CERT-DS-DEMO-2099', 'BPJPH', 'Import Dates & Holy Water', '2024-01-01', '2099-12-31', 'https://halal.go.id/cert/CERT-DS-DEMO-2099')
+ON CONFLICT (certificate_number) DO NOTHING;
 
 -- 6.8 Ledger Engine
 
@@ -728,6 +977,9 @@ CREATE INDEX IF NOT EXISTS idx_ledger_lines_account_tenant_darussalam_store ON t
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_date_tenant_darussalam_store ON tenant_darussalam_store.ledger_entries(entry_date);
 CREATE INDEX IF NOT EXISTS idx_ds_ledger_entries_status ON tenant_darussalam_store.ledger_entries(status);
 CREATE INDEX IF NOT EXISTS idx_ds_ledger_entries_reversed_by ON tenant_darussalam_store.ledger_entries(reversed_by_entry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ds_ledger_entries_reversal_source 
+    ON tenant_darussalam_store.ledger_entries(source_document_id) 
+    WHERE source_document_type = 'REVERSAL';
 
 -- Ledger Balance Invariant Trigger (Enforces >=2 lines, >0 amount, and sum(debit) == sum(credit))
 CREATE OR REPLACE FUNCTION tenant_darussalam_store.verify_ledger_entry_balance()
@@ -821,3 +1073,139 @@ INSERT INTO tenant_darussalam_store.ledger_accounts (code, name, account_type, i
     ('5010', 'Cost of Goods Sold', 'EXPENSE', FALSE),
     ('5020', 'Inventory Shrinkage & Loss', 'EXPENSE', FALSE)
 ON CONFLICT (code) DO NOTHING;
+
+-- Apply before deploying the certificate-validity service.
+-- Re-runnable upgrade for every trusted tenant in the registry; existing documents
+-- retain absent evaluation history rather than receiving fabricated decisions.
+BEGIN;
+DO $upgrade$
+DECLARE
+    tenant_schema TEXT;
+BEGIN
+    FOR tenant_schema IN SELECT schema_name FROM public.tenants WHERE status = 'ACTIVE' ORDER BY schema_name LOOP
+        IF tenant_schema !~ '^tenant_[a-z0-9_]+$' THEN
+            RAISE EXCEPTION 'Unsafe tenant schema in registry: %', tenant_schema;
+        END IF;
+        IF to_regnamespace(tenant_schema) IS NULL THEN
+            RAISE EXCEPTION 'Missing tenant schema: %', tenant_schema;
+        END IF;
+        EXECUTE format('ALTER TABLE %I.compliance_certificates ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ', tenant_schema);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS %I.compliance_decisions (
+            document_type TEXT NOT NULL CHECK (document_type IN (''PO'', ''GR'')),
+            document_id UUID NOT NULL,
+            decision JSONB NOT NULL,
+            PRIMARY KEY (document_type, document_id)
+        )', tenant_schema);
+        EXECUTE format($ddl$
+            CREATE OR REPLACE FUNCTION %I.prevent_compliance_decision_mutation()
+            RETURNS TRIGGER AS $body$
+            BEGIN
+                RAISE EXCEPTION 'Compliance decisions are immutable';
+            END;
+            $body$ LANGUAGE plpgsql
+        $ddl$, tenant_schema);
+        EXECUTE format('DROP TRIGGER IF EXISTS immutable_compliance_decision ON %I.compliance_decisions', tenant_schema);
+        EXECUTE format('CREATE TRIGGER immutable_compliance_decision BEFORE UPDATE OR DELETE ON %I.compliance_decisions FOR EACH ROW EXECUTE FUNCTION %I.prevent_compliance_decision_mutation()', tenant_schema, tenant_schema);
+
+        -- TPC-011: Inline quality check fields on goods_receipt_items
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS delivered_quantity INTEGER NOT NULL DEFAULT 0 CHECK (delivered_quantity >= 0)', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS accepted_quantity INTEGER NOT NULL DEFAULT 0 CHECK (accepted_quantity >= 0)', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS rejected_quantity INTEGER NOT NULL DEFAULT 0 CHECK (rejected_quantity >= 0)', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS qc_outcome VARCHAR(31) NOT NULL DEFAULT ''NOT_RECORDED_LEGACY'' CHECK (qc_outcome IN (''PASS'', ''PARTIAL_ACCEPT'', ''REJECT'', ''NOT_RECORDED_LEGACY''))', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS qc_reason TEXT', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS inspected_by UUID', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.goods_receipt_items ADD COLUMN IF NOT EXISTS inspected_at TIMESTAMPTZ', tenant_schema);
+
+
+        -- Backfill existing legacy records: received_quantity -> accepted_quantity & delivered_quantity, without fabricating PASS
+        EXECUTE format('UPDATE %I.goods_receipt_items SET delivered_quantity = received_quantity, accepted_quantity = received_quantity WHERE qc_outcome = ''NOT_RECORDED_LEGACY'' AND delivered_quantity = 0 AND received_quantity > 0', tenant_schema);
+
+        -- TPC-012: Serialization and cancellation audit fields on purchase_orders
+        EXECUTE format('ALTER TABLE %I.purchase_orders DROP CONSTRAINT IF EXISTS purchase_orders_status_check', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD CONSTRAINT purchase_orders_status_check CHECK (status IN (''DRAFT'', ''ISSUED'', ''PARTIALLY_RECEIVED'', ''RECEIVED'', ''CANCELLED''))', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancelled_by UUID', tenant_schema);
+        EXECUTE format('ALTER TABLE %I.purchase_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ', tenant_schema);
+
+        -- TPC-014: Append-only stock movements and opening balance cutover
+        EXECUTE format('CREATE TABLE IF NOT EXISTS %I.stock_movements (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            product_id UUID NOT NULL REFERENCES %I.products(id) ON DELETE RESTRICT,
+            warehouse_location VARCHAR(127) NOT NULL DEFAULT ''MAIN_STORE'',
+            quantity_delta INTEGER NOT NULL,
+            movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN (''OPENING'', ''IN'', ''OUT'', ''ADJUSTMENT'')),
+            source_document_type VARCHAR(63) NOT NULL,
+            source_document_id UUID,
+            source_document_line_id UUID,
+            actor_id UUID,
+            reason TEXT,
+            occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT chk_stock_movement_direction CHECK (
+                (movement_type = ''OPENING'' AND quantity_delta >= 0) OR
+                (movement_type = ''IN'' AND quantity_delta > 0) OR
+                (movement_type = ''OUT'' AND quantity_delta < 0) OR
+                (movement_type = ''ADJUSTMENT'' AND quantity_delta <> 0)
+            )
+        )', tenant_schema, tenant_schema);
+
+        EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_movement_source_%s ON %I.stock_movements (
+            source_document_type,
+            COALESCE(source_document_id, ''00000000-0000-0000-0000-000000000000''::uuid),
+            COALESCE(source_document_line_id, ''00000000-0000-0000-0000-000000000000''::uuid)
+        )', tenant_schema, tenant_schema);
+
+        EXECUTE format('CREATE INDEX IF NOT EXISTS idx_stock_movements_product_occurred_%s ON %I.stock_movements (product_id, occurred_at DESC, created_at DESC)', tenant_schema, tenant_schema);
+        EXECUTE format('CREATE INDEX IF NOT EXISTS idx_stock_movements_source_%s ON %I.stock_movements (source_document_type, source_document_id)', tenant_schema, tenant_schema);
+
+        EXECUTE format($ddl$
+            CREATE OR REPLACE FUNCTION %I.prevent_stock_movements_mutation()
+            RETURNS TRIGGER AS $body$
+            BEGIN
+                RAISE EXCEPTION 'Stock movement violation: Posted stock movements are strictly append-only and cannot be updated or deleted.';
+            END;
+            $body$ LANGUAGE plpgsql
+        $ddl$, tenant_schema);
+
+        EXECUTE format('DROP TRIGGER IF EXISTS trg_immutable_stock_movements ON %I.stock_movements', tenant_schema);
+        EXECUTE format('CREATE TRIGGER trg_immutable_stock_movements BEFORE UPDATE OR DELETE ON %I.stock_movements FOR EACH ROW EXECUTE FUNCTION %I.prevent_stock_movements_mutation()', tenant_schema, tenant_schema);
+
+        -- Backfill OPENING balance cutoff without double counting or zero deltas
+        EXECUTE format('
+            INSERT INTO %I.stock_movements (
+                product_id,
+                warehouse_location,
+                quantity_delta,
+                movement_type,
+                source_document_type,
+                source_document_id,
+                source_document_line_id,
+                reason,
+                occurred_at,
+                created_at
+            )
+            SELECT
+                i.product_id,
+                COALESCE(i.warehouse_location, ''MAIN_STORE''),
+                i.stock_quantity,
+                ''OPENING'',
+                ''OPENING_BALANCE'',
+                i.product_id,
+                NULL,
+                ''Initial opening stock cutover'',
+                i.updated_at,
+                NOW()
+            FROM %I.inventory i
+            WHERE i.stock_quantity > 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM %I.stock_movements sm
+                  WHERE sm.product_id = i.product_id
+                    AND sm.movement_type = ''OPENING''
+              )
+        ', tenant_schema, tenant_schema, tenant_schema);
+    END LOOP;
+END;
+$upgrade$;
+COMMIT;
+
+

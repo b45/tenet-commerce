@@ -5,100 +5,53 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
+	"github.com/b45/tenet-commerce/backend/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	ErrComplianceCertRequired = errors.New("compliance certificate is required under strict mode")
-	ErrComplianceCertExpired  = errors.New("compliance certificate is expired")
-	ErrComplianceCertInvalid  = errors.New("compliance certificate is not valid for this transaction")
-	ErrInvalidPOStatus        = errors.New("invalid purchase order status for this operation")
-	ErrEmptyReceipt           = errors.New("goods receipt must contain at least one item")
-	ErrZeroValueReceipt       = errors.New("goods receipt inbound valuation must be greater than zero")
-	ErrReceiptItemNotOnPO     = errors.New("goods receipt item does not exist on purchase order")
-	ErrDuplicateReceiptItem   = errors.New("goods receipt contains a duplicate product")
-	ErrReceiptQuantityExceeds = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
-	ErrIdempotencyKeyConflict = errors.New("idempotency key is already associated with another purchase order")
+	ErrComplianceCertRequired               = errors.New("compliance certificate is required under strict mode")
+	ErrComplianceCertExpired                = errors.New("compliance certificate is expired")
+	ErrComplianceCertInvalid                = errors.New("compliance certificate is not valid for this transaction")
+	ErrSupplierInactive                     = errors.New("supplier is inactive")
+	ErrInvalidPOStatus                      = errors.New("invalid purchase order status for this operation")
+	ErrEmptyReceipt                         = errors.New("goods receipt must contain at least one item")
+	ErrZeroValueReceipt                     = errors.New("goods receipt inbound valuation must be greater than zero")
+	ErrReceiptItemNotOnPO                   = errors.New("goods receipt item does not exist on purchase order")
+	ErrDuplicateReceiptItem                 = errors.New("goods receipt contains a duplicate product")
+	ErrReceiptQuantityExceeds               = errors.New("goods receipt quantity exceeds purchase order outstanding quantity")
+	ErrIdempotencyKeyConflict               = errors.New("idempotency key is already associated with another purchase order")
+	ErrInvalidMonetaryAmount                = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
+	ErrInvalidQCArithmetic                  = errors.New("delivered quantity must equal accepted plus rejected quantity")
+	ErrQCReasonRequired                     = errors.New("qc_reason is required when rejected quantity is greater than zero")
+	ErrPOCannotBeCancelled                  = errors.New("only DRAFT or ISSUED purchase orders can be cancelled")
+	ErrPOCannotBeCancelledWithAcceptedGoods = errors.New("cannot cancel purchase order with received goods")
+	ErrProductNotAvailable                  = errors.New("purchase order product does not exist or is inactive")
 )
 
 type Service struct {
 	repo          *Repository
 	ledgerService *ledger.Service
+	now           func() time.Time
 }
 
 func NewService(repo *Repository, ledgerService *ledger.Service) *Service {
-	return &Service{repo: repo, ledgerService: ledgerService}
+	return NewServiceWithClock(repo, ledgerService, time.Now)
 }
 
-// checkCompliance is an internal helper that implements the Configurable Compliance Engine logic.
-// It verifies if the tenant is in strict mode and, if so, whether the provided certificate is valid.
-func (s *Service) checkCompliance(ctx context.Context, db queryRower, supplierID uuid.UUID, certID *uuid.UUID) error {
-	start := time.Now()
-	defer func() {
-		slog.InfoContext(ctx, "compliance_check_completed",
-			slog.Duration("duration_cert_validation_ms", time.Since(start)),
-		)
-	}()
-
-	// 1. Fetch Tenant Config
-	config, err := s.repo.GetTenantConfig(ctx, db, "compliance")
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil // No config found means no strict mode
-		}
-		return err
+// NewServiceWithClock allows deterministic boundary tests without changing global time.
+// The clock must be safe for concurrent use and must not be derived from HTTP input.
+func NewServiceWithClock(repo *Repository, ledgerService *ledger.Service, now func() time.Time) *Service {
+	if now == nil {
+		panic("supplychain: nil clock")
 	}
-
-	strictMode, ok := config["strict_compliance_mode"].(bool)
-	if !ok || !strictMode {
-		return nil // Strict mode is disabled. Bypass check.
-	}
-
-	// 2. Strict mode is ON. We must have a certificate.
-	if certID == nil {
-		return ErrComplianceCertRequired
-	}
-
-	// 3. Validate Certificate Status
-	cert, err := s.repo.GetComplianceCertificateByID(ctx, db, *certID)
-	if err != nil {
-		return err
-	}
-	if cert.SupplierID != supplierID {
-		return ErrComplianceCertInvalid
-	}
-
-	switch cert.ComputedStatus {
-	case "EXPIRED", "NOT_YET_VALID":
-		slog.ErrorContext(ctx, "compliance_hard_block",
-			slog.String("cert_id", cert.ID.String()),
-			slog.String("cert_type", cert.CertType),
-		)
-		return ErrComplianceCertExpired
-	case "EXPIRING_SOON":
-		slog.WarnContext(ctx, "compliance_expiring_soon",
-			slog.String("cert_id", cert.ID.String()),
-			slog.String("expiry_date", cert.ExpiryDate.String()),
-		)
-		return nil
-	}
-
-	requiredTypes, ok := config["required_compliance"].([]interface{})
-	if !ok {
-		return nil
-	}
-	for _, value := range requiredTypes {
-		requiredType, ok := value.(string)
-		if ok && requiredType == cert.CertType {
-			return nil
-		}
-	}
-	return ErrComplianceCertInvalid
+	return &Service{repo: repo, ledgerService: ledgerService, now: now}
 }
 
 // CreateSupplier registers a supplier and optionally its compliance certificate
@@ -177,22 +130,44 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, conn *pgxpool.Conn, r
 		IssuedDate:       time.Now(),
 	}
 
-	var totalAmount float64
+	totalMoney := money.IDR(0)
 	for _, reqItem := range req.Items {
-		productID, _ := uuid.Parse(reqItem.ProductID)
-		subtotal := float64(reqItem.Quantity) * reqItem.UnitCost
-		totalAmount += subtotal
+		productID, err := uuid.Parse(reqItem.ProductID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid product id", ErrProductNotAvailable)
+		}
+		if reqItem.Quantity <= 0 || reqItem.Quantity > money.MaxLineItemQuantity {
+			return nil, fmt.Errorf("invalid quantity %d: must be between 1 and %d", reqItem.Quantity, money.MaxLineItemQuantity)
+		}
+
+		unitCostMoney, err := money.ValidateIDR(reqItem.UnitCost, money.MaxTransactionAmount)
+		if err != nil {
+			return nil, fmt.Errorf("%w: unit cost: %v", ErrInvalidMonetaryAmount, err)
+		}
+
+		subtotalMoney, err := unitCostMoney.Mul(int64(reqItem.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: subtotal calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
+
+		totalMoney, err = totalMoney.Add(subtotalMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: total calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
+		if totalMoney.Amount() > money.MaxTransactionAmount {
+			return nil, fmt.Errorf("%w: total PO amount exceeds %d IDR", ErrInvalidMonetaryAmount, money.MaxTransactionAmount)
+		}
 
 		po.Items = append(po.Items, PurchaseOrderItem{
 			ID:              uuid.New(),
 			PurchaseOrderID: po.ID,
 			ProductID:       productID,
 			Quantity:        reqItem.Quantity,
-			UnitCost:        reqItem.UnitCost,
-			Subtotal:        subtotal,
+			UnitCost:        unitCostMoney.ToFloat(),
+			Subtotal:        subtotalMoney.ToFloat(),
 		})
 	}
-	po.TotalAmount = totalAmount
+	po.TotalAmount = totalMoney.ToFloat()
 
 	tx, err := conn.Begin(ctx)
 	if err != nil {
@@ -201,12 +176,23 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, conn *pgxpool.Conn, r
 	defer tx.Rollback(ctx)
 
 	// COMPLIANCE INTERCEPTOR (HARD-BLOCK), evaluated inside the PO transaction.
-	if err := s.checkCompliance(ctx, tx, supplierID, certID); err != nil {
+	po.ComplianceEvaluation, err = s.checkCompliance(ctx, tx, supplierID, certID)
+	if err != nil {
+		return nil, err
+	}
+	productIDs := make([]uuid.UUID, 0, len(po.Items))
+	for _, item := range po.Items {
+		productIDs = append(productIDs, item.ProductID)
+	}
+	if err := s.repo.LockActiveProductsForPurchaseOrder(ctx, tx, productIDs); err != nil {
 		return nil, err
 	}
 
 	startInsert := time.Now()
 	if err := s.repo.CreatePurchaseOrder(ctx, tx, po); err != nil {
+		return nil, err
+	}
+	if err := s.repo.recordComplianceDecision(ctx, tx, "PO", po.ID, po.ComplianceEvaluation); err != nil {
 		return nil, err
 	}
 	slog.InfoContext(ctx, "po_insert_completed", slog.Duration("duration_insert_po_ms", time.Since(startInsert)))
@@ -248,7 +234,8 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 		if existing.PurchaseOrderID != po.ID {
 			return nil, ErrIdempotencyKeyConflict
 		}
-		return existing, nil
+		existing.ComplianceEvaluation, err = s.repo.getComplianceDecision(ctx, tx, "GR", existing.ID)
+		return existing, err
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -260,7 +247,8 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 
 	// The certificate may have changed since the PO was issued, so enforce the
 	// tenant's strict-compliance configuration within this receipt transaction.
-	if err := s.checkCompliance(ctx, tx, po.SupplierID, po.ComplianceCertID); err != nil {
+	decision, err := s.checkCompliance(ctx, tx, po.SupplierID, po.ComplianceCertID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -274,15 +262,16 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	}
 
 	gr := &GoodsReceipt{
-		ID:              uuid.New(),
-		GRNumber:        "GR-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:8],
-		IdempotencyKey:  idempotencyKey,
-		PurchaseOrderID: po.ID,
-		ReceivedBy:      userID,
-		ReceivedDate:    time.Now(),
-		Notes:           req.Notes,
+		ComplianceEvaluation: decision,
+		ID:                   uuid.New(),
+		GRNumber:             "GR-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:8],
+		IdempotencyKey:       idempotencyKey,
+		PurchaseOrderID:      po.ID,
+		ReceivedBy:           userID,
+		ReceivedDate:         time.Now(),
+		Notes:                req.Notes,
 	}
-	inboundValue, fullyReceived, err := reconcileReceiptItems(gr, req.Items, poItems, receivedQuantities)
+	inboundValue, fullyReceived, hasAccepted, err := reconcileReceiptItems(gr, req.Items, poItems, receivedQuantities, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -291,19 +280,26 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	if err := s.repo.CreateGoodsReceipt(ctx, tx, gr); err != nil {
 		return nil, err
 	}
+	if err := s.repo.recordComplianceDecision(ctx, tx, "GR", gr.ID, decision); err != nil {
+		return nil, err
+	}
 	slog.InfoContext(ctx, "gr_and_stock_update_completed", slog.Duration("duration_stock_increment_ms", time.Since(startInsert)))
 
-	status := "PARTIALLY_RECEIVED"
 	if fullyReceived {
-		status = "RECEIVED"
-	}
-	if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, status); err != nil {
-		return nil, err
+		if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, "RECEIVED"); err != nil {
+			return nil, err
+		}
+	} else if hasAccepted && po.Status == "ISSUED" {
+		if err := s.repo.UpdatePurchaseOrderStatus(ctx, tx, po.ID, "PARTIALLY_RECEIVED"); err != nil {
+			return nil, err
+		}
 	}
 
-	if err := s.ledgerService.PostGoodsReceiptJournal(ctx, tx, gr.ID, gr.GRNumber, inboundValue); err != nil {
-		slog.ErrorContext(ctx, "failed_to_post_gr_journal", slog.Any("error", err))
-		return nil, err
+	if inboundValue > 0 {
+		if err := s.ledgerService.PostGoodsReceiptJournal(ctx, tx, gr.ID, gr.GRNumber, inboundValue); err != nil {
+			slog.ErrorContext(ctx, "failed_to_post_gr_journal", slog.Any("error", err))
+			return nil, err
+		}
 	}
 
 	startCommit := time.Now()
@@ -315,57 +311,138 @@ func (s *Service) CreateGoodsReceipt(ctx context.Context, conn *pgxpool.Conn, us
 	return gr, nil
 }
 
-func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, poItems []PurchaseOrderItem, received map[uuid.UUID]int) (float64, bool, error) {
+func reconcileReceiptItems(gr *GoodsReceipt, requested []CreateGRItemRequest, poItems []PurchaseOrderItem, received map[uuid.UUID]int, inspectedBy uuid.UUID) (float64, bool, bool, error) {
 	if len(requested) == 0 {
-		return 0, false, ErrEmptyReceipt
+		return 0, false, false, ErrEmptyReceipt
 	}
 
 	poByProduct := make(map[uuid.UUID]PurchaseOrderItem, len(poItems))
 	for _, poItem := range poItems {
 		if _, exists := poByProduct[poItem.ProductID]; exists {
-			return 0, false, fmt.Errorf("purchase order contains duplicate product %s", poItem.ProductID)
+			return 0, false, false, fmt.Errorf("purchase order contains duplicate product %s", poItem.ProductID)
 		}
 		poByProduct[poItem.ProductID] = poItem
 	}
 
-	requestedByProduct := make(map[uuid.UUID]int, len(requested))
-	var inboundValue float64
+	requestedAcceptedByProduct := make(map[uuid.UUID]int, len(requested))
+	inboundMoney := money.IDR(0)
+	now := time.Now()
+	hasAccepted := false
+
 	for _, requestItem := range requested {
 		productID, err := uuid.Parse(requestItem.ProductID)
 		if err != nil {
-			return 0, false, fmt.Errorf("parse goods receipt product id: %w", err)
+			return 0, false, false, fmt.Errorf("parse goods receipt product id: %w", err)
 		}
-		if _, exists := requestedByProduct[productID]; exists {
-			return 0, false, ErrDuplicateReceiptItem
+		if _, exists := requestedAcceptedByProduct[productID]; exists {
+			return 0, false, false, ErrDuplicateReceiptItem
 		}
 		poItem, exists := poByProduct[productID]
 		if !exists {
-			return 0, false, ErrReceiptItemNotOnPO
-		}
-		if requestItem.ReceivedQuantity <= 0 || requestItem.ReceivedQuantity > poItem.Quantity-received[productID] {
-			return 0, false, ErrReceiptQuantityExceeds
+			return 0, false, false, ErrReceiptItemNotOnPO
 		}
 
-		requestedByProduct[productID] = requestItem.ReceivedQuantity
+		// Resolve delivered, accepted, rejected quantities
+		var delivered, accepted, rejected int
+		var qcReason *string
+
+		if requestItem.DeliveredQuantity != nil || requestItem.AcceptedQuantity != nil || requestItem.RejectedQuantity != nil {
+			if requestItem.DeliveredQuantity != nil {
+				delivered = *requestItem.DeliveredQuantity
+			}
+			if requestItem.AcceptedQuantity != nil {
+				accepted = *requestItem.AcceptedQuantity
+			}
+			if requestItem.RejectedQuantity != nil {
+				rejected = *requestItem.RejectedQuantity
+			}
+			if requestItem.QCReason != nil {
+				trimmed := strings.TrimSpace(*requestItem.QCReason)
+				if trimmed != "" {
+					qcReason = &trimmed
+				}
+			}
+
+			// Invariant check: delivered > 0, accepted >= 0, rejected >= 0
+			if delivered <= 0 || accepted < 0 || rejected < 0 {
+				return 0, false, false, ErrInvalidQCArithmetic
+			}
+			if delivered != accepted+rejected {
+				return 0, false, false, ErrInvalidQCArithmetic
+			}
+			if rejected > 0 && (qcReason == nil || *qcReason == "") {
+				return 0, false, false, ErrQCReasonRequired
+			}
+		} else if requestItem.ReceivedQuantity > 0 {
+			// Legacy request adapter: received_quantity -> PASS (delivered = received, accepted = received, rejected = 0)
+			delivered = requestItem.ReceivedQuantity
+			accepted = requestItem.ReceivedQuantity
+			rejected = 0
+		} else {
+			return 0, false, false, ErrInvalidQCArithmetic
+		}
+
+		outstanding := poItem.Quantity - received[productID]
+		if delivered > outstanding {
+			return 0, false, false, ErrReceiptQuantityExceeds
+		}
+
+		// Derive QC Outcome
+		var outcome string
+		if rejected == 0 {
+			outcome = "PASS"
+		} else if accepted == 0 {
+			outcome = "REJECT"
+		} else {
+			outcome = "PARTIAL_ACCEPT"
+		}
+
+		if accepted > 0 {
+			hasAccepted = true
+			unitCostMoney, err := money.FromExactFloat(poItem.UnitCost, money.CurrencyIDR)
+			if err != nil {
+				return 0, false, false, fmt.Errorf("invalid purchase order unit cost: %w", err)
+			}
+			itemInboundMoney, err := unitCostMoney.Mul(int64(accepted))
+			if err != nil {
+				return 0, false, false, fmt.Errorf("failed calculating inbound valuation: %w", err)
+			}
+			inboundMoney, err = inboundMoney.Add(itemInboundMoney)
+			if err != nil {
+				return 0, false, false, fmt.Errorf("failed aggregating inbound valuation: %w", err)
+			}
+		}
+
+		requestedAcceptedByProduct[productID] = accepted
 		gr.Items = append(gr.Items, GoodsReceiptItem{
-			ID:               uuid.New(),
-			GoodsReceiptID:   gr.ID,
-			ProductID:        productID,
-			ReceivedQuantity: requestItem.ReceivedQuantity,
+			ID:                uuid.New(),
+			GoodsReceiptID:    gr.ID,
+			ProductID:         productID,
+			ReceivedQuantity:  accepted, // Legacy column parity
+			DeliveredQuantity: delivered,
+			AcceptedQuantity:  accepted,
+			RejectedQuantity:  rejected,
+			QCOutcome:         outcome,
+			QCReason:          qcReason,
+			InspectedBy:       &inspectedBy,
+			InspectedAt:       &now,
 		})
-		inboundValue += float64(requestItem.ReceivedQuantity) * poItem.UnitCost
 	}
 
-	if inboundValue <= 0 {
-		return 0, false, ErrZeroValueReceipt
-	}
+	// Sort items deterministically by Product ID to enforce a consistent row-lock order
+	// and eliminate deadlock risks across concurrent inventory updates.
+	sort.Slice(gr.Items, func(i, j int) bool {
+		return gr.Items[i].ProductID.String() < gr.Items[j].ProductID.String()
+	})
+
+	inboundValue := inboundMoney.ToFloat()
 
 	for productID, poItem := range poByProduct {
-		if received[productID]+requestedByProduct[productID] != poItem.Quantity {
-			return inboundValue, false, nil
+		if received[productID]+requestedAcceptedByProduct[productID] != poItem.Quantity {
+			return inboundValue, false, hasAccepted, nil
 		}
 	}
-	return inboundValue, true, nil
+	return inboundValue, true, hasAccepted, nil
 }
 
 // ListSuppliers returns a paginated list of suppliers with optional is_active filter
@@ -439,23 +516,12 @@ func (s *Service) RegisterCertificate(ctx context.Context, conn *pgxpool.Conn, s
 		return nil, err
 	}
 
-	// Calculate dynamic status
-	now := time.Now()
-	switch {
-	case validFrom.After(now):
-		cert.ComputedStatus = "NOT_YET_VALID"
-	case expiryDate.Before(now):
-		cert.ComputedStatus = "EXPIRED"
-	case expiryDate.Before(now.AddDate(0, 0, 30)):
-		cert.ComputedStatus = "EXPIRING_SOON"
-	default:
-		cert.ComputedStatus = "VALID"
-	}
+	cert.ComputedStatus = certificateStatus(cert, s.now())
 
 	return cert, nil
 }
 
-// RevokeCertificate marks an existing certificate expired
+// RevokeCertificate revokes a certificate without rewriting its validity dates.
 func (s *Service) RevokeCertificate(ctx context.Context, conn *pgxpool.Conn, certID uuid.UUID) error {
 	return s.repo.RevokeCertificate(ctx, conn, certID)
 }
@@ -470,9 +536,13 @@ func (s *Service) GetPurchaseOrderDetail(ctx context.Context, conn *pgxpool.Conn
 	return s.repo.GetPurchaseOrderDetail(ctx, conn, poID)
 }
 
-// CancelPurchaseOrder atomically cancels an unfulfilled purchase order
-func (s *Service) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID uuid.UUID) error {
-	return s.repo.CancelPurchaseOrder(ctx, conn, poID)
+// CancelPurchaseOrder atomically cancels an unfulfilled purchase order.
+func (s *Service) CancelPurchaseOrder(ctx context.Context, conn *pgxpool.Conn, poID, actorID uuid.UUID, reason string) (*PurchaseOrder, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "Cancelled by user"
+	}
+	return s.repo.CancelPurchaseOrder(ctx, conn, poID, actorID, reason, s.now())
 }
 
 // ListGoodsReceipts returns a paginated list of goods receipts

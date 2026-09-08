@@ -57,3 +57,27 @@ func TestComputeFingerprint_EmptyBody(t *testing.T) {
 
 	assert.Equal(t, hash1, hash2, "nil and whitespace body must produce identical hash")
 }
+
+func TestComputeFingerprint_ConcreteResourceIDsDiffer(t *testing.T) {
+	body := []byte(`{"reason":"audit"}`)
+
+	hash1, err := idempotency.ComputeFingerprint("POST", "/api/v1/pos/orders/11111111-1111-1111-1111-111111111111/void", body)
+	require.NoError(t, err)
+
+	hash2, err := idempotency.ComputeFingerprint("POST", "/api/v1/pos/orders/22222222-2222-2222-2222-222222222222/void", body)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, hash1, hash2, "concrete resource IDs must produce distinct fingerprints even with identical route templates")
+}
+
+func TestComputeFingerprint_HTTPMethodsDiffer(t *testing.T) {
+	body := []byte(`{"amount": 10000}`)
+
+	hashPost, err := idempotency.ComputeFingerprint("POST", "/api/v1/resource", body)
+	require.NoError(t, err)
+
+	hashPut, err := idempotency.ComputeFingerprint("PUT", "/api/v1/resource", body)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, hashPost, hashPut, "different HTTP methods must produce distinct fingerprints")
+}

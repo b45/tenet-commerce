@@ -70,6 +70,59 @@ CREATE TABLE public.users (
 );
 
 CREATE INDEX idx_users_tenant_email ON public.users(tenant_id, email);
+
+-- Subscription Plans Catalog
+CREATE TABLE public.plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(63) NOT NULL UNIQUE,          -- 'starter', 'growth', 'enterprise'
+    name VARCHAR(255) NOT NULL,
+    version INT NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Plan Features & Quota Grants
+CREATE TABLE public.plan_features (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plan_id UUID NOT NULL REFERENCES public.plans(id) ON DELETE CASCADE,
+    feature_key VARCHAR(127) NOT NULL,
+    grant_type VARCHAR(31) NOT NULL DEFAULT 'BOOLEAN' CHECK (grant_type IN ('BOOLEAN', 'QUOTA')),
+    quota_limit INT NULL,                      -- NULL represents unlimited capacity
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_plan_feature UNIQUE (plan_id, feature_key)
+);
+
+CREATE INDEX idx_plan_features_plan_key ON public.plan_features(plan_id, feature_key);
+
+-- Tenant Subscriptions
+CREATE TABLE public.tenant_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL UNIQUE REFERENCES public.tenants(id) ON DELETE RESTRICT,
+    plan_id UUID NOT NULL REFERENCES public.plans(id) ON DELETE RESTRICT,
+    status VARCHAR(31) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELED')),
+    current_period_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    current_period_end TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '365 days'),
+    canceled_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_tenant_subscriptions_tenant ON public.tenant_subscriptions(tenant_id);
+
+-- Subscription Audit Log
+CREATE TABLE public.subscription_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    actor_id UUID NULL REFERENCES public.users(id) ON DELETE SET NULL,
+    action VARCHAR(63) NOT NULL,
+    before_state JSONB NULL,
+    after_state JSONB NOT NULL,
+    reason TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 ```
 
 ---
@@ -118,6 +171,37 @@ CREATE TABLE inventory (
     warehouse_location VARCHAR(127) DEFAULT 'MAIN_STORE',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Append-Only Stock Movements (Audit Trail & Stock Card)
+CREATE TABLE stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    warehouse_location VARCHAR(127) NOT NULL DEFAULT 'MAIN_STORE',
+    quantity_delta INTEGER NOT NULL,
+    movement_type VARCHAR(31) NOT NULL CHECK (movement_type IN ('OPENING', 'IN', 'OUT', 'ADJUSTMENT')),
+    source_document_type VARCHAR(63) NOT NULL,
+    source_document_id UUID,
+    source_document_line_id UUID,
+    actor_id UUID,
+    reason TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_stock_movement_direction CHECK (
+        (movement_type = 'OPENING' AND quantity_delta >= 0) OR
+        (movement_type = 'IN' AND quantity_delta > 0) OR
+        (movement_type = 'OUT' AND quantity_delta < 0) OR
+        (movement_type = 'ADJUSTMENT' AND quantity_delta <> 0)
+    )
+);
+
+CREATE UNIQUE INDEX uq_stock_movement_source ON stock_movements (
+    source_document_type,
+    COALESCE(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(source_document_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+CREATE INDEX idx_stock_movements_product_occurred ON stock_movements (product_id, occurred_at DESC, created_at DESC);
+CREATE INDEX idx_stock_movements_source ON stock_movements (source_document_type, source_document_id);
 
 -- 4.2 Point of Sale & Transactions
 CREATE TABLE transactions (
@@ -305,6 +389,7 @@ CREATE INDEX idx_ledger_entries_reversed_by ON ledger_entries(reversed_by_entry_
 -- 1. trg_verify_ledger_balance (CONSTRAINT TRIGGER): Hard-enforces line_count >= 2, total_debit > 0, and total_debit == total_credit.
 -- 2. trg_immutable_ledger_entries (BEFORE UPDATE OR DELETE): Blocks all deletions; permits updates ONLY for transitioning status from POSTED to REVERSED with a valid reversed_by_entry_id.
 -- 3. trg_immutable_ledger_lines (BEFORE UPDATE OR DELETE): Blocks any update or deletion on posted entry lines.
+-- 4. trg_immutable_stock_movements (BEFORE UPDATE OR DELETE): Blocks all updates and deletions on posted stock movements (strictly append-only).
 
 -- 4.5 Zakat Tijarah Calculations
 CREATE TABLE zakat_calculations (

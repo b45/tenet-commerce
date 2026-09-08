@@ -46,8 +46,8 @@ func DurableIdempotencyMiddleware(redisClient *pkgRedis.Client, defaultTTL time.
 	}
 
 	return func(c *gin.Context) {
-		// Only check on state-mutating methods
-		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPut && c.Request.Method != http.MethodPatch {
+		// Only check on state-mutating methods (POST, PUT, PATCH, DELETE)
+		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPut && c.Request.Method != http.MethodPatch && c.Request.Method != http.MethodDelete {
 			c.Next()
 			return
 		}
@@ -58,26 +58,39 @@ func DurableIdempotencyMiddleware(redisClient *pkgRedis.Client, defaultTTL time.
 				"Idempotency-Key header is required for transaction operations")
 			return
 		}
+		if len(idempotencyKey) > MaxKeyLength {
+			response.AbortBadRequest(c, "IDEMPOTENCY_KEY_TOO_LONG",
+				fmt.Sprintf("Idempotency-Key exceeds maximum permitted length of %d characters", MaxKeyLength))
+			return
+		}
 
 		ctx := c.Request.Context()
 		reqLogger := logger.FromContext(ctx)
 
-		// 1. Capture and buffer request body for hashing
+		// 1. Capture and buffer request body for hashing with size limit guard
 		var rawBody []byte
 		if c.Request.Body != nil {
-			bodyBytes, err := io.ReadAll(c.Request.Body)
+			limitedReader := io.LimitReader(c.Request.Body, MaxBodySizeBytes+1)
+			bodyBytes, err := io.ReadAll(limitedReader)
 			if err != nil {
 				reqLogger.Error("Failed to read request body for idempotency hashing", "error", err)
 				response.AbortBadRequest(c, "INVALID_REQUEST_BODY", "Failed to read request payload")
+				return
+			}
+			if len(bodyBytes) > MaxBodySizeBytes {
+				response.AbortBadRequest(c, "REQUEST_PAYLOAD_TOO_LARGE",
+					fmt.Sprintf("Request payload exceeds maximum permitted size of %d bytes", MaxBodySizeBytes))
 				return
 			}
 			rawBody = bodyBytes
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
-		targetRoute := c.FullPath()
+		// Use concrete URL path so distinct resources sharing the same route template
+		// (e.g. /orders/1/void vs /orders/2/void) have completely distinct command identities.
+		targetRoute := c.Request.URL.Path
 		if targetRoute == "" {
-			targetRoute = c.Request.URL.Path
+			targetRoute = c.FullPath()
 		}
 
 		// 2. Calculate canonical request hash

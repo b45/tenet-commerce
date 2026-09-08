@@ -13,9 +13,8 @@ func BenchmarkValidateBalance_Standard(b *testing.B) {
 		{ID: uuid.New(), DebitAmount: 0, CreditAmount: 150000.00},
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if err := s.validateBalance(lines); err != nil {
 			b.Fatalf("unexpected validation error: %v", err)
 		}
@@ -31,9 +30,8 @@ func BenchmarkValidateBalance_POSComplex(b *testing.B) {
 		{ID: uuid.New(), DebitAmount: 0, CreditAmount: 85000.00},  // Merchandise Inventory
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if err := s.validateBalance(lines); err != nil {
 			b.Fatalf("unexpected validation error: %v", err)
 		}

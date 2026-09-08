@@ -2,11 +2,12 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"time"
 
+	"github.com/b45/tenet-commerce/backend/internal/inventory"
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/money"
@@ -50,6 +51,37 @@ func (s *Service) Checkout(
 	}
 	defer tx.Rollback(ctx) // Safe: no-op if transaction has already been committed
 
+	// 1.1 Atomic Idempotency Check: if a transaction with this idempotency key was already committed,
+	// recover and replay the exact committed receipt without repeating stock or financial mutations.
+	if idempotencyKey != "" {
+		existingTxn, existingItems, err := s.repo.GetTransactionByIdempotencyKey(ctx, tx, idempotencyKey)
+		if err == nil && existingTxn != nil {
+			reqLogger.Info("Idempotent transaction already committed in business transaction; returning existing result",
+				"idempotency_key", idempotencyKey,
+				"transaction_number", existingTxn.TransactionNumber,
+			)
+			return &CheckoutResponse{
+				TransactionID:     existingTxn.ID,
+				TransactionNumber: existingTxn.TransactionNumber,
+				IdempotencyKey:    existingTxn.IdempotencyKey,
+				CashierID:         existingTxn.CashierID,
+				PaymentMethod:     existingTxn.PaymentMethod,
+				Status:            existingTxn.Status,
+				CustomerName:      existingTxn.CustomerName,
+				Notes:             existingTxn.Notes,
+				CashTendered:      existingTxn.CashTendered,
+				ChangeAmount:      existingTxn.ChangeAmount,
+				PaymentReference:  existingTxn.PaymentReference,
+				Items:             existingItems,
+				SubtotalAmount:    existingTxn.SubtotalAmount,
+				TaxAmount:         existingTxn.TaxAmount,
+				DiscountAmount:    existingTxn.DiscountAmount,
+				TotalAmount:       existingTxn.TotalAmount,
+				CreatedAt:         existingTxn.CreatedAt,
+			}, nil
+		}
+	}
+
 	// 2. Extract and aggregate SKUs
 	skuMap := make(map[string]int)
 	var skus []string
@@ -86,32 +118,59 @@ func (s *Service) Checkout(
 				ErrInsufficientStock, product.Name, totalRequested, product.StockQuantity)
 		}
 
-		unitPriceMoney, _ := money.FromFloat(product.UnitPrice, "IDR")
-		itemSubtotalMoney, _ := unitPriceMoney.Mul(int64(item.Quantity))
-		subtotalMoney, _ = subtotalMoney.Add(itemSubtotalMoney)
+		unitPriceMoney, err := money.FromExactFloat(product.UnitPrice, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: product '%s' unit price: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		itemSubtotalMoney, err := unitPriceMoney.Mul(int64(item.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: item '%s' subtotal calculation: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		subtotalMoney, err = subtotalMoney.Add(itemSubtotalMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: subtotal calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
 
-		costPriceMoney, _ := money.FromFloat(product.CostPrice, "IDR")
-		itemCOGSMoney, _ := costPriceMoney.Mul(int64(item.Quantity))
-		totalCOGSMoney, _ = totalCOGSMoney.Add(itemCOGSMoney)
+		costPriceMoney, err := money.FromExactFloat(product.CostPrice, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: product '%s' cost price: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		itemCOGSMoney, err := costPriceMoney.Mul(int64(item.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: item '%s' COGS calculation: %v", ErrInvalidMonetaryAmount, product.Name, err)
+		}
+		totalCOGSMoney, err = totalCOGSMoney.Add(itemCOGSMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: total COGS calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
 
 		lineItems = append(lineItems, TransactionItem{
 			ProductID: product.ID,
 			SKU:       product.SKU,
 			Name:      product.Name,
 			Quantity:  item.Quantity,
-			UnitPrice: product.UnitPrice,
-			CostPrice: product.CostPrice,
+			UnitPrice: unitPriceMoney.ToFloat(),
+			CostPrice: costPriceMoney.ToFloat(),
 			Subtotal:  itemSubtotalMoney.ToFloat(),
 		})
 	}
 
 	// 5. Calculate final amounts using exact-money precision
 	taxAmount := 0.00
-	discountMoney, _ := money.FromFloat(req.DiscountAmount, "IDR")
+	discountMoney, err := money.ValidateIDR(req.DiscountAmount, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: discount amount: %v", ErrInvalidMonetaryAmount, err)
+	}
 	if discountMoney.Amount() > subtotalMoney.Amount() {
 		discountMoney = subtotalMoney
 	}
-	totalAmountMoney, _ := subtotalMoney.Sub(discountMoney)
+	totalAmountMoney, err := subtotalMoney.Sub(discountMoney)
+	if err != nil {
+		return nil, fmt.Errorf("%w: total amount calculation: %v", ErrInvalidMonetaryAmount, err)
+	}
+	if totalAmountMoney.Amount() > money.MaxTransactionAmount {
+		return nil, ErrTransactionLimitExceeded
+	}
 
 	// 5.1 Validate settlement before any inventory or ledger mutation.
 	// A completed CASH sale must have a tender amount sufficient to cover the receipt total.
@@ -120,18 +179,8 @@ func (s *Service) Checkout(
 		return nil, err
 	}
 
-	// 6. APM SPAN: Atomically decrement stock for each locked item
-	tDec := time.Now()
-	for sku, qty := range skuMap {
-		product := productMap[sku]
-		if err := s.repo.DecrementStock(ctx, tx, product.ID, qty); err != nil {
-			reqLogger.Error("Failed to decrement inventory stock", "sku", sku, "error", err)
-			return nil, fmt.Errorf("failed decrementing stock for %s: %w", sku, err)
-		}
-	}
-	decDuration := time.Since(tDec)
-
-	// 7. APM SPAN: Insert Master Transaction Record
+	// 6. Insert the transaction and its immutable lines before posting movements,
+	// so every stock delta can reference the exact business document and line.
 	txnNumber := s.repo.GenerateTransactionNumber()
 	masterTxn := &Transaction{
 		TransactionNumber: txnNumber,
@@ -157,9 +206,10 @@ func (s *Service) Checkout(
 	}
 	txnDuration := time.Since(tTxn)
 
-	// 8. APM SPAN: Bulk Insert Transaction Line Items
+	// 7. Bulk insert transaction line items with caller-generated IDs.
 	for i := range lineItems {
 		lineItems[i].TransactionID = masterTxn.ID
+		lineItems[i].ID = uuid.NewString()
 	}
 	tItems := time.Now()
 	if err := s.repo.CreateTransactionItems(ctx, tx, lineItems); err != nil {
@@ -168,9 +218,32 @@ func (s *Service) Checkout(
 	}
 	itemsDuration := time.Since(tItems)
 
+	// 8. Post one OUT movement for every sale line in the same transaction.
+	tDec := time.Now()
+	txnUUID := uuid.MustParse(masterTxn.ID)
+	actorUUID, err := uuid.Parse(cashierID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cashier identity: %w", err)
+	}
+	for _, item := range lineItems {
+		productUUID := uuid.MustParse(item.ProductID)
+		lineUUID := uuid.MustParse(item.ID)
+		reason := "POS sale " + masterTxn.TransactionNumber
+		if _, err := s.repo.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+			ProductID: productUUID, QuantityDelta: -item.Quantity, MovementType: inventory.MovementTypeOut,
+			SourceDocumentType: inventory.SourceDocPOSSale, SourceDocumentID: &txnUUID,
+			SourceDocumentLineID: &lineUUID, ActorID: &actorUUID, Reason: &reason,
+		}); err != nil {
+			if errors.Is(err, inventory.ErrInsufficientStock) {
+				return nil, fmt.Errorf("%w: %s", ErrInsufficientStock, item.SKU)
+			}
+			return nil, fmt.Errorf("failed posting sale movement for %s: %w", item.SKU, err)
+		}
+	}
+	decDuration := time.Since(tDec)
+
 	// 8.5. APM SPAN: Post automatic journal entry
 	tLedger := time.Now()
-	txnUUID, _ := uuid.Parse(masterTxn.ID)
 	if err := s.ledgerService.PostPOSSaleJournal(ctx, tx, txnUUID, masterTxn.TransactionNumber, masterTxn.TotalAmount, totalCOGSMoney.ToFloat(), masterTxn.PaymentMethod); err != nil {
 		reqLogger.Error("Failed to post POS sale journal entry", "error", err)
 		return nil, fmt.Errorf("failed posting ledger journal: %w", err)
@@ -234,14 +307,14 @@ func validatePaymentSettlement(paymentMethod string, cashTendered *float64, tota
 		return 0, 0, fmt.Errorf("%w: cash_tendered is required", ErrInsufficientCashTendered)
 	}
 
-	tenderMoney, err := money.FromFloat(*cashTendered, "IDR")
+	tenderMoney, err := money.ValidateIDR(*cashTendered, money.MaxTenderAmount)
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid cash tendered amount: %w", err)
+		return 0, 0, fmt.Errorf("%w: cash tendered: %v", ErrInvalidMonetaryAmount, err)
 	}
 
-	totalMoney, err := money.FromFloat(totalAmount, "IDR")
+	totalMoney, err := money.FromExactFloat(totalAmount, money.CurrencyIDR)
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid total amount: %w", err)
+		return 0, 0, fmt.Errorf("%w: total amount: %v", ErrInvalidMonetaryAmount, err)
 	}
 
 	if tenderMoney.Amount() < totalMoney.Amount() {
@@ -296,15 +369,39 @@ func (s *Service) VoidTransaction(
 		return nil, fmt.Errorf("failed retrieving transaction line items: %w", err)
 	}
 
-	// 5. Restock inventory and compute total COGS
-	var totalCOGS float64
+	// 5. Restock inventory and compute total COGS using exact-money precision
+	totalCOGSMoney := money.IDR(0)
+	txnUUID := uuid.MustParse(txn.ID)
+	actorUUID, err := uuid.Parse(cashierID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cashier identity: %w", err)
+	}
 	for _, item := range items {
-		if err := s.repo.IncrementStock(ctx, tx, item.ProductID, item.Quantity); err != nil {
+		productUUID := uuid.MustParse(item.ProductID)
+		lineUUID := uuid.MustParse(item.ID)
+		reason := req.Reason
+		if _, err := s.repo.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+			ProductID: productUUID, QuantityDelta: item.Quantity, MovementType: inventory.MovementTypeIn,
+			SourceDocumentType: inventory.SourceDocPOSVoid, SourceDocumentID: &txnUUID,
+			SourceDocumentLineID: &lineUUID, ActorID: &actorUUID, Reason: &reason,
+		}); err != nil {
 			reqLogger.Error("Failed restocking inventory during void", "product_id", item.ProductID, "error", err)
 			return nil, fmt.Errorf("failed restocking product %s: %w", item.SKU, err)
 		}
-		totalCOGS += math.Round(item.CostPrice*float64(item.Quantity)*100) / 100
+		itemCostMoney, err := money.FromExactFloat(item.CostPrice, money.CurrencyIDR)
+		if err != nil {
+			return nil, fmt.Errorf("%w: item cost price: %v", ErrInvalidMonetaryAmount, err)
+		}
+		subCOGSMoney, err := itemCostMoney.Mul(int64(item.Quantity))
+		if err != nil {
+			return nil, fmt.Errorf("%w: line COGS calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
+		totalCOGSMoney, err = totalCOGSMoney.Add(subCOGSMoney)
+		if err != nil {
+			return nil, fmt.Errorf("%w: total COGS calculation: %v", ErrInvalidMonetaryAmount, err)
+		}
 	}
+	totalCOGS := totalCOGSMoney.ToFloat()
 
 	// 6. Mark transaction VOIDED
 	if err := s.repo.MarkTransactionVoided(ctx, tx, txn.ID, cashierID, req.Reason); err != nil {
@@ -313,7 +410,6 @@ func (s *Service) VoidTransaction(
 	}
 
 	// 7. Post Sharia Ledger Reversal Journal Entry
-	txnUUID, _ := uuid.Parse(txn.ID)
 	if err := s.ledgerService.PostPOSVoidReversalJournal(ctx, tx, txnUUID, txn.TransactionNumber, txn.TotalAmount, totalCOGS, txn.PaymentMethod, req.Reason); err != nil {
 		reqLogger.Error("Failed posting POS void reversal journal", "error", err)
 		return nil, fmt.Errorf("failed posting ledger reversal: %w", err)
@@ -401,8 +497,12 @@ func (s *Service) GetProduct(ctx context.Context, conn *pgxpool.Conn, id string)
 }
 
 // CreateProduct adds a new product to the catalog with initial inventory
-func (s *Service) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req CreateProductRequest) (*Product, error) {
-	return s.repo.CreateProduct(ctx, conn, req)
+func (s *Service) CreateProduct(ctx context.Context, conn *pgxpool.Conn, userID string, req CreateProductRequest) (*Product, error) {
+	actorID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user identity: %w", err)
+	}
+	return s.repo.CreateProduct(ctx, conn, actorID, req)
 }
 
 // UpdateProduct updates product metadata
@@ -417,6 +517,9 @@ func (s *Service) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id stri
 
 // AdjustStock executes an atomic inventory adjustment and posts a balanced Sharia ledger shrinkage journal if applicable
 func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID string, req StockAdjustmentRequest) (*StockAdjustmentResponse, error) {
+	if req.AdjustmentType != "SET" && req.Quantity <= 0 {
+		return nil, ErrInvalidAdjustmentQuantity
+	}
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed starting adjustment transaction: %w", err)
@@ -428,12 +531,20 @@ func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID st
 		return nil, err
 	}
 
-	prevQty, newQty, deltaQty, err := s.repo.AdjustInventoryStock(ctx, tx, req.ProductID, req.AdjustmentType, req.Quantity)
+	productID, err := uuid.Parse(req.ProductID)
+	if err != nil {
+		return nil, ErrProductNotFound
+	}
+	actorID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user identity: %w", err)
+	}
+	adjID := uuid.New()
+	prevQty, newQty, deltaQty, err := s.repo.PostAdjustmentMovement(ctx, tx, adjID, productID, actorID, req.AdjustmentType, req.Quantity, req.ExpectedQuantity, req.Reason)
 	if err != nil {
 		return nil, err
 	}
 
-	adjID := uuid.New()
 	var ledgerEntryNum *string
 	var ledgerEntryIDStr *string
 
@@ -484,3 +595,14 @@ func (s *Service) AdjustStock(ctx context.Context, conn *pgxpool.Conn, userID st
 func (s *Service) GetLowStock(ctx context.Context, conn *pgxpool.Conn) ([]Product, error) {
 	return s.repo.GetLowStockProducts(ctx, conn)
 }
+
+// GetStockCard retrieves stock movement history for a product with opening and closing balances
+func (s *Service) GetStockCard(ctx context.Context, conn *pgxpool.Conn, filter StockCardFilter) (*StockCardResponse, error) {
+	return s.repo.GetStockCard(ctx, conn, filter)
+}
+
+// GetStockOverview calculates aggregated stock statistics across all active products
+func (s *Service) GetStockOverview(ctx context.Context, conn *pgxpool.Conn) (*StockOverviewCard, error) {
+	return s.repo.GetStockOverview(ctx, conn)
+}
+

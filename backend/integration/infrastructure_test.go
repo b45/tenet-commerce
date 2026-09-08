@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,6 +38,12 @@ const (
 var integrationDSN string
 
 func TestMain(m *testing.M) {
+	flag.Parse()
+	if testing.Short() {
+		fmt.Println("skipping integration tests in -short mode")
+		os.Exit(0)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -46,6 +53,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	storage := map[string]string{}
+	if os.Getenv("TENET_TEST_POSTGRES_TMPFS") == "1" {
+		storage["/var/lib/postgresql/data"] = "rw,size=512m"
+	}
 	postgresContainer, err := tcpostgres.Run(
 		ctx,
 		"postgres:16-alpine",
@@ -54,6 +65,7 @@ func TestMain(m *testing.M) {
 		tcpostgres.WithPassword(testDatabasePass),
 		tcpostgres.WithInitScripts(initScript),
 		tcpostgres.BasicWaitStrategies(),
+		testcontainers.WithTmpfs(storage),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "integration setup failed: PostgreSQL container: %v\n", err)

@@ -10,30 +10,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/b45/tenet-commerce/backend/internal/inventory"
+	"github.com/b45/tenet-commerce/backend/pkg/money"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	ErrProductNotFound          = errors.New("product not found or inactive")
-	ErrInsufficientStock        = errors.New("insufficient stock for product")
-	ErrTransactionNotFound      = errors.New("transaction not found")
-	ErrAlreadyVoided            = errors.New("transaction is already voided")
-	ErrInsufficientCashTendered = errors.New("insufficient cash tendered")
-	ErrCashTenderedNotAllowed   = errors.New("cash tendered is only valid for CASH payments")
-	ErrCategoryNotFound         = errors.New("category not found")
-	ErrCategoryCodeExists       = errors.New("category code already exists")
-	ErrSKUAlreadyExists         = errors.New("product SKU already exists")
-	ErrBarcodeAlreadyExists     = errors.New("product barcode already exists")
-	ErrNegativeAdjustmentStock  = errors.New("insufficient stock for negative adjustment")
+	ErrProductNotFound           = errors.New("product not found or inactive")
+	ErrInsufficientStock         = errors.New("insufficient stock for product")
+	ErrTransactionNotFound       = errors.New("transaction not found")
+	ErrAlreadyVoided             = errors.New("transaction is already voided")
+	ErrInsufficientCashTendered  = errors.New("insufficient cash tendered")
+	ErrCashTenderedNotAllowed    = errors.New("cash tendered is only valid for CASH payments")
+	ErrCategoryNotFound          = errors.New("category not found")
+	ErrCategoryCodeExists        = errors.New("category code already exists")
+	ErrSKUAlreadyExists          = errors.New("product SKU already exists")
+	ErrBarcodeAlreadyExists      = errors.New("product barcode already exists")
+	ErrNegativeAdjustmentStock   = errors.New("insufficient stock for negative adjustment")
+	ErrInvalidMonetaryAmount     = errors.New("invalid monetary amount: must be non-fractional, non-negative, and within bounds")
+	ErrTransactionLimitExceeded  = errors.New("transaction total exceeds maximum limit of 1,000,000,000 IDR")
+	ErrStaleStockCount           = errors.New("stock count is stale")
+	ErrProductHasOutstandingPO   = errors.New("product has outstanding purchase order quantity")
+	ErrInvalidAdjustmentQuantity = errors.New("adjustment quantity must be positive unless setting an absolute stock count")
 )
 
 // Repository handles database operations for the POS module within a tenant schema
-type Repository struct{}
+type Repository struct {
+	inventoryRepo *inventory.Repository
+}
 
 // NewRepository initializes a new POS repository
 func NewRepository() *Repository {
-	return &Repository{}
+	return &Repository{inventoryRepo: inventory.NewRepository()}
 }
 
 // GetProducts returns all active products with current stock quantities for the tenant catalog
@@ -170,46 +180,6 @@ func (r *Repository) GetProductsBySKUsForUpdate(ctx context.Context, tx pgx.Tx, 
 	return productMap, nil
 }
 
-// DecrementStock safely reduces inventory quantity within an active transaction.
-// Row-level lock was already acquired via GetProductsBySKUsForUpdate.
-func (r *Repository) DecrementStock(ctx context.Context, tx pgx.Tx, productID string, quantity int) error {
-	query := `
-		UPDATE inventory 
-		SET stock_quantity = stock_quantity - $1, 
-		    updated_at = NOW()
-		WHERE product_id = $2 
-		  AND stock_quantity >= $1
-	`
-
-	cmdTag, err := tx.Exec(ctx, query, quantity, productID)
-	if err != nil {
-		return fmt.Errorf("failed executing stock decrement: %w", err)
-	}
-
-	if cmdTag.RowsAffected() == 0 {
-		return ErrInsufficientStock
-	}
-
-	return nil
-}
-
-// IncrementStock safely restores inventory quantity within an active transaction upon void
-func (r *Repository) IncrementStock(ctx context.Context, tx pgx.Tx, productID string, quantity int) error {
-	query := `
-		UPDATE inventory 
-		SET stock_quantity = stock_quantity + $1, 
-		    updated_at = NOW()
-		WHERE product_id = $2
-	`
-
-	_, err := tx.Exec(ctx, query, quantity, productID)
-	if err != nil {
-		return fmt.Errorf("failed executing stock increment: %w", err)
-	}
-
-	return nil
-}
-
 // GenerateTransactionNumber generates a unique, sortable transaction code: TXN-YYYYMMDD-HEX
 func (r *Repository) GenerateTransactionNumber() string {
 	datePart := time.Now().Format("20060102")
@@ -217,6 +187,64 @@ func (r *Repository) GenerateTransactionNumber() string {
 	_, _ = rand.Read(randomBytes)
 	hexPart := hex.EncodeToString(randomBytes)
 	return fmt.Sprintf("TXN-%s-%s", datePart, hexPart)
+}
+
+// GetTransactionByIdempotencyKey retrieves an existing transaction by its unique idempotency key
+func (r *Repository) GetTransactionByIdempotencyKey(ctx context.Context, tx pgx.Tx, key string) (*Transaction, []TransactionItem, error) {
+	queryTxn := `
+		SELECT 
+			id, transaction_number, idempotency_key, cashier_id,
+			subtotal_amount, tax_amount, discount_amount, total_amount,
+			payment_method, status, customer_name, notes,
+			COALESCE(cash_tendered, 0), COALESCE(change_amount, 0),
+			payment_reference, void_reason, voided_at, voided_by, created_at
+		FROM transactions
+		WHERE idempotency_key = $1
+	`
+
+	var t Transaction
+	err := tx.QueryRow(ctx, queryTxn, key).Scan(
+		&t.ID, &t.TransactionNumber, &t.IdempotencyKey, &t.CashierID,
+		&t.SubtotalAmount, &t.TaxAmount, &t.DiscountAmount, &t.TotalAmount,
+		&t.PaymentMethod, &t.Status, &t.CustomerName, &t.Notes,
+		&t.CashTendered, &t.ChangeAmount, &t.PaymentReference,
+		&t.VoidReason, &t.VoidedAt, &t.VoidedBy, &t.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, ErrTransactionNotFound
+		}
+		return nil, nil, fmt.Errorf("query transaction by idempotency key: %w", err)
+	}
+
+	queryItems := `
+		SELECT 
+			ti.id, ti.transaction_id, ti.product_id, p.sku, p.name,
+			ti.quantity, ti.unit_price, ti.cost_price, ti.subtotal
+		FROM transaction_items ti
+		JOIN products p ON ti.product_id = p.id
+		WHERE ti.transaction_id = $1
+		ORDER BY ti.id ASC
+	`
+	rows, err := tx.Query(ctx, queryItems, t.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query transaction items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []TransactionItem
+	for rows.Next() {
+		var item TransactionItem
+		if err := rows.Scan(
+			&item.ID, &item.TransactionID, &item.ProductID, &item.SKU, &item.Name,
+			&item.Quantity, &item.UnitPrice, &item.CostPrice, &item.Subtotal,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan transaction item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	return &t, items, nil
 }
 
 // CreateTransaction inserts a master transaction record inside an active database transaction
@@ -275,6 +303,7 @@ func (r *Repository) CreateTransactionItems(ctx context.Context, tx pgx.Tx, item
 
 	query := `
 		INSERT INTO transaction_items (
+			id,
 			transaction_id,
 			product_id,
 			quantity,
@@ -283,14 +312,15 @@ func (r *Repository) CreateTransactionItems(ctx context.Context, tx pgx.Tx, item
 			subtotal
 		) VALUES `
 
-	values := make([]interface{}, 0, len(items)*6)
+	values := make([]interface{}, 0, len(items)*7)
 	valuePlaceholders := make([]string, len(items))
 
 	for i, item := range items {
-		offset := i * 6
-		valuePlaceholders[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
-			offset+1, offset+2, offset+3, offset+4, offset+5, offset+6)
+		offset := i * 7
+		valuePlaceholders[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			offset+1, offset+2, offset+3, offset+4, offset+5, offset+6, offset+7)
 		values = append(values,
+			item.ID,
 			item.TransactionID,
 			item.ProductID,
 			item.Quantity,
@@ -863,8 +893,22 @@ func (r *Repository) CreateCategory(ctx context.Context, conn *pgxpool.Conn, req
 	return &cat, nil
 }
 
-// UpdateCategory updates an existing category
+// UpdateCategory updates an existing category with row-level locking
 func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id string, req UpdateCategoryRequest) (*Category, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM categories WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, fmt.Errorf("failed locking category for update: %w", err)
+	}
+
 	query := `
 		UPDATE categories
 		SET name = $1, code = $2, parent_id = $3
@@ -873,7 +917,7 @@ func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id 
 	`
 	var cat Category
 	var parentID *string
-	err := conn.QueryRow(ctx, query, req.Name, strings.ToUpper(strings.TrimSpace(req.Code)), req.ParentID, id).
+	err = tx.QueryRow(ctx, query, req.Name, strings.ToUpper(strings.TrimSpace(req.Code)), req.ParentID, id).
 		Scan(&cat.ID, &cat.Name, &cat.Code, &parentID, &cat.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -886,17 +930,30 @@ func (r *Repository) UpdateCategory(ctx context.Context, conn *pgxpool.Conn, id 
 	}
 	cat.ParentID = parentID
 
-	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM products WHERE category_id = $1 AND is_active = TRUE`, id).Scan(&cat.ProductCount)
+	_ = tx.QueryRow(ctx, `SELECT COUNT(*) FROM products WHERE category_id = $1 AND is_active = TRUE`, id).Scan(&cat.ProductCount)
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing category update: %w", err)
+	}
+
 	return &cat, nil
 }
 
-// DeleteCategory removes a category, unlinking any assigned products
+// DeleteCategory removes a category, unlinking any assigned products with row-level locking
 func (r *Repository) DeleteCategory(ctx context.Context, conn *pgxpool.Conn, id string) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed beginning transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM categories WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCategoryNotFound
+		}
+		return fmt.Errorf("failed locking category for deletion: %w", err)
+	}
 
 	_, err = tx.Exec(ctx, `UPDATE products SET category_id = NULL WHERE category_id = $1`, id)
 	if err != nil {
@@ -975,7 +1032,7 @@ func (r *Repository) GetProductByID(ctx context.Context, conn *pgxpool.Conn, id 
 }
 
 // CreateProduct inserts a new product and initializes its inventory entry atomically
-func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req CreateProductRequest) (*Product, error) {
+func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, actorID uuid.UUID, req CreateProductRequest) (*Product, error) {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed starting transaction: %w", err)
@@ -1002,6 +1059,15 @@ func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req 
 		reorderThreshold = req.ReorderThreshold
 	}
 
+	unitPriceMoney, err := money.ValidateIDR(req.UnitPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: unit_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+	costPriceMoney, err := money.ValidateIDR(req.CostPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cost_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+
 	productQuery := `
 		INSERT INTO products (
 			name, sku, barcode, description, category_id, unit_price, cost_price, compliance_tags, is_active, created_at, updated_at
@@ -1020,8 +1086,8 @@ func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req 
 		req.Barcode,
 		req.Description,
 		req.CategoryID,
-		req.UnitPrice,
-		req.CostPrice,
+		unitPriceMoney.ToFloat(),
+		costPriceMoney.ToFloat(),
 		tagsJSON,
 		isActive,
 	).Scan(&productID, &createdAt, &updatedAt)
@@ -1037,10 +1103,25 @@ func (r *Repository) CreateProduct(ctx context.Context, conn *pgxpool.Conn, req 
 
 	inventoryQuery := `
 		INSERT INTO inventory (product_id, stock_quantity, reorder_threshold, warehouse_location, updated_at)
-		VALUES ($1, $2, $3, $4, NOW())
+		VALUES ($1, 0, $2, $3, NOW())
 	`
-	if _, err := tx.Exec(ctx, inventoryQuery, productID, req.InitialStock, reorderThreshold, warehouseLocation); err != nil {
+	if _, err := tx.Exec(ctx, inventoryQuery, productID, reorderThreshold, warehouseLocation); err != nil {
 		return nil, fmt.Errorf("failed inserting inventory record: %w", err)
+	}
+	if req.InitialStock > 0 {
+		productUUID, err := uuid.Parse(productID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid generated product ID: %w", err)
+		}
+		reason := "Initial stock recorded during product creation"
+		if _, err := r.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+			ProductID: productUUID, WarehouseLocation: warehouseLocation,
+			QuantityDelta: req.InitialStock, MovementType: inventory.MovementTypeOpening,
+			SourceDocumentType: inventory.SourceDocProductCreate, SourceDocumentID: &productUUID,
+			ActorID: &actorID, Reason: &reason,
+		}); err != nil {
+			return nil, fmt.Errorf("failed posting initial stock movement: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -1087,6 +1168,20 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 	}
 	defer tx.Rollback(ctx)
 
+	// Acquire row-level lock to prevent concurrent update races
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
+		return nil, fmt.Errorf("failed locking product for update: %w", err)
+	}
+	if req.IsActive != nil && !*req.IsActive {
+		if err := r.rejectOutstandingPurchaseOrders(ctx, tx, id); err != nil {
+			return nil, err
+		}
+	}
+
 	tagsJSON, err := json.Marshal(req.ComplianceTags)
 	if err != nil {
 		tagsJSON = []byte("[]")
@@ -1095,6 +1190,15 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive
+	}
+
+	unitPriceMoney, err := money.ValidateIDR(req.UnitPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: unit_price: %v", ErrInvalidMonetaryAmount, err)
+	}
+	costPriceMoney, err := money.ValidateIDR(req.CostPrice, money.MaxTransactionAmount)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cost_price: %v", ErrInvalidMonetaryAmount, err)
 	}
 
 	query := `
@@ -1113,8 +1217,8 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 		req.Barcode,
 		req.Description,
 		req.CategoryID,
-		req.UnitPrice,
-		req.CostPrice,
+		unitPriceMoney.ToFloat(),
+		costPriceMoney.ToFloat(),
 		tagsJSON,
 		isActive,
 		id,
@@ -1181,23 +1285,65 @@ func (r *Repository) UpdateProduct(ctx context.Context, conn *pgxpool.Conn, id s
 	}, nil
 }
 
-// DeleteProduct performs a soft delete by marking is_active = FALSE
+// DeleteProduct performs a soft delete by marking is_active = FALSE with row-level locking
 func (r *Repository) DeleteProduct(ctx context.Context, conn *pgxpool.Conn, id string) error {
-	res, err := conn.Exec(ctx, `UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, id)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, id).Scan(&existingID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrProductNotFound
+		}
+		return fmt.Errorf("failed locking product for deletion: %w", err)
+	}
+	if err := r.rejectOutstandingPurchaseOrders(ctx, tx, id); err != nil {
+		return err
+	}
+
+	res, err := tx.Exec(ctx, `UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed soft-deleting product: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return ErrProductNotFound
 	}
+	return tx.Commit(ctx)
+}
+
+func (r *Repository) rejectOutstandingPurchaseOrders(ctx context.Context, tx pgx.Tx, productID string) error {
+	var outstanding bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM purchase_order_items poi
+			JOIN purchase_orders po ON po.id = poi.purchase_order_id
+			WHERE poi.product_id = $1
+			  AND po.status IN ('ISSUED', 'PARTIALLY_RECEIVED')
+			  AND poi.quantity > COALESCE((
+				SELECT SUM(gri.accepted_quantity)
+				FROM goods_receipt_items gri
+				JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+				WHERE gr.purchase_order_id = po.id AND gri.product_id = poi.product_id
+			  ), 0)
+		)
+	`, productID).Scan(&outstanding); err != nil {
+		return fmt.Errorf("failed checking outstanding purchase orders: %w", err)
+	}
+	if outstanding {
+		return ErrProductHasOutstandingPO
+	}
 	return nil
 }
 
-// AdjustInventoryStock applies an atomic stock adjustment to an inventory item with row-level locking
-func (r *Repository) AdjustInventoryStock(ctx context.Context, tx pgx.Tx, productID string, adjType string, qty int) (prevQty int, newQty int, deltaQty int, err error) {
-	err = tx.QueryRow(ctx, `SELECT stock_quantity FROM inventory WHERE product_id = $1 FOR UPDATE`, productID).Scan(&prevQty)
+// PostAdjustmentMovement calculates an adjustment against the locked balance and posts its movement.
+func (r *Repository) PostAdjustmentMovement(ctx context.Context, tx pgx.Tx, adjustmentID, productID, actorID uuid.UUID, adjType string, qty int, expectedQuantity *int, reason string) (prevQty int, newQty int, deltaQty int, err error) {
+	prevQty, _, err = r.inventoryRepo.LockInventoryForUpdate(ctx, tx, productID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, inventory.ErrProductNotFound) {
 			return 0, 0, 0, ErrProductNotFound
 		}
 		return 0, 0, 0, fmt.Errorf("failed locking inventory: %w", err)
@@ -1211,6 +1357,9 @@ func (r *Repository) AdjustInventoryStock(ctx context.Context, tx pgx.Tx, produc
 		deltaQty = -qty
 		newQty = prevQty - qty
 	case "SET":
+		if expectedQuantity == nil || *expectedQuantity != prevQty {
+			return 0, 0, 0, ErrStaleStockCount
+		}
 		deltaQty = qty - prevQty
 		newQty = qty
 	default:
@@ -1221,9 +1370,18 @@ func (r *Repository) AdjustInventoryStock(ctx context.Context, tx pgx.Tx, produc
 		return 0, 0, 0, ErrNegativeAdjustmentStock
 	}
 
-	_, err = tx.Exec(ctx, `UPDATE inventory SET stock_quantity = $1, updated_at = NOW() WHERE product_id = $2`, newQty, productID)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed updating inventory stock: %w", err)
+	if deltaQty == 0 {
+		return prevQty, newQty, deltaQty, nil
+	}
+	if _, err = r.inventoryRepo.PostMovementTx(ctx, tx, inventory.PostMovementParams{
+		ProductID: productID, QuantityDelta: deltaQty, MovementType: inventory.MovementTypeAdjustment,
+		SourceDocumentType: inventory.SourceDocManualAdjustment, SourceDocumentID: &adjustmentID,
+		ActorID: &actorID, Reason: &reason,
+	}); err != nil {
+		if errors.Is(err, inventory.ErrInsufficientStock) {
+			return 0, 0, 0, ErrNegativeAdjustmentStock
+		}
+		return 0, 0, 0, fmt.Errorf("failed posting adjustment movement: %w", err)
 	}
 
 	return prevQty, newQty, deltaQty, nil
@@ -1314,3 +1472,182 @@ func (r *Repository) GetLowStockProducts(ctx context.Context, conn *pgxpool.Conn
 	}
 	return products, nil
 }
+
+// GetStockCard calculates opening balance, windowed stock movements with running balances, and closing balance for a product
+func (r *Repository) GetStockCard(ctx context.Context, conn *pgxpool.Conn, filter StockCardFilter) (*StockCardResponse, error) {
+	prodUUID, err := uuid.Parse(filter.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid product id: %w", err)
+	}
+
+	// 1. Fetch Product metadata and current stock
+	var prodName, prodSKU, location string
+	var currentOnHand int
+	queryProd := `
+		SELECT p.name, p.sku, COALESCE(i.stock_quantity, 0), COALESCE(i.warehouse_location, 'MAIN_STORE')
+		FROM products p
+		LEFT JOIN inventory i ON p.id = i.product_id
+		WHERE p.id = $1
+	`
+	if err := conn.QueryRow(ctx, queryProd, prodUUID).Scan(&prodName, &prodSKU, &currentOnHand, &location); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("product not found: %s", filter.ProductID)
+		}
+		return nil, fmt.Errorf("failed fetching product info for stock card: %w", err)
+	}
+
+	// 2. Calculate Opening Balance before StartDate (sum of all deltas strictly before StartDate)
+	openingBalance := 0
+	if filter.StartDate != nil {
+		queryOpening := `
+			SELECT COALESCE(SUM(quantity_delta), 0)
+			FROM stock_movements
+			WHERE product_id = $1 AND occurred_at < $2
+		`
+		if err := conn.QueryRow(ctx, queryOpening, prodUUID, *filter.StartDate).Scan(&openingBalance); err != nil {
+			return nil, fmt.Errorf("failed calculating opening balance: %w", err)
+		}
+	}
+
+	// 3. Count total movements in window
+	var whereClauses []string
+	var args []any
+	args = append(args, prodUUID)
+	whereClauses = append(whereClauses, fmt.Sprintf("product_id = $%d", len(args)))
+
+	if filter.StartDate != nil {
+		args = append(args, *filter.StartDate)
+		whereClauses = append(whereClauses, fmt.Sprintf("occurred_at >= $%d", len(args)))
+	}
+	if filter.EndDate != nil {
+		args = append(args, *filter.EndDate)
+		whereClauses = append(whereClauses, fmt.Sprintf("occurred_at <= $%d", len(args)))
+	}
+	whereSQL := strings.Join(whereClauses, " AND ")
+
+	var totalMovements int
+	queryCount := fmt.Sprintf("SELECT COUNT(*) FROM stock_movements WHERE %s", whereSQL)
+	if err := conn.QueryRow(ctx, queryCount, args...).Scan(&totalMovements); err != nil {
+		return nil, fmt.Errorf("failed counting stock movements: %w", err)
+	}
+
+	// 4. Fetch all movements in window in chronological order to compute exact running balance
+	queryMovements := fmt.Sprintf(`
+		SELECT 
+			id, product_id, warehouse_location, quantity_delta, movement_type,
+			source_document_type, source_document_id, source_document_line_id,
+			actor_id, reason, occurred_at, created_at
+		FROM stock_movements
+		WHERE %s
+		ORDER BY occurred_at ASC, created_at ASC
+	`, whereSQL)
+
+	rows, err := conn.Query(ctx, queryMovements, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed querying stock movements: %w", err)
+	}
+	defer rows.Close()
+
+	var allItems []StockCardItem
+	running := openingBalance
+
+	for rows.Next() {
+		var item StockCardItem
+		var movID, prodID uuid.UUID
+		var srcDocID, srcLineID, actorID *uuid.UUID
+
+		if err := rows.Scan(
+			&movID,
+			&prodID,
+			&item.WarehouseLocation,
+			&item.QuantityDelta,
+			&item.MovementType,
+			&item.SourceDocumentType,
+			&srcDocID,
+			&srcLineID,
+			&actorID,
+			&item.Reason,
+			&item.OccurredAt,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed scanning stock movement row: %w", err)
+		}
+
+		item.MovementID = movID.String()
+		item.ProductID = prodID.String()
+		if srcDocID != nil {
+			s := srcDocID.String()
+			item.SourceDocumentID = &s
+		}
+		if srcLineID != nil {
+			s := srcLineID.String()
+			item.SourceDocumentLineID = &s
+		}
+		if actorID != nil {
+			s := actorID.String()
+			item.ActorID = &s
+		}
+
+		running += item.QuantityDelta
+		item.RunningBalance = running
+		allItems = append(allItems, item)
+	}
+
+	closingBalance := running
+
+	// 5. Apply pagination slicing on the chronological items
+	paginatedItems := make([]StockCardItem, 0)
+	if filter.Offset < len(allItems) {
+		endIdx := filter.Offset + filter.Limit
+		if filter.Limit <= 0 || endIdx > len(allItems) {
+			endIdx = len(allItems)
+		}
+		paginatedItems = allItems[filter.Offset:endIdx]
+	}
+
+	return &StockCardResponse{
+		ProductID:         filter.ProductID,
+		ProductName:       prodName,
+		ProductSKU:        prodSKU,
+		WarehouseLocation: location,
+		OpeningBalance:    openingBalance,
+		ClosingBalance:    closingBalance,
+		CurrentOnHand:     currentOnHand,
+		Movements:         paginatedItems,
+		TotalMovements:    totalMovements,
+		Limit:             filter.Limit,
+		Offset:            filter.Offset,
+		StartDate:         filter.StartDate,
+		EndDate:           filter.EndDate,
+		AsOf:              time.Now(),
+	}, nil
+}
+
+// GetStockOverview calculates aggregated stock statistics across all active products
+func (r *Repository) GetStockOverview(ctx context.Context, conn *pgxpool.Conn) (*StockOverviewCard, error) {
+	query := `
+		SELECT 
+			COUNT(p.id) AS total_skus,
+			COALESCE(SUM(i.stock_quantity), 0) AS total_units,
+			COALESCE(SUM(CASE WHEN i.stock_quantity <= i.reorder_threshold AND i.stock_quantity > 0 THEN 1 ELSE 0 END), 0) AS low_stock_skus,
+			COALESCE(SUM(CASE WHEN i.stock_quantity <= 0 THEN 1 ELSE 0 END), 0) AS out_of_stock_skus
+		FROM products p
+		LEFT JOIN inventory i ON p.id = i.product_id
+		WHERE p.is_active = TRUE
+	`
+	var card StockOverviewCard
+	card.WarehouseLocation = "MAIN_STORE"
+	card.AsOf = time.Now()
+
+	if err := conn.QueryRow(ctx, query).Scan(
+		&card.TotalSKUs,
+		&card.TotalUnitsOnHand,
+		&card.LowStockSKUs,
+		&card.OutOfStockSKUs,
+	); err != nil {
+		return nil, fmt.Errorf("failed calculating stock overview: %w", err)
+	}
+
+	return &card, nil
+}
+

@@ -299,6 +299,98 @@
                         }
                     },
                     "response": []
+                },
+                {
+                    "name": "Get Effective Tenant Capabilities (Introspection)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "pm.test(\"Has plan and capabilities map\", function () {",
+                                    "    pm.expect(jsonData.data.plan).to.be.an('object');",
+                                    "    pm.expect(jsonData.data.capabilities).to.be.an('object');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/me/capabilities",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "me",
+                                "capabilities"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "User Session Logout",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200 OK\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"refresh_token\": \"{{refresh_token}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/logout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "auth",
+                                "logout"
+                            ]
+                        }
+                    },
+                    "response": []
                 }
             ]
         },
@@ -374,6 +466,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Creates the sale, one immutable OUT movement per transaction line, the inventory balance update, and balanced sales/COGS journal in one transaction. Same-key retries return the original result without another movement.",
                         "method": "POST",
                         "header": [
                             {
@@ -829,6 +922,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Voids a completed sale and posts one linked IN reversal movement per original transaction line using the original quantity and cost basis. The status, stock, movements, and reversal journal commit atomically; same-key retries do not restock twice.",
                         "method": "POST",
                         "header": [
                             {
@@ -958,6 +1052,11 @@
                         "method": "PUT",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_qris_cfg_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1053,8 +1152,14 @@
                         }
                     ],
                     "request": {
+                        "description": "Creates the product and inventory row atomically. A positive initial_stock posts one immutable OPENING movement linked to the product and authenticated actor; zero initial stock creates no movement.",
                         "method": "POST",
                         "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_prod_create_{{$timestamp}}",
+                                "type": "text"
+                            },
                             {
                                 "key": "Content-Type",
                                 "value": "application/json",
@@ -1096,8 +1201,14 @@
                         }
                     ],
                     "request": {
+                        "description": "Updates product metadata and inventory configuration without changing stock quantity. Deactivation returns 409 PRODUCT_HAS_OUTSTANDING_PO while an issued or partially received PO has outstanding quantity.",
                         "method": "PUT",
                         "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_prod_upd_{{$timestamp}}",
+                                "type": "text"
+                            },
                             {
                                 "key": "Content-Type",
                                 "value": "application/json",
@@ -1140,8 +1251,15 @@
                         }
                     ],
                     "request": {
+                        "description": "Soft-deletes a product while preserving transaction and stock-movement traceability. Returns 409 PRODUCT_HAS_OUTSTANDING_PO while an issued or partially received PO has outstanding quantity.",
                         "method": "DELETE",
-                        "header": [],
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_prod_del_{{$timestamp}}",
+                                "type": "text"
+                            }
+                        ],
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/products/{{last_created_product_id}}",
                             "host": [
@@ -1228,6 +1346,11 @@
                         "method": "POST",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cat_create_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1271,6 +1394,11 @@
                         "method": "PUT",
                         "header": [
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cat_upd_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -1313,7 +1441,13 @@
                     ],
                     "request": {
                         "method": "DELETE",
-                        "header": [],
+                        "header": [
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cat_del_{{$timestamp}}",
+                                "type": "text"
+                            }
+                        ],
                         "url": {
                             "raw": "{{base_url}}/api/v1/pos/categories/{{last_created_category_id}}",
                             "host": [
@@ -1361,6 +1495,7 @@
                         }
                     ],
                     "request": {
+                        "description": "Posts one immutable ADJUSTMENT movement atomically with its audit record and journal. ADD and SUBTRACT require a positive quantity. SET accepts an absolute quantity including zero and requires expected_quantity; a changed authoritative balance returns 409 STALE_STOCK_COUNT.",
                         "method": "POST",
                         "header": [
                             {
@@ -1431,6 +1566,56 @@
                         }
                     },
                     "response": []
+                },
+                {
+                    "name": "Get Stock Movement Card",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/inventory/card?product_id={{sample_product_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "inventory",
+                                "card"
+                            ],
+                            "query": [
+                                {
+                                    "key": "product_id",
+                                    "value": "{{sample_product_id}}"
+                                }
+                            ]
+                        },
+                        "description": "Returns stock card report with opening balance, chronological movements, running balances, and closing balance."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Stock Overview",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/pos/inventory/overview",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "pos",
+                                "inventory",
+                                "overview"
+                            ]
+                        },
+                        "description": "Returns high-level aggregate inventory metrics across all active SKUs."
+                    },
+                    "response": []
                 }
             ]
         },
@@ -1459,6 +1644,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "darussalam-store",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_ds_{{$timestamp}}",
                                 "type": "text"
                             },
                             {
@@ -1496,13 +1686,23 @@
                                     "var jsonData = pm.response.json();",
                                     "if(jsonData.data && jsonData.data.id) {",
                                     "    pm.collectionVariables.set(\"ds_po_id\", jsonData.data.id);",
-                                    "}"
+                                    "}",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
+                                    "});"
                                 ],
                                 "type": "text/javascript"
                             }
                         }
                     ],
                     "request": {
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision.",
                         "method": "POST",
                         "header": [
                             {
@@ -1576,9 +1776,29 @@
                                 "supply-chain",
                                 "goods-receipts"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
-                    "response": []
+                    "response": [],
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
                 }
             ]
         },
@@ -1607,6 +1827,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_ab_nocert_{{$timestamp}}",
                                 "type": "text"
                             },
                             {
@@ -1643,6 +1868,15 @@
                                 "exec": [
                                     "pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
                                     "    pm.response.to.have.status(422);",
+                                    "});",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
                                     "});"
                                 ],
                                 "type": "text/javascript"
@@ -1683,7 +1917,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
                     "response": []
                 },
@@ -1712,6 +1947,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_ab_cert_{{$timestamp}}",
                                 "type": "text"
                             },
                             {
@@ -1748,6 +1988,15 @@
                                 "exec": [
                                     "pm.test(\"Status code is 201 Created\", function () {",
                                     "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
                                     "});"
                                 ],
                                 "type": "text/javascript"
@@ -1788,7 +2037,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     },
                     "response": []
                 },
@@ -1853,6 +2103,15 @@
                                 "exec": [
                                     "pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
                                     "    pm.response.to.have.status(422);",
+                                    "});",
+                                    "pm.test(\"Compliance response follows the contract\", function () {",
+                                    "    const body = pm.response.json();",
+                                    "    if (pm.response.code === 422) { pm.expect(body.error.code).to.eql(\"COMPLIANCE_ERROR\"); }",
+                                    "    if (pm.response.code === 201) {",
+                                    "        pm.expect(body.data.compliance_evaluation.policy).to.eql(\"UTC_DATE_INCLUSIVE_V1\");",
+                                    "        pm.expect(body.data.compliance_evaluation.outcome).to.be.oneOf([\"ACCEPTED\", \"WARNING\"]);",
+                                    "        pm.expect(body.data.compliance_evaluation.evaluated_at).to.be.a(\"string\");",
+                                    "    }",
                                     "});"
                                 ],
                                 "type": "text/javascript"
@@ -1893,7 +2152,8 @@
                                 "supply-chain",
                                 "purchase-orders"
                             ]
-                        }
+                        },
+                        "description": "Requires supply_chain:manage and Idempotency-Key. UTC_DATE_INCLUSIVE_V1 evaluates validity after locking configuration, supplier and certificate. Strict mode returns 422 COMPLIANCE_ERROR for missing/expired/future/revoked/wrong-type/empty-scope certificates. Inactive suppliers and explicit wrong-supplier references always fail. Success includes immutable compliance_evaluation (policy, evaluated_at, strict, supplier_id, required_types, outcome, optional reason and certificate snapshot); non-strict invalid/missing certificates record WARNING. Every new receipt rechecks; replay preserves the original decision."
                     }
                 }
             ]
@@ -2087,7 +2347,7 @@
                                 "dashboard"
                             ]
                         },
-                        "description": "Returns aggregated business metrics including daily sales volume, average order value, low stock warnings, and impending Halal compliance certificate lapses."
+                        "description": "Returns daily sales, average order value, low stock and compliance alerts. Compliance alerts include REVOKED certificates even before their original expiry; expired_certificates_count includes revocations. days_remaining refers to the preserved original expiry date, calculated in UTC."
                     },
                     "response": []
                 }
@@ -2176,6 +2436,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_sup_upd_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -2252,6 +2517,11 @@
                                 "type": "text"
                             },
                             {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cert_reg_{{$timestamp}}",
+                                "type": "text"
+                            },
+                            {
                                 "key": "Content-Type",
                                 "value": "application/json",
                                 "type": "text"
@@ -2293,6 +2563,11 @@
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
                                 "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_cert_rev_{{$timestamp}}",
+                                "type": "text"
                             }
                         ],
                         "url": {
@@ -2314,7 +2589,8 @@
                                     "value": "{{ab_cert_id}}"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Records revoked_at once under a certificate row lock; preserves valid_from and expiry_date. No body required. Subsequent certificate reads report REVOKED. A concurrent strict receipt either commits first with its historical compliance_evaluation, or fails 422 COMPLIANCE_ERROR after revocation."
                     },
                     "response": []
                 },
@@ -2383,7 +2659,8 @@
                                     "value": "{{ab_po_id}}"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Includes the original immutable compliance_evaluation for documents created after the certificate-validity upgrade. Older documents omit it; it is not recalculated from current certificate status."
                     },
                     "response": []
                 },
@@ -2395,6 +2672,11 @@
                             {
                                 "key": "X-Tenant-ID",
                                 "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "idemp_po_cancel_{{$timestamp}}",
                                 "type": "text"
                             }
                         ],
@@ -2417,7 +2699,74 @@
                                     "value": "{{ab_po_id}}"
                                 }
                             ]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Supplier unable to deliver goods on schedule\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Goods Receipt (Inbound Stock Restock)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "if(pm.response.code === 201 && jsonData.data && jsonData.data.id) {",
+                                    "    pm.collectionVariables.set(\"ab_gr_id\", jsonData.data.id);",
+                                    "}",
+                                    "pm.test(\"Status code is 201 or 422\", function () {",
+                                    "    pm.expect(pm.response.code).to.be.oneOf([201, 422]);",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "X-Tenant-ID",
+                                "value": "al-barakah-mart",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Idempotency-Key",
+                                "value": "{{$guid}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"purchase_order_id\": \"{{ab_po_id}}\",\n    \"notes\": \"Delivery batch received and inspected with inline QC\",\n    \"items\": [\n        {\n            \"product_id\": \"10000000-0000-0000-0000-000000000001\",\n            \"delivered_quantity\": 10,\n            \"accepted_quantity\": 9,\n            \"rejected_quantity\": 1,\n            \"qc_reason\": \"Packaging seal broken on 1 unit\"\n        }\n    ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/supply-chain/goods-receipts",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "supply-chain",
+                                "goods-receipts"
+                            ]
+                        },
+                        "description": "Receives ordered items into inventory with inline quality check (delivered = accepted + rejected). Deterministic row locking and atomic stock increments for accepted quantity only. Validates compliance status, closes PO to RECEIVED when 100% fulfilled, posts balanced double-entry ledger journal for accepted valuation, and rolls back cleanly if inventory records or compliance fail."
                     },
                     "response": []
                 },
@@ -2482,7 +2831,8 @@
                                     "value": "{{ab_gr_id}}"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Returns full Goods Receipt details including inline QC records per line item (delivered_quantity, accepted_quantity, rejected_quantity, qc_outcome, qc_reason, inspected_by, inspected_at), ledger cross-reference, and immutable compliance_evaluation. Accepted receipt lines posted after the inventory cutover include stock_movement_id (UUID); rejected-only and legacy lines without a movement omit this field. Accepted stock movements, receipt records, PO status, and ledger postings commit atomically."
                     },
                     "response": []
                 },
@@ -2543,6 +2893,23 @@
                     "response": []
                 },
                 {
+                    "name": "Readiness Check",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/ready",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "ready"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
                     "name": "Refresh Token",
                     "request": {
                         "method": "POST",
@@ -2587,6 +2954,41 @@
                                 "v1",
                                 "auth",
                                 "me"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "User Session Logout",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/v1/auth/logout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "auth",
+                                "logout"
                             ]
                         }
                     },

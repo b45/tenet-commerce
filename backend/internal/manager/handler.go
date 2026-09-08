@@ -5,23 +5,32 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/entitlement"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	"github.com/b45/tenet-commerce/backend/pkg/response"
 )
 
 // Handler handles HTTP requests for the manager domain
 type Handler struct {
-	service *Service
+	service        *Service
+	entitlementSvc *entitlement.Service
 }
 
-// NewHandler initializes a new Manager HTTP handler
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+// NewHandler initializes a new Manager HTTP handler with optional entitlement evaluation
+func NewHandler(service *Service, entitlementSvc ...*entitlement.Service) *Handler {
+	h := &Handler{service: service}
+	if len(entitlementSvc) > 0 {
+		h.entitlementSvc = entitlementSvc[0]
+	}
+	return h
 }
 
-// RegisterRoutes mounts manager endpoints onto the given router group with RBAC role guards
+// RegisterRoutes mounts manager endpoints onto the given router group with RBAC role guards and entitlement checks
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.Use(internalAuth.RequireRole("MANAGER", "SUPER_ADMIN"))
+	if h.entitlementSvc != nil {
+		rg.Use(entitlement.RequireFeature(h.entitlementSvc, "pos.daily_summary"))
+	}
 	{
 		rg.GET("/dashboard", h.GetDashboardSummary)
 	}

@@ -58,6 +58,55 @@ func TestMoney_FromFloat(t *testing.T) {
 	assert.ErrorIs(t, err, money.ErrInvalidAmount)
 }
 
+func TestMoney_FromExactFloat(t *testing.T) {
+	// Exact integer floats must succeed
+	m, err := money.FromExactFloat(10001.0, "IDR")
+	require.NoError(t, err)
+	assert.Equal(t, int64(10001), m.Amount())
+
+	m0, err := money.FromExactFloat(0.0, "IDR")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), m0.Amount())
+
+	// Fractional floats must be rejected
+	_, err = money.FromExactFloat(100.50, "IDR")
+	assert.ErrorIs(t, err, money.ErrFractionalAmount)
+
+	_, err = money.FromExactFloat(0.01, "IDR")
+	assert.ErrorIs(t, err, money.ErrFractionalAmount)
+
+	// Non-finite floats must be rejected
+	_, err = money.FromExactFloat(math.NaN(), "IDR")
+	assert.ErrorIs(t, err, money.ErrInvalidAmount)
+
+	_, err = money.FromExactFloat(math.Inf(1), "IDR")
+	assert.ErrorIs(t, err, money.ErrInvalidAmount)
+}
+
+func TestMoney_ValidateIDR(t *testing.T) {
+	// Valid IDR amount
+	m, err := money.ValidateIDR(50000, money.MaxTransactionAmount)
+	require.NoError(t, err)
+	assert.Equal(t, int64(50000), m.Amount())
+
+	// Negative amount rejected
+	_, err = money.ValidateIDR(-500, money.MaxTransactionAmount)
+	assert.ErrorIs(t, err, money.ErrNegativeAmount)
+
+	// Fractional rejected
+	_, err = money.ValidateIDR(1250.75, money.MaxTransactionAmount)
+	assert.ErrorIs(t, err, money.ErrFractionalAmount)
+
+	// Exceeding cap rejected
+	_, err = money.ValidateIDR(float64(money.MaxTransactionAmount+1), money.MaxTransactionAmount)
+	assert.ErrorIs(t, err, money.ErrExceedsMaxCap)
+
+	// Boundary at cap accepted
+	mCap, err := money.ValidateIDR(float64(money.MaxTransactionAmount), money.MaxTransactionAmount)
+	require.NoError(t, err)
+	assert.Equal(t, money.MaxTransactionAmount, mCap.Amount())
+}
+
 func TestMoney_Arithmetic(t *testing.T) {
 	m1 := money.IDR(50000)
 	m2 := money.IDR(30000)

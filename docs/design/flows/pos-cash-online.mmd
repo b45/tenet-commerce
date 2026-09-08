@@ -1,0 +1,30 @@
+flowchart TD
+    A["Sesi dan tenant terverifikasi"] --> B{"Permission POS cukup?"}
+    B -->|Tidak| C["Akses ditolak; tidak ada pembayaran"]
+    B -->|Ya| D["POS-01: muat katalog aktif"]
+    D -->|Gagal| E["Pesan gagal dan muat ulang"]
+    E --> D
+    D --> F["Cari atau scan; tambah dan review cart"]
+    F --> G["POS-02: refresh snapshot; review total dan tender"]
+    G -->|Offline / invalid| H["Pertahankan input; jangan kirim"]
+    H --> G
+    G -->|Valid dan gate release terpenuhi| I["Persist original key, payload, tenant dan user"]
+    I -->|Storage gagal| H
+    I --> J["POST checkout; bekukan command"]
+    J --> K{"Hasil?"}
+    K -->|COMPLETED valid| L["POS-03: receipt server dan kembalian"]
+    K -->|Penolakan bisnis pasti| M["Review stok / produk / tender"]
+    M -->|Koreksi disetujui; command baru tertaut| G
+    K -->|401 / 403| N["Kunci record; pulihkan sesi pemilik semula"]
+    K -->|409 in-flight / 429| O["Tunggu; pertahankan original command"]
+    K -->|Timeout / 5xx / respons rusak| P["POS-03 unknown: jangan menagih ulang"]
+    N --> P
+    O --> P
+    P --> Q["Rekonsiliasi original command: gate G-02"]
+    Q -->|Dikonfirmasi| L
+    Q -->|Belum ada bukti| P
+    L --> R["Cetak opsional; hasil cetak terpisah dari status transaksi"]
+    R -->|Dialog ditutup / cetak tidak keluar| S["Cetak ulang receipt yang sama; tanpa POST checkout"]
+    R --> T["Transaksi baru setelah receipt tersimpan"]
+    S --> T
+    T --> F

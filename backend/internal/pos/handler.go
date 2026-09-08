@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalAuth "github.com/b45/tenet-commerce/backend/internal/auth"
+	"github.com/b45/tenet-commerce/backend/internal/entitlement"
 	pkgIdempotency "github.com/b45/tenet-commerce/backend/pkg/idempotency"
 	"github.com/b45/tenet-commerce/backend/pkg/logger"
 	pkgRedis "github.com/b45/tenet-commerce/backend/pkg/redis"
@@ -18,12 +19,17 @@ import (
 
 // Handler handles HTTP requests for the POS domain
 type Handler struct {
-	service *Service
+	service        *Service
+	entitlementSvc *entitlement.Service
 }
 
-// NewHandler initializes a new POS HTTP handler
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+// NewHandler initializes a new POS HTTP handler with optional entitlement evaluation
+func NewHandler(service *Service, entitlementSvc ...*entitlement.Service) *Handler {
+	h := &Handler{service: service}
+	if len(entitlementSvc) > 0 {
+		h.entitlementSvc = entitlementSvc[0]
+	}
+	return h
 }
 
 // RegisterRoutes mounts all POS endpoints with RBAC and idempotency middleware
@@ -39,14 +45,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.POST("/products",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.CreateProduct,
 	)
 	rg.PUT("/products/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.UpdateProduct,
 	)
 	rg.DELETE("/products/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.DeleteProduct,
 	)
 
@@ -61,14 +70,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.POST("/categories",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.CreateCategory,
 	)
 	rg.PUT("/categories/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.UpdateCategory,
 	)
 	rg.DELETE("/categories/:id",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.DeleteCategory,
 	)
 
@@ -82,6 +94,15 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 		internalAuth.RequirePermission("inventory:read"),
 		h.GetLowStock,
 	)
+	rg.GET("/inventory/card",
+		internalAuth.RequirePermission("inventory:read"),
+		h.GetStockCard,
+	)
+	rg.GET("/inventory/overview",
+		internalAuth.RequirePermission("inventory:read"),
+		h.GetStockOverview,
+	)
+
 
 	// Checkout & Orders
 	rg.POST("/checkout",
@@ -102,10 +123,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.VoidOrder,
 	)
-	rg.GET("/daily-summary",
+	dailySummaryHandlers := []gin.HandlerFunc{
 		internalAuth.RequirePermission("pos:read"),
-		h.GetDailySummary,
-	)
+	}
+	if h.entitlementSvc != nil {
+		dailySummaryHandlers = append(dailySummaryHandlers, entitlement.RequireFeature(h.entitlementSvc, "pos.daily_summary"))
+	}
+	dailySummaryHandlers = append(dailySummaryHandlers, h.GetDailySummary)
+	rg.GET("/daily-summary", dailySummaryHandlers...)
 
 	// QRIS Configuration
 	rg.GET("/qris",
@@ -114,6 +139,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 	)
 	rg.PUT("/qris",
 		internalAuth.RequirePermission("inventory:write"),
+		pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 		h.UpdateQRISConfig,
 	)
 }
@@ -192,6 +218,11 @@ func (h *Handler) Checkout(c *gin.Context) {
 
 	receipt, err := h.service.Checkout(c.Request.Context(), conn, cashierID, idempotencyKey, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) || errors.Is(err, ErrTransactionLimitExceeded) {
+			log.Warn("Checkout rejected due to monetary bounds or invalid exact amount", "error", err, "cashier_id", cashierID)
+			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrInsufficientCashTendered) {
 			log.Warn("Checkout rejected: insufficient cash tendered", "error", err, "cashier_id", cashierID)
 			response.BadRequest(c, "INSUFFICIENT_CASH_TENDERED", err.Error())
@@ -508,8 +539,17 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 		return
 	}
 
-	product, err := h.service.CreateProduct(c.Request.Context(), conn, req)
+	userID := c.GetString("user_id")
+	if userID == "" {
+		response.Unauthorized(c, "UNAUTHORIZED", "User identity not found in token")
+		return
+	}
+	product, err := h.service.CreateProduct(c.Request.Context(), conn, userID, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) {
+			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrSKUAlreadyExists) {
 			response.Conflict(c, "SKU_ALREADY_EXISTS", "Product SKU already exists")
 			return
@@ -550,8 +590,16 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 
 	product, err := h.service.UpdateProduct(c.Request.Context(), conn, id, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMonetaryAmount) {
+			response.BadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
 		if errors.Is(err, ErrProductNotFound) {
 			response.NotFound(c, "PRODUCT_NOT_FOUND", "Product not found")
+			return
+		}
+		if errors.Is(err, ErrProductHasOutstandingPO) {
+			response.Conflict(c, "PRODUCT_HAS_OUTSTANDING_PO", "Product cannot be deactivated while purchase order quantity remains outstanding")
 			return
 		}
 		if errors.Is(err, ErrBarcodeAlreadyExists) {
@@ -585,6 +633,10 @@ func (h *Handler) DeleteProduct(c *gin.Context) {
 	if err := h.service.DeleteProduct(c.Request.Context(), conn, id); err != nil {
 		if errors.Is(err, ErrProductNotFound) {
 			response.NotFound(c, "PRODUCT_NOT_FOUND", "Product not found")
+			return
+		}
+		if errors.Is(err, ErrProductHasOutstandingPO) {
+			response.Conflict(c, "PRODUCT_HAS_OUTSTANDING_PO", "Product cannot be deleted while purchase order quantity remains outstanding")
 			return
 		}
 		log.Error("Failed soft-deleting product", "id", id, "error", err)
@@ -799,6 +851,14 @@ func (h *Handler) AdjustStock(c *gin.Context) {
 			response.BadRequest(c, "INSUFFICIENT_STOCK", "Insufficient stock for negative adjustment")
 			return
 		}
+		if errors.Is(err, ErrInvalidAdjustmentQuantity) {
+			response.BadRequest(c, "INVALID_ADJUSTMENT_QUANTITY", err.Error())
+			return
+		}
+		if errors.Is(err, ErrStaleStockCount) {
+			response.Conflict(c, "STALE_STOCK_COUNT", "Inventory changed after the stock count was started; refresh and recount")
+			return
+		}
 		log.Error("Failed adjusting stock", "product_id", req.ProductID, "error", err)
 		response.InternalServerError(c, "STOCK_ADJUST_FAILED", err.Error())
 		return
@@ -833,3 +893,114 @@ func (h *Handler) GetLowStock(c *gin.Context) {
 		Total: len(products),
 	})
 }
+
+// GetStockCard retrieves windowed stock movement card report for a product with running balances
+// GET /api/v1/pos/inventory/card?product_id=...&start_date=...&end_date=...&limit=...&offset=...
+func (h *Handler) GetStockCard(c *gin.Context) {
+	log := logger.FromContext(c.Request.Context())
+	connVal, exists := c.Get("db_conn")
+	if !exists {
+		response.InternalServerError(c, "DATABASE_CONTEXT_LOST", "Database connection context not found")
+		return
+	}
+	conn, ok := connVal.(*pgxpool.Conn)
+	if !ok {
+		response.InternalServerError(c, "DATABASE_TYPE_ERROR", "Invalid connection context type")
+		return
+	}
+
+	productID := c.Query("product_id")
+	if productID == "" {
+		response.BadRequest(c, "MISSING_PRODUCT_ID", "product_id query parameter is required")
+		return
+	}
+
+	limit := 50
+	if lStr := c.Query("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	offset := 0
+	if oStr := c.Query("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	var startDate *time.Time
+	if sStr := c.Query("start_date"); sStr != "" {
+		if t, err := time.Parse(time.RFC3339, sStr); err == nil {
+			startDate = &t
+		} else if t, err := time.Parse("2006-01-02", sStr); err == nil {
+			startDate = &t
+		} else {
+			response.BadRequest(c, "INVALID_START_DATE", "start_date must be RFC3339 or YYYY-MM-DD")
+			return
+		}
+	}
+
+	var endDate *time.Time
+	if eStr := c.Query("end_date"); eStr != "" {
+		if t, err := time.Parse(time.RFC3339, eStr); err == nil {
+			endDate = &t
+		} else if t, err := time.Parse("2006-01-02", eStr); err == nil {
+			// Set to end of day 23:59:59
+			tEnd := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, t.Location())
+			endDate = &tEnd
+		} else {
+			response.BadRequest(c, "INVALID_END_DATE", "end_date must be RFC3339 or YYYY-MM-DD")
+			return
+		}
+	}
+
+	filter := StockCardFilter{
+		ProductID: productID,
+		StartDate: startDate,
+		EndDate:   endDate,
+		Limit:     limit,
+		Offset:    offset,
+	}
+
+	stockCard, err := h.service.GetStockCard(c.Request.Context(), conn, filter)
+	if err != nil {
+		if strings.Contains(err.Error(), "product not found") || strings.Contains(err.Error(), "invalid product id") {
+			response.NotFound(c, "PRODUCT_NOT_FOUND", err.Error())
+			return
+		}
+		log.Error("Failed querying stock card", "error", err)
+		response.InternalServerError(c, "STOCK_CARD_FETCH_FAILED", err.Error())
+		return
+	}
+
+	response.OKWithMeta(c, stockCard, response.Meta{
+		Total: stockCard.TotalMovements,
+	})
+}
+
+// GetStockOverview calculates high-level inventory totals across all active SKUs
+// GET /api/v1/pos/inventory/overview
+func (h *Handler) GetStockOverview(c *gin.Context) {
+	log := logger.FromContext(c.Request.Context())
+	connVal, exists := c.Get("db_conn")
+	if !exists {
+		response.InternalServerError(c, "DATABASE_CONTEXT_LOST", "Database connection context not found")
+		return
+	}
+	conn, ok := connVal.(*pgxpool.Conn)
+	if !ok {
+		response.InternalServerError(c, "DATABASE_TYPE_ERROR", "Invalid connection context type")
+		return
+	}
+
+	card, err := h.service.GetStockOverview(c.Request.Context(), conn)
+	if err != nil {
+		log.Error("Failed calculating stock overview", "error", err)
+		response.InternalServerError(c, "STOCK_OVERVIEW_FAILED", err.Error())
+		return
+	}
+
+	response.OK(c, card)
+}
+

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "name": "Tenet Commerce Base Design Tokens",
+  "version": "1.0.0",
+  "description": "Foundational semantic design tokens matching docs/FRONTEND_GUIDELINES.md Section 5 & 6.",
+  "color": {
+    "primitive": {
+      "indigo": {
+        "50": { "value": "#EEF2FF", "type": "color" },
+        "600": { "value": "#4F46E5", "type": "color" },
+        "700": { "value": "#4338CA", "type": "color" },
+        "800": { "value": "#3730A3", "type": "color" }
+      },
+      "slate": {
+        "50": { "value": "#F8FAFC", "type": "color" },
+        "100": { "value": "#F1F5F9", "type": "color" },
+        "200": { "value": "#E2E8F0", "type": "color" },
+        "400": { "value": "#94A3B8", "type": "color" },
+        "600": { "value": "#475569", "type": "color" },
+        "700": { "value": "#334155", "type": "color" },
+        "900": { "value": "#0F172A", "type": "color" }
+      },
+      "green": {
+        "50": { "value": "#F0FDF4", "type": "color" },
+        "200": { "value": "#BBF7D0", "type": "color" },
+        "700": { "value": "#15803D", "type": "color" },
+        "800": { "value": "#166534", "type": "color" }
+      },
+      "amber": {
+        "50": { "value": "#FFFBEB", "type": "color" },
+        "200": { "value": "#FDE68A", "type": "color" },
+        "700": { "value": "#B45309", "type": "color" },
+        "800": { "value": "#92400E", "type": "color" }
+      },
+      "red": {
+        "50": { "value": "#FEF2F2", "type": "color" },
+        "200": { "value": "#FECACA", "type": "color" },
+        "700": { "value": "#B91C1C", "type": "color" },
+        "800": { "value": "#991B1B", "type": "color" }
+      },
+      "blue": {
+        "50": { "value": "#EFF6FF", "type": "color" },
+        "200": { "value": "#BFDBFE", "type": "color" },
+        "700": { "value": "#1D4ED8", "type": "color" },
+        "800": { "value": "#1E40AF", "type": "color" }
+      }
+    },
+    "semantic": {
+      "action": {
+        "primary": { "value": "{color.primitive.indigo.700}", "type": "color" },
+        "primaryHover": { "value": "{color.primitive.indigo.800}", "type": "color" },
+        "onPrimary": { "value": "#FFFFFF", "type": "color" },
+        "focusRing": { "value": "{color.primitive.indigo.600}", "type": "color" }
+      },
+      "surface": {
+        "base": { "value": "#FFFFFF", "type": "color" },
+        "muted": { "value": "{color.primitive.slate.50}", "type": "color" },
+        "elevated": { "value": "#FFFFFF", "type": "color" },
+        "border": { "value": "{color.primitive.slate.200}", "type": "color" }
+      },
+      "text": {
+        "primary": { "value": "{color.primitive.slate.900}", "type": "color" },
+        "secondary": { "value": "{color.primitive.slate.600}", "type": "color" },
+        "muted": { "value": "{color.primitive.slate.400}", "type": "color" },
+        "inverse": { "value": "#FFFFFF", "type": "color" }
+      },
+      "status": {
+        "success": {
+          "text": { "value": "{color.primitive.green.800}", "type": "color" },
+          "background": { "value": "{color.primitive.green.50}", "type": "color" },
+          "border": { "value": "{color.primitive.green.200}", "type": "color" }
+        },
+        "warning": {
+          "text": { "value": "{color.primitive.amber.800}", "type": "color" },
+          "background": { "value": "{color.primitive.amber.50}", "type": "color" },
+          "border": { "value": "{color.primitive.amber.200}", "type": "color" }
+        },
+        "danger": {
+          "text": { "value": "{color.primitive.red.800}", "type": "color" },
+          "background": { "value": "{color.primitive.red.50}", "type": "color" },
+          "border": { "value": "{color.primitive.red.200}", "type": "color" }
+        },
+        "info": {
+          "text": { "value": "{color.primitive.blue.800}", "type": "color" },
+          "background": { "value": "{color.primitive.blue.50}", "type": "color" },
+          "border": { "value": "{color.primitive.blue.200}", "type": "color" }
+        }
+      }
+    }
+  },
+  "spacing": {
+    "1": { "value": "0.25rem", "type": "spacing" },
+    "2": { "value": "0.5rem", "type": "spacing" },
+    "3": { "value": "0.75rem", "type": "spacing" },
+    "4": { "value": "1rem", "type": "spacing" },
+    "6": { "value": "1.5rem", "type": "spacing" },
+    "8": { "value": "2rem", "type": "spacing" },
+    "12": { "value": "3rem", "type": "spacing" }
+  },
+  "radius": {
+    "sm": { "value": "0.25rem", "type": "radius" },
+    "md": { "value": "0.5rem", "type": "radius" },
+    "lg": { "value": "0.75rem", "type": "radius" },
+    "full": { "value": "9999px", "type": "radius" }
+  },
+  "typography": {
+    "fontSize": {
+      "xs": { "value": "0.75rem", "type": "fontSize" },
+      "sm": { "value": "0.875rem", "type": "fontSize" },
+      "base": { "value": "1rem", "type": "fontSize" },
+      "lg": { "value": "1.125rem", "type": "fontSize" },
+      "xl": { "value": "1.25rem", "type": "fontSize" },
+      "2xl": { "value": "1.5rem", "type": "fontSize" },
+      "3xl": { "value": "1.875rem", "type": "fontSize" }
+    }
+  }
+}

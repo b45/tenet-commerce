@@ -10,19 +10,18 @@
 ### 1.1 Base URL & Content Negotiation
 - **Local base URL:** `http://localhost:8081/api/v1`
 - **Content-Type:** `application/json; charset=utf-8`
-- **Production transport:** deployment-specific; this repository does not yet provide a production TLS/API-gateway deployment.
-
 ### 1.2 Required Request Headers
 ```http
 Authorization: Bearer <JWT_ACCESS_TOKEN>
-Idempotency-Key: <client-generated key> # Required by current middleware only for POS checkout, void, and stock adjustment
+Idempotency-Key: <client-generated key> # Required for all state-mutating endpoints (POS checkout/void/adjust, catalog products/categories/qris, supply chain, and ledger entries)
 X-Tenant-ID: <TENANT_SLUG>              # Fallback only; authenticated JWT tenant context has priority
 ```
-
-### 1.3 Health Check
 - **Endpoint:** `GET /health`
 - **Auth:** Public
 - **Response:** `200 OK` with the application health payload. This endpoint is outside the `/api/v1` namespace.
+- **Endpoint:** `GET /ready`
+- **Auth:** Public
+- **Response:** `200 OK` when PostgreSQL and Redis are reachable; `503 Service Unavailable` when dependencies are unavailable or `APP_MAINTENANCE_MODE=true`. This endpoint is outside the `/api/v1` namespace and emits `Retry-After: 300` during maintenance.
 
 ### 1.4 Standard Response Envelope
 ```json
@@ -112,14 +111,81 @@ Password for all seeded dev accounts: `Password123!`
   "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
-- **Response:** The same token-pair envelope as login. The current implementation issues a new access and refresh token after validating the submitted refresh token.
+- **Response:** The same token-pair envelope as login.
+- **Security & Lifecycle Rules:**
+  - Enforces **Refresh Token Rotation**: Upon successful refresh, the submitted refresh token is rotated and blacklisted in Redis (`auth:blacklist:<token_hash>`) for its remaining TTL to prevent replay attacks.
+  - Revoked refresh tokens are rejected immediately with HTTP 401 `TOKEN_REVOKED`.
 
 ### 2.3 Current Identity
 - **Endpoint:** `GET /api/v1/auth/me`
 - **Auth:** Bearer access token
 - **Response:** The authenticated JWT identity (`id`, `tenant_slug`, `role`, and `permissions`).
+- **Security Rules:**
+  - Validates cryptographic signature and checks Redis blacklist.
+  - If the token has been revoked via logout, returns HTTP 401 `TOKEN_REVOKED`.
 
-### 2.4 Tenant Provisioning — Planned / Not Registered
+### 2.4 User Session Logout
+- **Endpoint:** `POST /api/v1/auth/logout`
+- **Auth:** Bearer access token
+- **Description:** Invalidates the current session by writing the SHA-256 digest of the Bearer access token (and optionally the submitted refresh token) to Redis (`auth:blacklist:<sha256_hash>`) with a TTL equal to the token's remaining lifespan.
+- **Request Body (Optional):**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Logged out successfully"
+  }
+}
+```
+- **Error Responses:**
+  - `401 UNAUTHORIZED` / `MISSING_AUTH_HEADER`: No Bearer token provided.
+  - `401 TOKEN_REVOKED`: Token already revoked.
+
+### 2.5 Tenant Capabilities Introspection
+- **Endpoint:** `GET /api/v1/me/capabilities`
+- **Auth:** Bearer access token
+- **Description:** Returns the active subscription tier, policy version, and authoritative feature capability decisions for the tenant context.
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "tenant_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "plan": {
+      "code": "growth",
+      "name": "Growth Business Tier",
+      "status": "ACTIVE"
+    },
+    "capabilities": {
+      "pos.checkout": {
+        "allowed": true,
+        "reason": "ENTITLED",
+        "grant_type": "BOOLEAN"
+      },
+      "pos.daily_summary": {
+        "allowed": true,
+        "reason": "ENTITLED",
+        "grant_type": "BOOLEAN"
+      },
+      "catalog.max_products": {
+        "allowed": true,
+        "reason": "ENTITLED",
+        "grant_type": "QUOTA",
+        "quota_limit": 1000
+      }
+    },
+    "policy_version": 1
+  }
+}
+```
+
+### 2.6 Tenant Provisioning — Planned / Not Registered
 - **Status:** Not implemented as an HTTP endpoint. Tenant registry and schema provisioning are currently development/setup concerns and will be formalized by the tenant-migration hardening workstream.
 - **Future design reference (not an active contract):**
 - **Endpoint:** `POST /api/v1/tenants`
@@ -204,6 +270,7 @@ Password for all seeded dev accounts: `Password123!`
 }
 ```
 - **Cash settlement rule:** when `payment_method` is `CASH`, `cash_tendered` is required and must be at least the calculated total. For `QRIS` and `SIMULATED_CARD`, omit `cash_tendered`.
+- **Monetary validation rule:** All monetary fields (`unit_price`, `cost_price`, `discount_amount`, `cash_tendered`) must be non-negative, non-fractional integer IDR amounts. Fractional amounts (e.g. `100.50`) and amounts exceeding caps (> 1B IDR per transaction, > 2B IDR cash tender) are rejected with `400 Bad Request` (`INVALID_MONETARY_AMOUNT`).
 - **Response (201 Created):**
 ```json
 {
@@ -354,7 +421,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 3.6 Daily Cashier Sales Summary (X/Z-Report)
 - **Endpoint:** `GET /api/v1/pos/daily-summary`
-- **Auth:** `CASHIER`, `MANAGER`, `SUPER_ADMIN` (Requires permission: `pos:read`)
+- **Auth & Entitlements:** `CASHIER`, `MANAGER`, `SUPER_ADMIN` (Requires permission: `pos:read` AND tenant package entitlement: `pos.daily_summary`). Inactive subscriptions or Starter tiers receive `403 Forbidden` (`FEATURE_NOT_ENTITLED`).
 - **Query Parameters:**
   - `date`: `YYYY-MM-DD` (optional, default: current date)
   - `cashier_id`: UUID (optional, filter by specific cashier)
@@ -404,6 +471,7 @@ Password for all seeded dev accounts: `Password123!`
 ```
 
 - **Update QRIS Configuration:** `PUT /api/v1/pos/qris`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `inventory:write`)
 - **Request Body:**
 ```json
@@ -441,6 +509,7 @@ Password for all seeded dev accounts: `Password123!`
     ```
 
 - **Create Product:** `POST /api/v1/pos/products`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Request Body:**
     ```json
@@ -458,16 +527,21 @@ Password for all seeded dev accounts: `Password123!`
       "compliance_tags": ["HALAL_MUI"]
     }
     ```
-  - **Response (201 Created):** Returns created `Product` object.
+  - **Response (201 Created):** Returns created `Product` object. A positive `initial_stock` is posted as an immutable `OPENING` movement referencing the new product and authenticated actor; zero creates no stock delta.
 
 - **Update Product:** `PUT /api/v1/pos/products/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Request Body:** Similar to create product (without SKU and initial stock).
   - **Response (200 OK):** Returns updated `Product` object.
+  - Product updates cannot change `stock_quantity`; use the adjustment endpoint for every stock change.
+  - Deactivation returns `409 PRODUCT_HAS_OUTSTANDING_PO` while an issued or partially received PO still has outstanding quantity for the product.
 
 - **Soft Delete Product:** `DELETE /api/v1/pos/products/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
   - **Auth:** Requires permission: `inventory:write`
   - **Response (200 OK):** `{"success": true, "data": {"message": "Product soft-deleted successfully", "id": "..."}}`
+  - **Conflict (409):** `PRODUCT_HAS_OUTSTANDING_PO` when an issued or partially received PO still has outstanding quantity. Soft deletion preserves transaction and movement history.
 
 ### 3.9 Category Management
 - **List Categories:** `GET /api/v1/pos/categories`
@@ -488,10 +562,14 @@ Password for all seeded dev accounts: `Password123!`
     }
     ```
 - **Create Category:** `POST /api/v1/pos/categories`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
+  - **Auth:** Requires permission: `inventory:write`
   - **Request Body:** `{"name": "Kue Kering Lebaran", "code": "CAT-KERING"}`
   - **Response (201 Created):** Returns created category.
 - **Update Category:** `PUT /api/v1/pos/categories/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Delete Category:** `DELETE /api/v1/pos/categories/:id`
+  - **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 
 ### 3.10 Inventory Stock Adjustment & Spoilage Write-Off
 - **Endpoint:** `POST /api/v1/pos/inventory/adjust`
@@ -526,17 +604,75 @@ Password for all seeded dev accounts: `Password123!`
 ```
 *(Automatically creates a balanced double-entry journal posting: Debit 5020 Inventory Shrinkage & Loss, Credit 1030 Merchandise Inventory).*
 
+Each nonzero adjustment posts one immutable `ADJUSTMENT` stock movement in the same transaction as its audit record and journal. For `SET`, `quantity` is the absolute counted stock (zero is allowed) and `expected_quantity` is required. The server locks the authoritative balance and returns `409 STALE_STOCK_COUNT` if it differs from `expected_quantity`; clients must refresh and recount. `ADD` and `SUBTRACT` require a positive quantity and omit `expected_quantity`.
+
+Checkout posts one `OUT` movement per transaction line, and void posts one linked `IN` reversal per original line. Their movements, inventory balance, business document, and balanced journal commit atomically; same-key retries do not create another movement.
+
 ### 3.11 Low Stock Alerts
 - **Endpoint:** `GET /api/v1/pos/inventory/low-stock`
 - **Auth:** Requires permission: `inventory:read`
-- **Response (200 OK):** Returns all products where `stock_quantity <= reorder_threshold` sorted by urgency.
+- **Response (200 OK):** Returns all products where `stock_quantity <= reorder_threshold` sorted by urgency (`(stock_quantity - reorder_threshold) ASC`).
+
+### 3.12 Stock Movement Card & Overview Read Models
+- **Stock Movement Card Endpoint:** `GET /api/v1/pos/inventory/card`
+  - **Auth:** Requires permission: `inventory:read`
+  - **Query Params:** `product_id` (Mandatory UUID), `start_date` (Optional RFC3339/YYYY-MM-DD), `end_date` (Optional RFC3339/YYYY-MM-DD), `limit` (Optional, default 50), `offset` (Optional, default 0).
+  - **Response (200 OK):** Returns product metadata, opening balance strictly prior to `start_date`, chronological windowed movements with running balances, closing balance, total windowed movement count, and authoritative `current_on_hand`.
+- **Stock Overview Endpoint:** `GET /api/v1/pos/inventory/overview`
+  - **Auth:** Requires permission: `inventory:read`
+  - **Response (200 OK):** High-level aggregate totals across active tenant inventory: `total_skus`, `total_units_on_hand`, `low_stock_skus`, `out_of_stock_skus`, default location (`MAIN_STORE`), and timestamp `as_of`.
+
 
 ---
 
 ## 4. Compliance-Aware Supply Chain Management
 
+PO and GR compliance uses policy `UTC_DATE_INCLUSIVE_V1`: `valid_from` and
+`expiry_date` include the entire specified UTC calendar day. The server samples
+time after acquiring the relevant locks; request/browser dates cannot override it.
+Strict mode requires an active supplier, its own unrevoked certificate, a
+nonempty scope, an allowed `cert_type` from `required_compliance`, and current
+validity. `EXPIRING_SOON` does not bypass type validation. Scope is descriptive
+free text; this API does not infer product-level coverage from that text.
+
+Missing configuration preserves non-strict behavior. Non-strict invalid/missing
+certificates produce a recorded `WARNING`; inactive suppliers and explicit
+missing/wrong-supplier certificate references are rejected in either mode.
+Strict failures return HTTP 422 `COMPLIANCE_ERROR` and commit no PO/GR, inventory,
+journal, or compliance decision. Required types must be configured in strict mode.
+
+Successful PO/GR creation and their detail endpoints include
+`compliance_evaluation`: `policy`, `evaluated_at` (UTC timestamp), `strict`,
+`supplier_id`, `required_types`, `outcome` (`ACCEPTED` or `WARNING`), optional
+`reason`, and optional `certificate` snapshot. The immutable decision is committed
+with the document. Historical documents omit this field; they are not backfilled.
+Replay retains the original decision, while each new receipt evaluates again.
+Manager dashboard compliance alerts also include revoked certificates, with
+`status: "REVOKED"`; the existing `expired_certificates_count` includes these
+invalid certificates. `days_remaining` still describes the original expiry date.
+
+Lock order is PO (receipts only), tenant configuration table (`SHARE`), supplier,
+certificate, then inventory. The configuration table lock also protects an absent
+configuration row from concurrent insertion. Configuration writers must acquire
+their table/write lock before supplier/certificate locks. Revocation locks only
+the certificate: if it wins, strict receipt fails; if receipt wins, its recorded
+decision remains valid historical evidence after revocation commits. Configuration
+writes contend with active procurement decisions; this favors correctness over
+configuration-update throughput.
+
+**Deployment:** apply `scripts/06_certificate_validity.sql` with `psql -v
+ON_ERROR_STOP=1 -f scripts/06_certificate_validity.sql` before deploying this
+backend. The re-runnable transaction upgrades active schemas from the trusted
+tenant registry; upgrade inactive schemas before reactivation. It adds nullable
+`revoked_at` and immutable `compliance_decisions`, without altering historical
+validity dates. Legacy revocations that rewrote expiry remain expired; no original
+date is reconstructed. The canonical development initialization includes the
+same upgrade. An old backend must not be restored after new revocations because
+it does not check `revoked_at`; retain the schema and roll forward instead.
+
 ### 4.1 Register Supplier (with Optional Compliance Certificate)
 - **Endpoint:** `POST /api/v1/supply-chain/suppliers`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
 - **Request Body:**
 ```json
@@ -559,6 +695,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.2 Create Purchase Order (Enforcing Configurable Compliance)
 - **Endpoint:** `POST /api/v1/supply-chain/purchase-orders`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** `MANAGER`, `SUPER_ADMIN` (Requires permission: `supply_chain:manage`)
 - **Request Body:**
 ```json
@@ -574,13 +711,15 @@ Password for all seeded dev accounts: `Password123!`
   ]
 }
 ```
+- **Monetary validation rule:** `unit_cost` must be a non-negative, non-fractional integer IDR value not exceeding 1,000,000,000 IDR. Fractional amounts or overflow return `400 Bad Request` (`INVALID_MONETARY_AMOUNT`).
+- Every referenced product is locked with product deactivation and must remain active. Missing, malformed, or inactive product IDs return `422 PRODUCT_NOT_AVAILABLE`; no PO is created.
 - **Error Response if Certificate Expired (422 Unprocessable Entity):**
 ```json
 {
   "success": false,
   "error": {
-    "code": "COMPLIANCE_CERT_EXPIRED",
-    "message": "Compliance certificate has expired"
+    "code": "COMPLIANCE_ERROR",
+    "message": "compliance certificate is expired"
   }
 }
 ```
@@ -589,8 +728,8 @@ Password for all seeded dev accounts: `Password123!`
 {
   "success": false,
   "error": {
-    "code": "COMPLIANCE_CERT_REQUIRED",
-    "message": "Compliance certificate is required for this tenant"
+    "code": "COMPLIANCE_ERROR",
+    "message": "compliance certificate is required under strict mode"
   }
 }
 ```
@@ -602,7 +741,7 @@ Password for all seeded dev accounts: `Password123!`
   - `Idempotency-Key`: `<UUID>` (Required, unique per goods receipt operation)
   - `Content-Type`: `application/json`
   - `X-Tenant-ID`: `<tenant-slug>`
-- **Request Body:**
+- **Request Body (with Inline Quality Check):**
 ```json
 {
   "purchase_order_id": "30000000-0000-0000-0000-000000000001",
@@ -610,11 +749,16 @@ Password for all seeded dev accounts: `Password123!`
   "items": [
     {
       "product_id": "10000000-0000-0000-0000-000000000001",
-      "received_quantity": 50
+      "delivered_quantity": 60,
+      "accepted_quantity": 55,
+      "rejected_quantity": 5,
+      "qc_reason": "Damaged packaging on 5 units"
     }
   ]
 }
 ```
+> *Note on legacy request compatibility:* Submitting `{"product_id": "...", "received_quantity": 50}` remains supported and adapts automatically as `PASS` (`delivered=50`, `accepted=50`, `rejected=0`).
+
 - **Response (201 Created):**
 ```json
 {
@@ -633,7 +777,14 @@ Password for all seeded dev accounts: `Password123!`
         "id": "50000000-0000-0000-0000-000000000001",
         "goods_receipt_id": "40000000-0000-0000-0000-000000000001",
         "product_id": "10000000-0000-0000-0000-000000000001",
-        "received_quantity": 50
+        "received_quantity": 55,
+        "delivered_quantity": 60,
+        "accepted_quantity": 55,
+        "rejected_quantity": 5,
+        "qc_outcome": "PARTIAL_ACCEPT",
+        "qc_reason": "Damaged packaging on 5 units",
+        "inspected_by": "11111111-1111-1111-1111-111111111111",
+        "inspected_at": "2026-09-03T12:00:00Z"
       }
     ]
   }
@@ -641,16 +792,21 @@ Password for all seeded dev accounts: `Password123!`
 ```
 - **State Transition & Reconciliation Rules:**
   - PO status must be `ISSUED` or `PARTIALLY_RECEIVED`.
+  - Inline QC arithmetic is strictly enforced before database side effects: `delivered_quantity = accepted_quantity + rejected_quantity`. If `rejected_quantity > 0`, `qc_reason` is required.
+  - Delivered quantity must not exceed unreceived outstanding quantity on the PO.
+  - **Stock Increment & Traceability:** ONLY `accepted_quantity` increments inventory stock. Inbound increments are recorded atomically via `stock_movements` (`source_document_type = 'GOODS_RECEIPT'`, `source_document_id = gr.id`, `source_document_line_id = gri.id`), ensuring immutable auditability and traceability back to each receipt line item. Rejected goods never enter inventory.
+  - **PO Outstanding:** ONLY `accepted_quantity` reduces outstanding quantity. If all lines have `accepted_cumulative == ordered`, PO status transitions to `RECEIVED`; if some units are accepted, it transitions to `PARTIALLY_RECEIVED`; if all delivered units are rejected (`accepted=0`), PO status remains unchanged.
+  - **Accounting Postings:** Inbound monetary valuation is derived solely from `accepted_quantity * unit_cost`. If `inboundValue > 0`, an automated balanced ledger journal is posted (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`). If all delivered units are rejected (`inboundValue == 0`), ledger journal posting is skipped.
   - Serialized row lock (`SELECT ... FOR UPDATE`) prevents concurrent double-receiving.
-  - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments.
-  - Receipt quantities must not exceed unreceived outstanding quantities on the PO.
-  - If cumulative received quantities match ordered quantities across all PO lines, PO status transitions to `RECEIVED`; otherwise it transitions to `PARTIALLY_RECEIVED`.
+  - Inventory items are locked and updated deterministically ordered by `product_id` to eliminate deadlock risks.
+  - If a received product does not exist in the tenant's inventory table, the operation is rejected and rolled back with zero state mutation.
+  - Re-submitting with the same `Idempotency-Key` replays the existing receipt idempotently without repeating stock increments or double journal entries.
   - In strict compliance mode, re-validates that the PO's supplier Halal certificate is currently valid.
-  - Automatically posts a balanced double-entry ledger journal (`Debit 1030 Merchandise Inventory`, `Credit 2010 Accounts Payable`).
 - **Error Responses:**
-  - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`)
+  - `400 Bad Request` (`MISSING_IDEMPOTENCY_KEY`, `INVALID_RECEIPT_ITEMS`: empty receipt, duplicate product, arithmetic mismatch, missing qc_reason)
   - `409 Conflict` (`IDEMPOTENCY_KEY_CONFLICT`, `INVALID_PO_STATUS`)
-  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`, `COMPLIANCE_ERROR`)
+  - `422 Unprocessable Entity` (`RECEIPT_RECONCILIATION_FAILED`: delivered exceeds outstanding, `INVENTORY_RECORD_NOT_FOUND`, `COMPLIANCE_ERROR`)
+
 
 ### 4.4 List Suppliers
 - **Endpoint:** `GET /api/v1/supply-chain/suppliers`
@@ -668,6 +824,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.6 Update Supplier
 - **Endpoint:** `PUT /api/v1/supply-chain/suppliers/:id`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Request Body:**
 ```json
@@ -688,6 +845,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.8 Register Certificate Renewal
 - **Endpoint:** `POST /api/v1/supply-chain/suppliers/:id/certificates`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
 - **Request Body:**
 ```json
@@ -704,8 +862,9 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.9 Revoke Certificate
 - **Endpoint:** `PUT /api/v1/supply-chain/certificates/:id/revoke`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
-- **Response (200 OK):** Immediately marks certificate expired (`{"success": true, "data": {"revoked": true}}`).
+- **Response (200 OK):** Records `revoked_at` once, preserving original validity dates (`{"success": true, "data": {"revoked": true}}`). Certificate reads report `computed_status: "REVOKED"` and `revoked_at`; other statuses are `NOT_YET_VALID`, `VALID`, `EXPIRING_SOON`, and `EXPIRED`. No request body is required.
 
 ### 4.10 List Purchase Orders
 - **Endpoint:** `GET /api/v1/supply-chain/purchase-orders`
@@ -725,9 +884,42 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 4.12 Cancel Purchase Order
 - **Endpoint:** `PUT /api/v1/supply-chain/purchase-orders/:id/cancel`
+- **Headers:** `Idempotency-Key: <UUIDv4>` (Mandatory)
 - **Auth:** Requires permission: `supply_chain:manage`
-- **Rules:** Only `DRAFT` or `ISSUED` purchase orders with zero received goods can be cancelled.
-- **Response (200 OK):** `{"success": true, "data": {"cancelled": true}}`.
+- **Request Body (Optional):**
+```json
+{
+  "reason": "Supplier unable to fulfill raw material specifications"
+}
+```
+- **Rules:**
+  - Enforces database row-level locking (`SELECT ... FOR UPDATE`) serializing against concurrent receiving (`POST /api/v1/supply-chain/goods-receipts`).
+  - Cancellation is permitted if the PO is in `DRAFT` or `ISSUED` status with zero accepted goods (`total_accepted == 0`).
+  - Purchase orders with all-rejected QC inspections (where `accepted_quantity = 0`) can be cancelled while preserving historical inspection audit records intact.
+  - Purchase orders in `PARTIALLY_RECEIVED` or `RECEIVED` status cannot be cancelled and return `409 Conflict`.
+  - Replays of cancellation requests on an already cancelled PO are idempotent and return `200 OK` with the current record.
+- **Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "cancelled": true,
+    "purchase_order": {
+      "id": "82355942-c4c1-4ca8-91f8-b6db03330a7c",
+      "po_number": "PO-20260907-001",
+      "supplier_id": "e6f8af3f-f80b-4773-b3cc-9689e65b1ad3",
+      "compliance_cert_id": "c1f0d4ea-b9e7-4f24-9b55-d14fe4bb049e",
+      "total_amount": 500000.00,
+      "status": "CANCELLED",
+      "issued_date": "2026-09-07T00:00:00Z",
+      "created_at": "2026-09-07T08:00:00Z",
+      "cancellation_reason": "Supplier unable to fulfill raw material specifications",
+      "cancelled_by": "11111111-1111-1111-1111-111111111111",
+      "cancelled_at": "2026-09-07T08:15:00Z"
+    }
+  }
+}
+```
 
 ### 4.13 List Goods Receipts
 - **Endpoint:** `GET /api/v1/supply-chain/goods-receipts`
@@ -737,7 +929,10 @@ Password for all seeded dev accounts: `Password123!`
 ### 4.14 Get Goods Receipt Detail
 - **Endpoint:** `GET /api/v1/supply-chain/goods-receipts/:id`
 - **Auth:** Requires permission: `supply_chain:manage`
-- **Response (200 OK):** Detail of goods receipt with product names, SKU, received quantities, total inbound valuation, and cross-referenced Sharia ledger entry number.
+- **Response (200 OK):** Comprehensive detail of goods receipt with:
+  - Header: PO number, supplier name, receiving officer, receipt date, notes, total inbound valuation, Sharia ledger entry number, and Halal compliance evaluation.
+  - Line Items: product name, SKU, unit cost, subtotal valuation, linked inventory stock movement ID (`stock_movement_id`, optional UUID; omitted for rejected-only or legacy lines without a movement), and full inline QC audit record (`delivered_quantity`, `accepted_quantity`, `rejected_quantity`, `qc_outcome` [PASS / PARTIAL_ACCEPT / REJECT / NOT_RECORDED_LEGACY], `qc_reason`, `inspected_by`, `inspected_at`).
+
 
 ### 4.15 Document-Level Product Traceability
 - **Endpoint:** `GET /api/v1/supply-chain/traceability/product/:product_id`
@@ -894,7 +1089,7 @@ Password for all seeded dev accounts: `Password123!`
 
 ### 7.1 Get Aggregated Store Dashboard
 - **Endpoint:** `GET /api/v1/manager/dashboard`
-- **Auth:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN`)
+- **Auth & Entitlements:** Bearer Token (Required Roles: `MANAGER`, `SUPER_ADMIN` AND tenant package entitlement: `pos.daily_summary`). Inactive subscriptions or Starter tiers receive `403 Forbidden` (`FEATURE_NOT_ENTITLED`).
 - **Description:** Real-time business aggregations across sales revenue, inventory depletion alerts, Halal certificate expirations, and ledger account status.
 - **Success Response (200 OK):**
 ```json

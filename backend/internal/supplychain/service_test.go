@@ -6,30 +6,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/b45/tenet-commerce/backend/internal/ledger"
+	"github.com/b45/tenet-commerce/backend/pkg/database"
 )
 
 // This test requires a running database on localhost:5432 with the tenet_commerce db
 // To run: make test
 
 func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
-	// 1. Setup DB connection
-	// Assuming test DB is available as per Makefile
+	// 1. Setup DB connection using standard configuration
 	ctx := context.Background()
-	connString := "postgres://postgres:postgres@localhost:5432/tenet_commerce?sslmode=disable"
-	pool, err := pgxpool.New(ctx, connString)
+	db, err := database.NewPostgresDB(ctx)
 	if err != nil {
-		t.Skip("Database not available, skipping integration test", err)
+		t.Skipf("Database not available, skipping integration test: %v", err)
 	}
-	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		t.Skip("Database not pingable, skipping integration test", err)
-	}
+	defer db.Close()
+	pool := db.Pool
 
 	repo := NewRepository()
 	ledgerService := ledger.NewService(ledger.NewRepository())
@@ -50,7 +45,7 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 
 		// 1. Create Supplier WITHOUT Certificate
 		reqSupplier := &CreateSupplierRequest{
-			Code:          "SUP-DS-01",
+			Code:          "SUP-DS-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Without Cert",
 			ContactPerson: "Budi",
 		}
@@ -92,7 +87,7 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 
 		// 1. Try to create PO without cert - Should FAIL with ErrComplianceCertRequired
 		reqSupplier := &CreateSupplierRequest{
-			Code:          "SUP-AB-01",
+			Code:          "SUP-AB-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Try Bypass",
 		}
 		supplierNoCert, err := svc.CreateSupplier(ctx, conn, reqSupplier)
@@ -111,11 +106,11 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 		validDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
 		expiryDate := time.Now().AddDate(1, 0, 0).Format("2006-01-02") // 1 year later
 		reqSupplierValid := &CreateSupplierRequest{
-			Code:          "SUP-AB-02",
+			Code:          "SUP-AB-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Valid Cert",
 			ComplianceCertificate: &CreateComplianceCertRequest{
 				CertType:          "HALAL_MUI",
-				CertificateNumber: "CERT-002",
+				CertificateNumber: "CERT-" + uuid.NewString()[:8],
 				IssuingAuthority:  "MUI",
 				Scope:             "Meat",
 				ValidFrom:         validDate,
@@ -146,11 +141,11 @@ func TestSupplyChain_ConfigurableCompliance(t *testing.T) {
 		// 4. Create Supplier WITH Expired Cert
 		expiredDate := time.Now().AddDate(-1, 0, 0).Format("2006-01-02")
 		reqSupplierExpired := &CreateSupplierRequest{
-			Code:          "SUP-AB-03",
+			Code:          "SUP-AB-" + uuid.NewString()[:8],
 			CompanyName:   "Supplier Expired Cert",
 			ComplianceCertificate: &CreateComplianceCertRequest{
 				CertType:          "HALAL_MUI",
-				CertificateNumber: "CERT-EXPIRED",
+				CertificateNumber: "CERT-EXP-" + uuid.NewString()[:8],
 				IssuingAuthority:  "MUI",
 				Scope:             "Meat",
 				ValidFrom:         time.Now().AddDate(-2, 0, 0).Format("2006-01-02"),
@@ -201,9 +196,11 @@ func TestReconcileReceiptItems(t *testing.T) {
 		},
 	}
 
+	inspectorID := uuid.New()
+
 	t.Run("empty receipt items rejected", func(t *testing.T) {
 		gr := &GoodsReceipt{ID: uuid.New()}
-		_, _, err := reconcileReceiptItems(gr, nil, poItems, map[uuid.UUID]int{})
+		_, _, _, err := reconcileReceiptItems(gr, nil, poItems, map[uuid.UUID]int{}, inspectorID)
 		require.ErrorIs(t, err, ErrEmptyReceipt)
 	})
 
@@ -212,7 +209,7 @@ func TestReconcileReceiptItems(t *testing.T) {
 		requested := []CreateGRItemRequest{
 			{ProductID: "invalid-uuid", ReceivedQuantity: 5},
 		}
-		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "parse goods receipt product id")
 	})
@@ -223,7 +220,7 @@ func TestReconcileReceiptItems(t *testing.T) {
 			{ProductID: prod1.String(), ReceivedQuantity: 3},
 			{ProductID: prod1.String(), ReceivedQuantity: 2},
 		}
-		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
 		require.ErrorIs(t, err, ErrDuplicateReceiptItem)
 	})
 
@@ -232,7 +229,7 @@ func TestReconcileReceiptItems(t *testing.T) {
 		requested := []CreateGRItemRequest{
 			{ProductID: unknownProd.String(), ReceivedQuantity: 2},
 		}
-		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
 		require.ErrorIs(t, err, ErrReceiptItemNotOnPO)
 	})
 
@@ -241,8 +238,8 @@ func TestReconcileReceiptItems(t *testing.T) {
 		requested := []CreateGRItemRequest{
 			{ProductID: prod1.String(), ReceivedQuantity: 0},
 		}
-		_, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{})
-		require.ErrorIs(t, err, ErrReceiptQuantityExceeds)
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
+		require.ErrorIs(t, err, ErrInvalidQCArithmetic)
 	})
 
 	t.Run("quantity exceeding remaining outstanding quantity rejected", func(t *testing.T) {
@@ -252,7 +249,7 @@ func TestReconcileReceiptItems(t *testing.T) {
 		requested := []CreateGRItemRequest{
 			{ProductID: prod1.String(), ReceivedQuantity: 4},
 		}
-		_, _, err := reconcileReceiptItems(gr, requested, poItems, received)
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, received, inspectorID)
 		require.ErrorIs(t, err, ErrReceiptQuantityExceeds)
 	})
 
@@ -262,13 +259,19 @@ func TestReconcileReceiptItems(t *testing.T) {
 		requested := []CreateGRItemRequest{
 			{ProductID: prod1.String(), ReceivedQuantity: 4},
 		}
-		val, fullyReceived, err := reconcileReceiptItems(gr, requested, poItems, received)
+		val, fullyReceived, hasAccepted, err := reconcileReceiptItems(gr, requested, poItems, received, inspectorID)
 		require.NoError(t, err)
 		assert.False(t, fullyReceived)
+		assert.True(t, hasAccepted)
 		assert.Equal(t, 4*25000.0, val)
 		require.Len(t, gr.Items, 1)
 		assert.Equal(t, prod1, gr.Items[0].ProductID)
 		assert.Equal(t, 4, gr.Items[0].ReceivedQuantity)
+		assert.Equal(t, 4, gr.Items[0].DeliveredQuantity)
+		assert.Equal(t, 4, gr.Items[0].AcceptedQuantity)
+		assert.Equal(t, 0, gr.Items[0].RejectedQuantity)
+		assert.Equal(t, "PASS", gr.Items[0].QCOutcome)
+		assert.Equal(t, &inspectorID, gr.Items[0].InspectedBy)
 	})
 
 	t.Run("full receipt completing all lines returns fullyReceived true", func(t *testing.T) {
@@ -283,11 +286,105 @@ func TestReconcileReceiptItems(t *testing.T) {
 			{ProductID: prod1.String(), ReceivedQuantity: 6},
 			{ProductID: prod2.String(), ReceivedQuantity: 3},
 		}
-		val, fullyReceived, err := reconcileReceiptItems(gr, requested, poItems, received)
+		val, fullyReceived, hasAccepted, err := reconcileReceiptItems(gr, requested, poItems, received, inspectorID)
 		require.NoError(t, err)
 		assert.True(t, fullyReceived)
+		assert.True(t, hasAccepted)
 		expectedVal := (6 * 25000.0) + (3 * 50000.0)
 		assert.Equal(t, expectedVal, val)
 		require.Len(t, gr.Items, 2)
 	})
+
+	t.Run("inline QC mixed accept and reject", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		del := 10
+		acc := 8
+		rej := 2
+		reason := "2 packages damaged during transit"
+		requested := []CreateGRItemRequest{
+			{
+				ProductID:         prod1.String(),
+				DeliveredQuantity: &del,
+				AcceptedQuantity:  &acc,
+				RejectedQuantity:  &rej,
+				QCReason:          &reason,
+			},
+		}
+		val, fullyReceived, hasAccepted, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
+		require.NoError(t, err)
+		assert.False(t, fullyReceived)
+		assert.True(t, hasAccepted)
+		assert.Equal(t, 8*25000.0, val)
+		require.Len(t, gr.Items, 1)
+		assert.Equal(t, 8, gr.Items[0].AcceptedQuantity)
+		assert.Equal(t, 2, gr.Items[0].RejectedQuantity)
+		assert.Equal(t, 10, gr.Items[0].DeliveredQuantity)
+		assert.Equal(t, "PARTIAL_ACCEPT", gr.Items[0].QCOutcome)
+		assert.Equal(t, &reason, gr.Items[0].QCReason)
+	})
+
+	t.Run("inline QC all rejected produces zero valuation and preserves PO outstanding", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		del := 5
+		acc := 0
+		rej := 5
+		reason := "Cold chain broken, spoiled"
+		requested := []CreateGRItemRequest{
+			{
+				ProductID:         prod1.String(),
+				DeliveredQuantity: &del,
+				AcceptedQuantity:  &acc,
+				RejectedQuantity:  &rej,
+				QCReason:          &reason,
+			},
+		}
+		val, fullyReceived, hasAccepted, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
+		require.NoError(t, err)
+		assert.False(t, fullyReceived)
+		assert.False(t, hasAccepted)
+		assert.Equal(t, 0.0, val)
+		require.Len(t, gr.Items, 1)
+		assert.Equal(t, 0, gr.Items[0].AcceptedQuantity)
+		assert.Equal(t, 5, gr.Items[0].RejectedQuantity)
+		assert.Equal(t, 5, gr.Items[0].DeliveredQuantity)
+		assert.Equal(t, "REJECT", gr.Items[0].QCOutcome)
+		assert.Equal(t, &reason, gr.Items[0].QCReason)
+	})
+
+	t.Run("inline QC invalid arithmetic rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		del := 10
+		acc := 7
+		rej := 2 // 7 + 2 != 10
+		reason := "Test"
+		requested := []CreateGRItemRequest{
+			{
+				ProductID:         prod1.String(),
+				DeliveredQuantity: &del,
+				AcceptedQuantity:  &acc,
+				RejectedQuantity:  &rej,
+				QCReason:          &reason,
+			},
+		}
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
+		require.ErrorIs(t, err, ErrInvalidQCArithmetic)
+	})
+
+	t.Run("inline QC rejected without reason rejected", func(t *testing.T) {
+		gr := &GoodsReceipt{ID: uuid.New()}
+		del := 10
+		acc := 8
+		rej := 2
+		requested := []CreateGRItemRequest{
+			{
+				ProductID:         prod1.String(),
+				DeliveredQuantity: &del,
+				AcceptedQuantity:  &acc,
+				RejectedQuantity:  &rej,
+			},
+		}
+		_, _, _, err := reconcileReceiptItems(gr, requested, poItems, map[uuid.UUID]int{}, inspectorID)
+		require.ErrorIs(t, err, ErrQCReasonRequired)
+	})
 }
+

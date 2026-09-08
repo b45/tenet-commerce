@@ -35,7 +35,7 @@ func setupPOSTestRouterWithIdempotency(t *testing.T, db *database.PostgresDB) (*
 		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
 		c.Set("tenant_slug", "al-barakah-mart")
 		c.Set("jwt_claims", &pkgAuth.CustomClaims{
-			Permissions: []string{"pos:checkout", "pos:read", "pos:void"},
+			Permissions: []string{"pos:checkout", "pos:read", "pos:void", "inventory:read", "inventory:write"},
 		})
 		c.Next()
 	})
@@ -251,4 +251,279 @@ func TestIdempotency_MissingKeyRejected(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "MISSING_IDEMPOTENCY_KEY")
+}
+
+// TestIdempotency_SameKeyDifferentConcreteResourceDoesNotReplay verifies that sending the same
+// idempotency key and identical body to two distinct resource IDs (e.g. /orders/orderA/void vs /orders/orderB/void)
+// does NOT replay the first response for the second resource.
+func TestIdempotency_SameKeyDifferentConcreteResourceDoesNotReplay(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	rdb := newTestRedisClient(t)
+
+	tenantRepo := tenant.NewRepository(db)
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posRepo := pos.NewRepository()
+	posService := pos.NewService(posRepo, ledgerService)
+	posHandler := pos.NewHandler(posService)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", "11111111-1111-1111-1111-111111111111")
+		c.Set("tenant_slug", "al-barakah-mart")
+		c.Set("jwt_claims", &pkgAuth.CustomClaims{
+			Permissions: []string{"pos:checkout", "pos:void"},
+		})
+		c.Next()
+	})
+	router.Use(tenant.ContextMiddleware(db, tenantRepo))
+	posHandler.RegisterRoutes(router.Group("/api/v1/pos"), rdb)
+
+	// Step 1: Create Order 1
+	idempotencyKey := fmt.Sprintf("idem-multi-%d", time.Now().UnixNano())
+	payloadCheckout := pos.CheckoutRequest{
+		Items: []pos.CartItemRequest{
+			{SKU: "SKU-CHICKEN-01", Quantity: 1},
+		},
+		PaymentMethod: "CASH",
+		CashTendered:  func() *float64 { val := float64(100000); return &val }(),
+	}
+	bodyCheckout, _ := json.Marshal(payloadCheckout)
+
+	reqCheckout := httptest.NewRequest(http.MethodPost, "/api/v1/pos/checkout", bytes.NewReader(bodyCheckout))
+	reqCheckout.Header.Set("Content-Type", "application/json")
+	reqCheckout.Header.Set("Idempotency-Key", idempotencyKey+"-chk")
+	wCheckout := httptest.NewRecorder()
+	router.ServeHTTP(wCheckout, reqCheckout)
+	require.Equal(t, http.StatusCreated, wCheckout.Code)
+
+	var respCheckout struct {
+		Data struct {
+			TransactionID string `json:"transaction_id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(wCheckout.Body.Bytes(), &respCheckout))
+	orderID1 := respCheckout.Data.TransactionID
+
+	// Step 2: Void Order 1 with shared void key
+	voidPayload := map[string]string{"reason": "customer cancelled"}
+	voidBody, _ := json.Marshal(voidPayload)
+
+	sharedVoidKey := fmt.Sprintf("idem-void-shared-%d", time.Now().UnixNano())
+	reqVoid1 := httptest.NewRequest(http.MethodPost, "/api/v1/pos/orders/"+orderID1+"/void", bytes.NewReader(voidBody))
+	reqVoid1.Header.Set("Content-Type", "application/json")
+	reqVoid1.Header.Set("Idempotency-Key", sharedVoidKey)
+	wVoid1 := httptest.NewRecorder()
+	router.ServeHTTP(wVoid1, reqVoid1)
+	require.Equal(t, http.StatusOK, wVoid1.Code)
+	assert.Contains(t, wVoid1.Body.String(), orderID1)
+
+	// Step 3: Attempt void on a DIFFERENT order ID with the SAME sharedVoidKey and identical body
+	differentOrderID := "99999999-9999-9999-9999-999999999999"
+	reqVoid2 := httptest.NewRequest(http.MethodPost, "/api/v1/pos/orders/"+differentOrderID+"/void", bytes.NewReader(voidBody))
+	reqVoid2.Header.Set("Content-Type", "application/json")
+	reqVoid2.Header.Set("Idempotency-Key", sharedVoidKey)
+	wVoid2 := httptest.NewRecorder()
+	router.ServeHTTP(wVoid2, reqVoid2)
+
+	// Must NOT replay Order 1's void response! It must fail with 404 (or 400) for the non-existent order.
+	assert.NotEqual(t, http.StatusOK, wVoid2.Code, "second resource must NOT replay cached response from first resource")
+	assert.Empty(t, wVoid2.Header().Get("Idempotent-Replayed"), "must not be flagged as replayed")
+	assert.Contains(t, wVoid2.Body.String(), "NOT_FOUND")
+}
+
+// TestIdempotency_KeyLengthLimit verifies that oversized idempotency keys are rejected.
+func TestIdempotency_KeyLengthLimit(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router, _ := setupPOSTestRouterWithIdempotency(t, db)
+
+	payload := pos.CheckoutRequest{
+		Items:         []pos.CartItemRequest{{SKU: "SKU-CHICKEN-01", Quantity: 1}},
+		PaymentMethod: "CASH",
+		CashTendered:  func() *float64 { val := float64(100000); return &val }(),
+	}
+	body, _ := json.Marshal(payload)
+
+	// Key exceeding 128 characters
+	oversizedKey := fmt.Sprintf("oversized-%0130d", 1)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", oversizedKey)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "IDEMPOTENCY_KEY_TOO_LONG")
+}
+
+// TestIdempotency_PostCommitCrashRecoveryAndSingleStockJournalEffect simulates a crash
+// after the business transaction commits but before the HTTP response or Redis cache write.
+// When the client retries with the same key, it must return the exact same document, exactly ONE stock decrement,
+// and exactly ONE balanced journal entry in the ledger.
+func TestIdempotency_PostCommitCrashRecoveryAndSingleStockJournalEffect(t *testing.T) {
+	db := newTestDatabase(t)
+	rdb := newTestRedisClient(t)
+
+	ledgerService := ledger.NewService(ledger.NewRepository())
+	posRepo := pos.NewRepository()
+	posService := pos.NewService(posRepo, ledgerService)
+
+	ctx := context.Background()
+	conn, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+
+	// Switch connection to tenant schema
+	_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart;")
+	require.NoError(t, err)
+
+	initialStock := stockForSKU(t, db, "SKU-CHICKEN-01")
+	idempotencyKey := fmt.Sprintf("idem-crash-recovery-%d", time.Now().UnixNano())
+
+	payload := pos.CheckoutRequest{
+		Items: []pos.CartItemRequest{
+			{SKU: "SKU-CHICKEN-01", Quantity: 3},
+		},
+		PaymentMethod: "CASH",
+		CashTendered:  func() *float64 { val := float64(200000); return &val }(),
+	}
+
+	// 1. First execution through service directly (simulating successful commit before network drop)
+	resp1, err := posService.Checkout(ctx, conn, "11111111-1111-1111-1111-111111111111", idempotencyKey, payload)
+	require.NoError(t, err)
+	require.NotNil(t, resp1)
+	assert.NotEmpty(t, resp1.TransactionID)
+
+	stockAfterFirst := stockForSKU(t, db, "SKU-CHICKEN-01")
+	assert.Equal(t, initialStock-3, stockAfterFirst, "stock decremented by 3 on initial commit")
+
+	// Verify exactly one journal entry exists for this transaction
+	var journalCount int
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM ledger_entries WHERE source_document_id = $1;", resp1.TransactionID).Scan(&journalCount)
+	require.NoError(t, err)
+	assert.Equal(t, 1, journalCount, "must have exactly 1 journal entry after first commit")
+
+	// 2. Client retries: service Checkout called again with identical idempotencyKey
+	resp2, err := posService.Checkout(ctx, conn, "11111111-1111-1111-1111-111111111111", idempotencyKey, payload)
+	require.NoError(t, err)
+	require.NotNil(t, resp2)
+
+	// Invariants after retry:
+	// - Returned document IDs match
+	assert.Equal(t, resp1.TransactionID, resp2.TransactionID)
+	assert.Equal(t, resp1.TransactionNumber, resp2.TransactionNumber)
+	assert.Equal(t, resp1.TotalAmount, resp2.TotalAmount)
+
+	// - Stock MUST NOT decrement again
+	stockAfterRetry := stockForSKU(t, db, "SKU-CHICKEN-01")
+	assert.Equal(t, stockAfterFirst, stockAfterRetry, "stock must NOT decrement a second time on retry")
+
+	// - Exactly ONE journal entry remains
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM ledger_entries WHERE source_document_id = $1;", resp1.TransactionID).Scan(&journalCount)
+	require.NoError(t, err)
+	assert.Equal(t, 1, journalCount, "must still have exactly 1 journal entry (no duplicate accounting effects)")
+
+	_ = rdb // clean up references
+}
+
+func TestIdempotency_MasterDataMutationsProtectedFromRetry(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	router, _ := setupPOSTestRouterWithIdempotency(t, db)
+
+	// 1. Missing Idempotency-Key rejected on product creation
+	productReq := pos.CreateProductRequest{
+		Name:         "Kopi Arabika Aceh Gayo 250g",
+		SKU:          fmt.Sprintf("SKU-COF-%d", time.Now().UnixNano()),
+		UnitPrice:    85000,
+		CostPrice:    50000,
+		InitialStock: 25,
+	}
+	bodyNoKey, _ := json.Marshal(productReq)
+	reqNoKey := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyNoKey))
+	reqNoKey.Header.Set("Content-Type", "application/json")
+	wNoKey := httptest.NewRecorder()
+	router.ServeHTTP(wNoKey, reqNoKey)
+	assert.Equal(t, http.StatusBadRequest, wNoKey.Code)
+	assert.Contains(t, wNoKey.Body.String(), "MISSING_IDEMPOTENCY_KEY")
+
+	// 2. Product creation with Idempotency-Key succeeds
+	idempotencyKey := fmt.Sprintf("idem-prod-%d", time.Now().UnixNano())
+	reqValid := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyNoKey))
+	reqValid.Header.Set("Content-Type", "application/json")
+	reqValid.Header.Set("Idempotency-Key", idempotencyKey)
+	wValid := httptest.NewRecorder()
+	router.ServeHTTP(wValid, reqValid)
+	require.Equal(t, http.StatusCreated, wValid.Code)
+
+	var createdResp struct {
+		Success bool        `json:"success"`
+		Data    pos.Product `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(wValid.Body.Bytes(), &createdResp))
+	assert.Equal(t, productReq.Name, createdResp.Data.Name)
+	assert.Equal(t, productReq.SKU, createdResp.Data.SKU)
+	productID := createdResp.Data.ID
+
+	// 3. Replay with identical key returns cached response without duplicate insertion
+	reqReplay := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyNoKey))
+	reqReplay.Header.Set("Content-Type", "application/json")
+	reqReplay.Header.Set("Idempotency-Key", idempotencyKey)
+	wReplay := httptest.NewRecorder()
+	router.ServeHTTP(wReplay, reqReplay)
+	assert.Equal(t, http.StatusCreated, wReplay.Code)
+	assert.Equal(t, "true", wReplay.Header().Get("Idempotent-Replayed"))
+	assert.Equal(t, wValid.Body.String(), wReplay.Body.String())
+
+	// 4. Replay with different payload returns 409 Conflict
+	conflictReq := productReq
+	conflictReq.Name = "Different Product Name"
+	bodyConflict, _ := json.Marshal(conflictReq)
+	reqConflict := httptest.NewRequest(http.MethodPost, "/api/v1/pos/products", bytes.NewReader(bodyConflict))
+	reqConflict.Header.Set("Content-Type", "application/json")
+	reqConflict.Header.Set("Idempotency-Key", idempotencyKey)
+	wConflict := httptest.NewRecorder()
+	router.ServeHTTP(wConflict, reqConflict)
+	assert.Equal(t, http.StatusConflict, wConflict.Code)
+
+	// 5. Update product with Idempotency-Key
+	updKey := fmt.Sprintf("idem-prod-upd-%d", time.Now().UnixNano())
+	newPrice := 90000.0
+	updReqData := pos.UpdateProductRequest{
+		Name:      "Kopi Arabika Aceh Gayo Premium 250g",
+		UnitPrice: newPrice,
+		CostPrice: 50000,
+	}
+	bodyUpd, _ := json.Marshal(updReqData)
+	reqUpd := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/pos/products/%s", productID), bytes.NewReader(bodyUpd))
+	reqUpd.Header.Set("Content-Type", "application/json")
+	reqUpd.Header.Set("Idempotency-Key", updKey)
+	wUpd := httptest.NewRecorder()
+	router.ServeHTTP(wUpd, reqUpd)
+	require.Equal(t, http.StatusOK, wUpd.Code)
+
+	// Replay update returns identical response
+	reqUpdReplay := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/pos/products/%s", productID), bytes.NewReader(bodyUpd))
+	reqUpdReplay.Header.Set("Content-Type", "application/json")
+	reqUpdReplay.Header.Set("Idempotency-Key", updKey)
+	wUpdReplay := httptest.NewRecorder()
+	router.ServeHTTP(wUpdReplay, reqUpdReplay)
+	assert.Equal(t, http.StatusOK, wUpdReplay.Code)
+	assert.Equal(t, "true", wUpdReplay.Header().Get("Idempotent-Replayed"))
+
+	// 6. Delete product with Idempotency-Key
+	delKey := fmt.Sprintf("idem-prod-del-%d", time.Now().UnixNano())
+	reqDel := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/pos/products/%s", productID), nil)
+	reqDel.Header.Set("Idempotency-Key", delKey)
+	wDel := httptest.NewRecorder()
+	router.ServeHTTP(wDel, reqDel)
+	require.Equal(t, http.StatusOK, wDel.Code)
+
+	// Replay delete returns identical response
+	reqDelReplay := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/pos/products/%s", productID), nil)
+	reqDelReplay.Header.Set("Idempotency-Key", delKey)
+	wDelReplay := httptest.NewRecorder()
+	router.ServeHTTP(wDelReplay, reqDelReplay)
+	assert.Equal(t, http.StatusOK, wDelReplay.Code)
+	assert.Equal(t, "true", wDelReplay.Header().Get("Idempotent-Replayed"))
 }

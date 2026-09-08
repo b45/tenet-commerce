@@ -5,6 +5,8 @@
 
 ## 1. Master Sprint Schedule & Phases
 
+> The dated chart below is the original planning baseline, not a record of actual completion dates. For Phase 3, the [Frontend Design and Delivery Plan](FRONTEND_PHASE3_DESIGN.md) supersedes its calendar estimates with dependency-based work packages. Phase 2 Hardening Gate (G2) has officially passed and signed off.
+
 ```mermaid
 gantt
     title Tenet Commerce — 8-Week Implementation Roadmap
@@ -82,12 +84,17 @@ gantt
 - **Status:** **PASSED & SIGNED OFF.** All 24 hermetic integration tests pass; full-lifecycle E2E verified; real-database benchmarks documented. Phase 3 is officially unlocked.
 
 ### Phase 3: Frontend Client & Offline-First POS
-- **Objective:** Build a responsive, high-performance web POS using Next.js 14 and shadcn/ui with offline resilience.
+
+- **Detailed proposal:** [Frontend Design and Delivery Plan](FRONTEND_PHASE3_DESIGN.md), including free Penpot/Mermaid tooling, open-format archives and support for provider-independent contributions.
+- **Delivery sequence:** P3-00 readiness; P3-01 UX/export validation; P3-02 foundation; P3-03 online POS; P3-04 offline drafts; P3-05 gated offline cash; P3-06/07 operations/finance; P3-08/09 hardening/handoff.
+- **Estimate:** 416–656 focused hours before contingency; recalibrate after initial packages. Offline sales depend on verified price, inventory, session and ambiguous-result recovery contracts.
+- **Framework baseline:** Upgraded to Next.js 15 (React 19) App Router baseline with Tailwind CSS.
+- **Objective:** Build a responsive, high-performance web POS using Next.js 15 and modern UI primitives with offline resilience.
 - **Key Deliverables:**
-  - [ ] **High-Velocity POS Cashier Interface:** Barcode scanner listener, rapid cart manipulation, and discount overrides.
-  - [ ] **Offline Storage & Queuing:** Browser `IndexedDB` persistence of products and offline transaction records.
-  - [ ] **Background Sync Engine:** Service Worker detecting network state transitions and deterministically replaying queued transactions.
-  - [ ] **Enterprise Dashboards:** Supply Chain management UI (PO, GR) and Sharia Ledger reporting (Chart of Accounts, Trial Balance).
+  - [x] **High-Velocity POS Cashier Interface (P3-03):** Barcode scanner listener, rapid cart manipulation, cash tender modal, 80mm thermal receipt printing, daily sales summary, and order history.
+  - [x] **Offline Storage & Catalog Drafts (P3-04):** Browser `IndexedDB` persistence of products (`tenet_pos_offline_db`), active cart drafts auto-save/recovery, and real-time network connectivity indicators.
+  - [ ] **Offline Cash Settlement & Replay Engine (P3-05):** Gated offline cash checkout outbox queue, local sequence IDs, and deterministic background sync upon reconnection.
+  - [ ] **Enterprise Dashboards & Operations (P3-06, P3-07):** Multi-standard compliance & certification hub (delivered), procurement UI (PO, GR), and Sharia Ledger reporting (Chart of Accounts, Trial Balance).
 
 ---
 

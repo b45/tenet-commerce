@@ -32,13 +32,25 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 		// Suppliers
 		rg.GET("/suppliers", h.ListSuppliers)
 		rg.GET("/suppliers/:id", h.GetSupplier)
-		rg.POST("/suppliers", h.CreateSupplier)
-		rg.PUT("/suppliers/:id", h.UpdateSupplier)
+		rg.POST("/suppliers",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.CreateSupplier,
+		)
+		rg.PUT("/suppliers/:id",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.UpdateSupplier,
+		)
 
 		// Certificates
 		rg.GET("/suppliers/:id/certificates", h.GetSupplierCertificates)
-		rg.POST("/suppliers/:id/certificates", h.RegisterCertificate)
-		rg.PUT("/certificates/:id/revoke", h.RevokeCertificate)
+		rg.POST("/suppliers/:id/certificates",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.RegisterCertificate,
+		)
+		rg.PUT("/certificates/:id/revoke",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.RevokeCertificate,
+		)
 
 		// Purchase Orders
 		rg.GET("/purchase-orders", h.ListPurchaseOrders)
@@ -47,7 +59,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rdb *pkgRedis.Client) {
 			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
 			h.CreatePurchaseOrder,
 		)
-		rg.PUT("/purchase-orders/:id/cancel", h.CancelPurchaseOrder)
+		rg.PUT("/purchase-orders/:id/cancel",
+			pkgIdempotency.DurableIdempotencyMiddleware(rdb, 24*time.Hour),
+			h.CancelPurchaseOrder,
+		)
 
 		// Goods Receipts
 		rg.GET("/goods-receipts", h.ListGoodsReceipts)
@@ -109,7 +124,17 @@ func (h *Handler) CreatePurchaseOrder(c *gin.Context) {
 
 	po, err := h.service.CreatePurchaseOrder(c.Request.Context(), conn, &req)
 	if err != nil {
-		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) {
+		if errors.Is(err, ErrProductNotAvailable) {
+			response.UnprocessableEntity(c, "PRODUCT_NOT_AVAILABLE", err.Error())
+			c.Abort()
+			return
+		}
+		if errors.Is(err, ErrInvalidMonetaryAmount) {
+			log.Warn("Purchase order rejected due to invalid monetary amount", "error", err)
+			response.AbortBadRequest(c, "INVALID_MONETARY_AMOUNT", err.Error())
+			return
+		}
+		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) || errors.Is(err, ErrSupplierInactive) {
 			log.Warn("Purchase order creation hard-blocked by Halal compliance engine", "supplier_id", req.SupplierID, "error", err)
 			response.UnprocessableEntity(c, "COMPLIANCE_ERROR", err.Error())
 			c.Abort()
@@ -163,7 +188,7 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 
 	gr, err := h.service.CreateGoodsReceipt(c.Request.Context(), conn, userID, idempotencyKey, &req)
 	if err != nil {
-		if errors.Is(err, ErrEmptyReceipt) || errors.Is(err, ErrZeroValueReceipt) || errors.Is(err, ErrDuplicateReceiptItem) {
+		if errors.Is(err, ErrEmptyReceipt) || errors.Is(err, ErrZeroValueReceipt) || errors.Is(err, ErrDuplicateReceiptItem) || errors.Is(err, ErrInvalidQCArithmetic) || errors.Is(err, ErrQCReasonRequired) {
 			log.Warn("Goods receipt validation rejected", "error", err)
 			response.AbortBadRequest(c, "INVALID_RECEIPT_ITEMS", err.Error())
 			return
@@ -174,7 +199,7 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 			c.Abort()
 			return
 		}
-		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) {
+		if errors.Is(err, ErrComplianceCertRequired) || errors.Is(err, ErrComplianceCertExpired) || errors.Is(err, ErrComplianceCertInvalid) || errors.Is(err, ErrSupplierInactive) {
 			log.Warn("Goods receipt creation hard-blocked by Halal compliance engine", "po_id", req.PurchaseOrderID, "error", err)
 			response.UnprocessableEntity(c, "COMPLIANCE_ERROR", err.Error())
 			c.Abort()
@@ -183,6 +208,12 @@ func (h *Handler) CreateGoodsReceipt(c *gin.Context) {
 		if errors.Is(err, ErrInvalidPOStatus) {
 			log.Warn("Goods receipt rejected: invalid PO status", "po_id", req.PurchaseOrderID, "error", err)
 			response.AbortConflict(c, "INVALID_PO_STATUS", err.Error())
+			return
+		}
+		if errors.Is(err, ErrInventoryNotFound) {
+			log.Warn("Goods receipt rejected: product inventory record not found", "po_id", req.PurchaseOrderID, "error", err)
+			response.UnprocessableEntity(c, "INVENTORY_RECORD_NOT_FOUND", err.Error())
+			c.Abort()
 			return
 		}
 		if errors.Is(err, ErrIdempotencyKeyConflict) {
@@ -385,7 +416,11 @@ func (h *Handler) ListPurchaseOrders(c *gin.Context) {
 		response.AbortInternalServerError(c, "PO_LIST_FAILED", err.Error())
 		return
 	}
-	response.OK(c, pos)
+	response.OKWithMeta(c, pos, response.Meta{
+		Total:  len(pos),
+		Limit:  limit,
+		Offset: offset,
+	})
 }
 
 // GetPurchaseOrderDetail handles GET /api/v1/supply-chain/purchase-orders/:id
@@ -428,15 +463,40 @@ func (h *Handler) CancelPurchaseOrder(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.CancelPurchaseOrder(c.Request.Context(), conn, id); err != nil {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		response.AbortUnauthorized(c, "UNAUTHORIZED", "Missing user ID in context")
+		return
+	}
+	actorID, err := uuid.Parse(userIDVal.(string))
+	if err != nil {
+		response.AbortUnauthorized(c, "UNAUTHORIZED", "Invalid user ID format in context")
+		return
+	}
+
+	var req CancelPurchaseOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Optional reason or fallback if body empty
+		req.Reason = "Cancelled by user"
+	}
+
+	cancelledPO, err := h.service.CancelPurchaseOrder(c.Request.Context(), conn, id, actorID, req.Reason)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			response.NotFound(c, "PO_NOT_FOUND", "Purchase order not found")
+			return
+		}
+		if errors.Is(err, ErrPOCannotBeCancelled) || errors.Is(err, ErrPOCannotBeCancelledWithAcceptedGoods) {
+			response.AbortConflict(c, "PO_CANCELLATION_CONFLICT", err.Error())
 			return
 		}
 		response.UnprocessableEntity(c, "PO_CANCELLATION_FAILED", err.Error())
 		return
 	}
-	response.OK(c, gin.H{"cancelled": true})
+	response.OK(c, gin.H{
+		"cancelled":      true,
+		"purchase_order": cancelledPO,
+	})
 }
 
 // ListGoodsReceipts handles GET /api/v1/supply-chain/goods-receipts
@@ -455,7 +515,11 @@ func (h *Handler) ListGoodsReceipts(c *gin.Context) {
 		response.AbortInternalServerError(c, "GR_LIST_FAILED", err.Error())
 		return
 	}
-	response.OK(c, grs)
+	response.OKWithMeta(c, grs, response.Meta{
+		Total:  len(grs),
+		Limit:  limit,
+		Offset: offset,
+	})
 }
 
 // GetGoodsReceiptDetail handles GET /api/v1/supply-chain/goods-receipts/:id

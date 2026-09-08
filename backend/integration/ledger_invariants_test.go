@@ -291,16 +291,84 @@ func TestLedgerInvariants_ReversalEndpoint_ProducesBalancedAuditTrail(t *testing
 	assert.Equal(t, http.StatusUnprocessableEntity, revW2.Code)
 	assert.Contains(t, revW2.Body.String(), "ENTRY_ALREADY_REVERSED")
 
-	// Step 5: Verify Trial Balance is still completely balanced
+	// Step 5: Verify Trial Balance is still completely balanced and uses posted lines without rounding
 	tbReq := httptest.NewRequest(http.MethodGet, "/api/v1/ledger/trial-balance", nil)
 	tbW := httptest.NewRecorder()
 	router.ServeHTTP(tbW, tbReq)
 
 	require.Equal(t, http.StatusOK, tbW.Code)
 	var tbResp struct {
-		Success bool                        `json:"success"`
-		Data    ledger.TrialBalanceSummary  `json:"data"`
+		Success bool                       `json:"success"`
+		Data    ledger.TrialBalanceSummary `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(tbW.Body.Bytes(), &tbResp))
 	assert.True(t, tbResp.Data.IsBalanced)
+	assert.GreaterOrEqual(t, tbResp.Data.TotalDebits, 175000.0)
+	assert.Equal(t, tbResp.Data.TotalDebits, tbResp.Data.TotalCredits)
+}
+
+func TestLedgerInvariants_DatabaseTrigger_BlocksNegativeAndZeroLines(t *testing.T) {
+	db := newPoolSizeOneDatabase(t)
+	ctx := context.Background()
+	conn, err := db.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+
+	_, err = conn.Exec(ctx, "SET search_path TO tenant_al_barakah_mart, public")
+	require.NoError(t, err)
+
+	acc1, acc2 := getTwoAccountIDs(t, conn)
+
+	// 1. Rejection of zero amount entries
+	{
+		tx, err := conn.Begin(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		entryID := uuid.New()
+		_, err = tx.Exec(ctx, `
+			INSERT INTO ledger_entries (id, entry_number, entry_date, source_document_type, memo, status)
+			VALUES ($1, $2, CURRENT_DATE, 'MANUAL_ADJUSTMENT', 'Direct DB Test Zero Lines', 'POSTED')
+		`, entryID, fmt.Sprintf("JE-TEST-ZERO-%d", time.Now().UnixNano()))
+		require.NoError(t, err)
+
+		// Both 0 debit and 0 credit on lines violates chk_debit_or_credit constraint
+		_, err = tx.Exec(ctx, `
+			INSERT INTO ledger_entry_lines (id, ledger_entry_id, account_id, debit_amount, credit_amount)
+			VALUES ($1, $2, $3, 0, 0), ($4, $2, $5, 0, 0)
+		`, uuid.New(), entryID, acc1, uuid.New(), acc2)
+		require.Error(t, err, "inserting zero debit and zero credit lines must violate CHECK constraint")
+		tx.Rollback(ctx)
+	}
+
+	// 2. Direct duplicate reversal attempt at the database layer violates partial unique index
+	{
+		tx, err := conn.Begin(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		sourceEntryID := uuid.New()
+		_, err = tx.Exec(ctx, `
+			INSERT INTO ledger_entries (id, entry_number, entry_date, source_document_type, memo, status)
+			VALUES ($1, $2, CURRENT_DATE, 'MANUAL_ADJUSTMENT', 'Source For Direct Reversal Test', 'REVERSED')
+		`, sourceEntryID, fmt.Sprintf("JE-TEST-SRC-%d", time.Now().UnixNano()))
+		require.NoError(t, err)
+
+		// First reversal
+		revID1 := uuid.New()
+		_, err = tx.Exec(ctx, `
+			INSERT INTO ledger_entries (id, entry_number, entry_date, source_document_type, source_document_id, memo, status)
+			VALUES ($1, $2, CURRENT_DATE, 'REVERSAL', $3, 'First Reversal', 'POSTED')
+		`, revID1, fmt.Sprintf("JE-TEST-REV1-%d", time.Now().UnixNano()), sourceEntryID)
+		require.NoError(t, err)
+
+		// Second reversal for identical source_document_id must violate unique index
+		revID2 := uuid.New()
+		_, err = tx.Exec(ctx, `
+			INSERT INTO ledger_entries (id, entry_number, entry_date, source_document_type, source_document_id, memo, status)
+			VALUES ($1, $2, CURRENT_DATE, 'REVERSAL', $3, 'Duplicate Reversal', 'POSTED')
+		`, revID2, fmt.Sprintf("JE-TEST-REV2-%d", time.Now().UnixNano()), sourceEntryID)
+		require.Error(t, err, "duplicate reversal entry for same source document must violate uq_abm_ledger_entries_reversal_source")
+		tx.Rollback(ctx)
+	}
 }

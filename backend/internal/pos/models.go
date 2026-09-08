@@ -231,11 +231,12 @@ type UpdateProductRequest struct {
 
 // StockAdjustmentRequest represents the payload for POST /api/v1/pos/inventory/adjust
 type StockAdjustmentRequest struct {
-	ProductID      string `json:"product_id" binding:"required"`
-	AdjustmentType string `json:"adjustment_type" binding:"required,oneof=ADD SUBTRACT SET"`
-	Quantity       int    `json:"quantity" binding:"required,gt=0"`
-	Reason         string `json:"reason" binding:"required,oneof=DAMAGE EXPIRED AUDIT_CORRECTION RESTOCK OTHER"`
-	Notes          string `json:"notes,omitempty"`
+	ProductID        string `json:"product_id" binding:"required"`
+	AdjustmentType   string `json:"adjustment_type" binding:"required,oneof=ADD SUBTRACT SET"`
+	Quantity         int    `json:"quantity" binding:"gte=0"`
+	ExpectedQuantity *int   `json:"expected_quantity,omitempty" binding:"omitempty,gte=0"`
+	Reason           string `json:"reason" binding:"required,oneof=DAMAGE EXPIRED AUDIT_CORRECTION RESTOCK OTHER"`
+	Notes            string `json:"notes,omitempty"`
 }
 
 // StockAdjustmentResponse represents the result of a stock adjustment
@@ -249,5 +250,59 @@ type StockAdjustmentResponse struct {
 	Reason            string    `json:"reason"`
 	LedgerEntryNumber *string   `json:"ledger_entry_number,omitempty"`
 	AdjustedAt        time.Time `json:"adjusted_at"`
+}
+
+// StockCardFilter defines query parameters for stock movement card history
+type StockCardFilter struct {
+	ProductID string    `json:"product_id"`
+	StartDate *time.Time `json:"start_date,omitempty"`
+	EndDate   *time.Time `json:"end_date,omitempty"`
+	Limit     int       `json:"limit"`
+	Offset    int       `json:"offset"`
+}
+
+// StockCardItem represents a single movement line in a stock card report with running balance
+type StockCardItem struct {
+	MovementID           string    `json:"movement_id"`
+	ProductID            string    `json:"product_id"`
+	WarehouseLocation    string    `json:"warehouse_location"`
+	QuantityDelta        int       `json:"quantity_delta"`
+	RunningBalance       int       `json:"running_balance"`
+	MovementType         string    `json:"movement_type"`
+	SourceDocumentType   string    `json:"source_document_type"`
+	SourceDocumentID     *string   `json:"source_document_id,omitempty"`
+	SourceDocumentLineID *string   `json:"source_document_line_id,omitempty"`
+	ActorID              *string   `json:"actor_id,omitempty"`
+	Reason               *string   `json:"reason,omitempty"`
+	OccurredAt           time.Time `json:"occurred_at"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+// StockCardResponse represents the full stock card report including opening, movements, and closing balance
+type StockCardResponse struct {
+	ProductID         string          `json:"product_id"`
+	ProductName       string          `json:"product_name"`
+	ProductSKU        string          `json:"product_sku"`
+	WarehouseLocation string          `json:"warehouse_location"`
+	OpeningBalance    int             `json:"opening_balance"`
+	ClosingBalance    int             `json:"closing_balance"`
+	CurrentOnHand     int             `json:"current_on_hand"`
+	Movements         []StockCardItem `json:"movements"`
+	TotalMovements    int             `json:"total_movements"`
+	Limit             int             `json:"limit"`
+	Offset            int             `json:"offset"`
+	StartDate         *time.Time      `json:"start_date,omitempty"`
+	EndDate           *time.Time      `json:"end_date,omitempty"`
+	AsOf              time.Time       `json:"as_of"`
+}
+
+// StockOverviewCard represents high-level inventory totals across all SKUs
+type StockOverviewCard struct {
+	TotalSKUs          int       `json:"total_skus"`
+	TotalUnitsOnHand   int       `json:"total_units_on_hand"`
+	LowStockSKUs       int       `json:"low_stock_skus"`
+	OutOfStockSKUs     int       `json:"out_of_stock_skus"`
+	WarehouseLocation  string    `json:"warehouse_location"`
+	AsOf               time.Time `json:"as_of"`
 }
 
