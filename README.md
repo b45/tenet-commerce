@@ -143,6 +143,7 @@ The `backend/integration` suite starts PostgreSQL 16 and Redis 7 through Testcon
 - [Architecture](docs/ARCHITECTURE.md) — architecture and planned evolution.
 - [Architecture Evidence](docs/ARCHITECTURE_EVIDENCE.md) — source references, decisions, and limitations.
 - [Benchmark Report](docs/BENCHMARK_REPORT.md) — reproducible isolated workload results.
+- [v0.4.0 Release Candidate](docs/releases/v0.4.0.md) — candidate scope, verification, and limitations.
 - [Roadmap](docs/ROADMAP.md) — phase plan and hardening sequence.
 - [Phase 3 Frontend Design](docs/FRONTEND_PHASE3_DESIGN.md) — proposed UI/UX, free tooling, design portability, runtime boundaries and delivery gates.
 - [Frontend Guidelines](docs/FRONTEND_GUIDELINES.md) — practical design foundations, semantic colours, layouts, reusable patterns, accessibility and feature workflow (Indonesian).
